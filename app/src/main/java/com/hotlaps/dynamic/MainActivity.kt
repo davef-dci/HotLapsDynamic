@@ -15,6 +15,7 @@ import com.hotlaps.dynamic.ui.SplashDynamics
 import com.hotlaps.dynamic.ui.calibration.CalibrateScreen
 import com.hotlaps.dynamic.data.CalibRepo
 import com.hotlaps.dynamic.data.PrefsRepo
+import com.hotlaps.dynamic.ui.settings.SettingsScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -48,7 +49,9 @@ class MainActivity : ComponentActivity() {
                             CalibrateScreen(onBack = { nav.popBackStack() })
                         }
 
-                        composable("settings"){ /* TODO: Settings screen  */ }
+                        composable("settings") {
+                            SettingsScreen(onBack = { nav.popBackStack() })
+                        }
                         composable("go")      { /* TODO: “Go!” screen     */ }
                     }
                 }
