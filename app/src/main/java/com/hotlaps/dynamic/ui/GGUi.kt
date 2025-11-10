@@ -16,19 +16,30 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 
+// For reading Settings the same way SettingsScreen does
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.platform.LocalContext
+import com.hotlaps.dynamic.data.SettingsRepo
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GGScreen( // <- this is the screen you’ll navigate to from “Go!”
     modifier: Modifier = Modifier
 ) {
-    // Temporary placeholders. We’ll replace with Settings + sensors soon.
-    val maxAbsG = 1.0f
+    // === Read Settings (same pattern as SettingsScreen) ===
+    val context = LocalContext.current
+    val repo = remember(context) { SettingsRepo(context) }
+
+    // Collect the three settings we need
+    val ggMaxG        by repo.ggMaxG.collectAsStateWithLifecycle(initialValue = 1.25f)
+    val ggTrailWindow by repo.ggTrailWindowS.collectAsStateWithLifecycle(initialValue = 3.0f)
+    val trailBrakeG   by repo.trailBrakeG.collectAsStateWithLifecycle(initialValue = 0.30f)
+
+    // === Sensor placeholders for now (next step we’ll wire real accel) ===
     val latG = 0.0f
     val longG = 0.0f
-    val trailSeconds = 3.0f
     val ticks = 0L
-    val brakeThreshG = 0.15f
 
     Scaffold(
         topBar = {
@@ -43,17 +54,33 @@ fun GGScreen( // <- this is the screen you’ll navigate to from “Go!”
                 .fillMaxSize(),
             verticalArrangement = Arrangement.Center
         ) {
+
+            // --- Debug: show the settings that GGPlot is using ---
+            ElevatedCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                Column(Modifier.padding(12.dp)) {
+                    Text("ggMaxG: ${"%.2f".format(ggMaxG)}")
+                    Text("ggTrailWindow: ${"%.1f".format(ggTrailWindow)} s")
+                    Text("trailBrakeG: ${"%.2f".format(trailBrakeG)}")
+                }
+            }
+
+
             GGPlot(
-                maxAbsG = maxAbsG,
+                maxAbsG = ggMaxG,
                 latG = latG,
                 longG = longG,
-                trailSeconds = trailSeconds,
+                trailSeconds = ggTrailWindow,
                 ticks = ticks,
-                brakeThreshG = brakeThreshG,
+                brakeThreshG = trailBrakeG,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
             )
+
         }
     }
 }
