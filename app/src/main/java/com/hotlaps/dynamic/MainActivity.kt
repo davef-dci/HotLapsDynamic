@@ -12,6 +12,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.hotlaps.dynamic.ui.MainMenuDynamics
 import com.hotlaps.dynamic.ui.SplashDynamics
+import com.hotlaps.dynamic.ui.calibration.CalibrateScreen
 import com.hotlaps.dynamic.data.CalibRepo
 import com.hotlaps.dynamic.data.PrefsRepo
 
@@ -43,7 +44,10 @@ class MainActivity : ComponentActivity() {
                         }
 
                         // Stub out the three targets for now
-                        composable("calib")   { /* TODO: Calibrate screen */ }
+                        composable("calib") {
+                            CalibrateScreen(onBack = { nav.popBackStack() })
+                        }
+
                         composable("settings"){ /* TODO: Settings screen  */ }
                         composable("go")      { /* TODO: “Go!” screen     */ }
                     }

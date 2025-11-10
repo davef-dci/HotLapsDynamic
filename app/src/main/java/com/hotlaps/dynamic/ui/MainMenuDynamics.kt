@@ -15,6 +15,9 @@ import com.hotlaps.dynamic.data.PrefsRepo
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 //import com.hotlaps.dynamic.BuildConfig
 import com.hotlaps.dynamic.BuildConfig
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle // if not already
+
 
 
 @Composable
@@ -49,14 +52,16 @@ fun MainMenuDynamics(
     onSettings: () -> Unit,
     onGo: () -> Unit
 ) {
+
+    // ✅ Provide Context and remember with it
+    val context = LocalContext.current
+    val calibRepo = remember(context) { CalibRepo(context) }
     // If your repos already exist, keep these package paths the same as in your project
-    val calibRepo = remember { CalibRepo() }        // If your CalibRepo needs Context, pass it like CalibRepo(LocalContext.current)
     val prefsRepo = remember { PrefsRepo() }
 
     val calibState = calibRepo.state.collectAsStateWithLifecycle(initialValue = null).value
     val isCalibrated = calibState?.vec != null
 
-    val brakeThresh = prefsRepo.brakeThreshG.collectAsStateWithLifecycle(0.30f).value
 
     Column(
         modifier = Modifier
@@ -89,7 +94,6 @@ fun MainMenuDynamics(
         Spacer(Modifier.height(16.dp))
         BigButton(
             text = if (isCalibrated) "Go!" else "Go! (needs calibration)",
-            subText = "Brake threshold: ${"%.2f".format(brakeThresh)} g",
             enabled = isCalibrated,
             onClick = onGo
         )
