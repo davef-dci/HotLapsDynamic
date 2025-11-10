@@ -13,6 +13,9 @@ import androidx.compose.ui.unit.sp
 import com.hotlaps.dynamic.data.CalibRepo
 import com.hotlaps.dynamic.data.PrefsRepo
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+//import com.hotlaps.dynamic.BuildConfig
+import com.hotlaps.dynamic.BuildConfig
+
 
 @Composable
 private fun BigButton(
@@ -90,5 +93,20 @@ fun MainMenuDynamics(
             enabled = isCalibrated,
             onClick = onGo
         )
+
+// push footer to bottom
+        Spacer(Modifier.weight(1f))
+
+// small, subtle rev text
+        Text(
+            text = "Rev ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) • ${BuildConfig.GIT_SHA} • ${BuildConfig.BUILD_TIME}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
+            textAlign = TextAlign.Center
+        )
+
     }
 }

@@ -1,3 +1,9 @@
+
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -21,6 +27,8 @@ android {
     buildTypes {
         release {
             // Smaller, faster builds
+            buildConfigField("String", "GIT_SHA", "\"${gitSha()}\"")
+            buildConfigField("String", "BUILD_TIME", "\"${buildTime()}\"")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -31,6 +39,8 @@ android {
         debug {
             // Optional: faster incremental builds
             // applicationIdSuffix = ".debug"
+            buildConfigField("String", "GIT_SHA", "\"${gitSha()}\"")
+            buildConfigField("String", "BUILD_TIME", "\"${buildTime()}\"")
         }
     }
 
@@ -45,7 +55,10 @@ android {
         // freeCompilerArgs += listOf("-Xjvm-default=all")
     }
 
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true   // <-- ensure BuildConfig is generated
+    }
 
     // Compose compiler version is managed by the Kotlin Compose plugin + BOM
     packaging {
@@ -91,3 +104,13 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
 }
+
+
+// Helpers
+fun gitSha(): String = try {
+    val p = Runtime.getRuntime().exec("git rev-parse --short=7 HEAD")
+    p.inputStream.bufferedReader().readText().trim().ifEmpty { "nogit" }
+} catch (_: Exception) { "nogit" }
+
+fun buildTime(): String =
+    SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date())
