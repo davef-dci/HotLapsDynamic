@@ -17,6 +17,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hotlaps.dynamic.BuildConfig
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle // if not already
+import com.hotlaps.dynamic.ui.GGScreen
+
 
 
 

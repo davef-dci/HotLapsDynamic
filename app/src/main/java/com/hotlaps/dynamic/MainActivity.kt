@@ -16,6 +16,8 @@ import com.hotlaps.dynamic.ui.calibration.CalibrateScreen
 import com.hotlaps.dynamic.data.CalibRepo
 import com.hotlaps.dynamic.data.PrefsRepo
 import com.hotlaps.dynamic.ui.settings.SettingsScreen
+import com.hotlaps.dynamic.ui.GGScreen
+
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -52,7 +54,8 @@ class MainActivity : ComponentActivity() {
                         composable("settings") {
                             SettingsScreen(onBack = { nav.popBackStack() })
                         }
-                        composable("go")      { /* TODO: “Go!” screen     */ }
+                        composable("go") { GGScreen() }
+
                     }
                 }
             }
