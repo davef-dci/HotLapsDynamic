@@ -400,6 +400,51 @@ private fun GGPlot(
             }
         }
 
+// --- Peak markers within the current trail window ---
+        run {
+            // helpers
+            fun clampG(g: Float) = g.coerceIn(-maxAbsG, maxAbsG)
+            val tickWidthPx = 28f        // half-length of the tick
+            val tickStroke  = 8f
+            val minShowG    = 0.05f      // ignore tiny noise
+
+            fun drawHPeak(yG: Float, color: Color) {
+                val g = clampG(yG)
+                if (kotlin.math.abs(g) < minShowG) return
+                val y = cy - (g / maxAbsG) * radius
+                drawLine(
+                    color = color.copy(alpha = 0.95f),
+                    start = Offset(cx - tickWidthPx, y),
+                    end   = Offset(cx + tickWidthPx, y),
+                    strokeWidth = tickStroke,
+                    cap = StrokeCap.Round
+                )
+            }
+            fun drawVPeak(xG: Float, color: Color) {
+                val g = clampG(xG)
+                if (kotlin.math.abs(g) < minShowG) return
+                val x = cx + (g / maxAbsG) * radius
+                drawLine(
+                    color = color.copy(alpha = 0.95f),
+                    start = Offset(x, cy - tickWidthPx),
+                    end   = Offset(x, cy + tickWidthPx),
+                    strokeWidth = tickStroke,
+                    cap = StrokeCap.Round
+                )
+            }
+
+            // compute peaks from the pruned trail (auto-expires with window)
+            val maxLong = trail.maxOfOrNull { it.y } ?: 0f   // +accel (up)
+            val minLong = trail.minOfOrNull { it.y } ?: 0f   // -brake (down)
+            val maxLat  = trail.maxOfOrNull { it.x } ?: 0f   // +right
+            val minLat  = trail.minOfOrNull { it.x } ?: 0f   // -left
+
+            // draw ticks (colors match your axis scheme)
+            drawHPeak(maxLong, Color(0xFF16A34A)) // accel peak = green
+            drawHPeak(minLong, Color(0xFFDC2626)) // brake  peak = red
+            drawVPeak(maxLat,  Color(0xFFF59E0B)) // right  peak = orange
+            drawVPeak(minLat,  Color(0xFFA855F7)) // left   peak = violet
+        }
 
 
 
