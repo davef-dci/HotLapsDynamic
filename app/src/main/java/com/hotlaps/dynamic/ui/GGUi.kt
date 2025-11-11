@@ -35,13 +35,14 @@ import kotlin.math.min
 import kotlin.math.sin
 import androidx.compose.ui.unit.dp
 import android.util.Log
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun GGScreen( // <- this is the screen you’ll navigate to from “Go!”
+fun GGScreen(
     modifier: Modifier = Modifier
 ) {
     // === Read Settings (same pattern as SettingsScreen) ===
@@ -53,38 +54,44 @@ fun GGScreen( // <- this is the screen you’ll navigate to from “Go!”
     val ggTrailWindow by repo.ggTrailWindowS.collectAsStateWithLifecycle(initialValue = 3.0f)
     val trailBrakeG   by repo.trailBrakeG.collectAsStateWithLifecycle(initialValue = 0.30f)
 
-    // === Sensor placeholders for now (next step we’ll wire real accel) ===
-    val latG = 0.0f
-    val longG = 0.0f
-    val ticks = 0L
+
+// === 10 Hz ticker + live g-values (TEMP simulation shows motion) ===
+    var ticks by remember { mutableStateOf(0L) }
+    var latG  by remember { mutableStateOf(0f) }
+    var longG by remember { mutableStateOf(0f) }
+
+    LaunchedEffect(Unit) {
+        // 10 Hz loop (every 100 ms)
+        while (true) {
+            kotlinx.coroutines.delay(100)
+
+            // ---- TEMP SIMULATION (replace with real sensor reads later) ----
+            val t = ticks * 0.1f
+            latG  = (0.85f * kotlin.math.sin(t.toDouble())).toFloat()
+            longG = (0.65f * kotlin.math.cos(1.3f * t.toDouble())).toFloat()
+            // ----------------------------------------------------------------
+
+            ticks++  // drives GGPlot trail timing too
+        }
+    }
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("G-G") }
-            )
+            TopAppBar(title = { Text("G-G") })
         }
     ) { inner ->
-        Column(
+        Box(
             modifier = modifier
                 .padding(inner)
-                .fillMaxSize(),
-            verticalArrangement = Arrangement.Center
+                .fillMaxSize()
         ) {
-
-            // --- Debug: show the settings that GGPlot is using ---
-            ElevatedCard(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            ) {
-                Column(Modifier.padding(12.dp)) {
-                    Text("ggMaxG: ${"%.2f".format(ggMaxG)}")
-                    Text("ggTrailWindow: ${"%.1f".format(ggTrailWindow)} s")
-                    Text("trailBrakeG: ${"%.2f".format(trailBrakeG)}")
+            // Color the longitudinal readout by phase (Accel/Brake/Neutral)
+            val accelColor =
+                when {
+                    longG >  trailBrakeG -> Color(0xFF34D399) // accelerating (green)
+                    longG < -trailBrakeG -> Color(0xFFEF4444) // braking (red)
+                    else                 -> Color(0xFFE5E7EB) // neutral (light gray)
                 }
-            }
-
 
             GGPlot(
                 maxAbsG = ggMaxG,
@@ -98,18 +105,37 @@ fun GGScreen( // <- this is the screen you’ll navigate to from “Go!”
                     .padding(horizontal = 16.dp)
             )
 
-        }
-    }
+            // --- Top-left HUD with the live numbers ---
+            Column(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Longitudinal Accel (g) — color by braking/accelerating
+                Text(
+                    text = "Long Accel: ${"%.2f".format(longG)} g",
+                    color = accelColor,
+                    fontSize = 44.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                // Lateral Accel (g) — bright blue for contrast
+                Text(
+                    text = "Lat Accel:  ${"%.2f".format(latG)} g",
+                    color = Color(0xFF60A5FA),
+                    fontSize = 44.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            } // <-- closes Column
+        } // <-- closes Box
+    } // <-- closes Scaffold
 }
 
 
 
 
-
-/**
- * GGPlot = the pure drawing widget.
- * Lives in the same file for simplicity, but has no nav knowledge.
- */
 @Composable
 private fun GGPlot(
     maxAbsG: Float,
@@ -129,19 +155,14 @@ private fun GGPlot(
         val cy = size.height / 2f
         val radius = size.minDimension * 0.48f
         val textSizePx = size.minDimension * 0.045f
-        val textColor = android.graphics.Color.parseColor("#444444")  // dark gray text
         val paint = android.graphics.Paint().apply {
-            color = textColor
+            color = android.graphics.Color.parseColor("#444444")
             textAlign = android.graphics.Paint.Align.CENTER
             textSize = textSizePx
         }
+
         // ----- Base grid -----
-        drawCircle(
-            color = Color.Gray,
-            radius = radius,
-            center = Offset(cx, cy),
-            style = Stroke(width = 3f)
-        )
+        drawCircle(Color.Gray, radius, Offset(cx, cy), style = Stroke(width = 3f))
         drawLine(Color.Gray, Offset(cx - radius, cy), Offset(cx + radius, cy), 2f)
         drawLine(Color.Gray, Offset(cx, cy - radius), Offset(cx, cy + radius), 2f)
 
@@ -150,12 +171,12 @@ private fun GGPlot(
         var tick = tickStep
         while (tick < maxAbsG) {
             val r = radius * (tick / maxAbsG)
-            drawCircle(Color.DarkGray, radius = r, center = Offset(cx, cy), style = Stroke(1f))
+            drawCircle(Color.DarkGray, r, Offset(cx, cy), style = Stroke(1f))
             tick += tickStep
         }
 
         // Center dot
-        drawCircle(Color.White.copy(alpha = 0.7f), radius = 5f, center = Offset(cx, cy))
+        drawCircle(Color.White.copy(alpha = 0.7f), 5f, Offset(cx, cy))
 
         // Wedges + diagonal labels (ported)
         drawGgRadialsAndLabels(
@@ -171,21 +192,8 @@ private fun GGPlot(
         // Axis title labels (same look as HotLapMobile)
         drawGgLabels()
 
-
-        // ----- Axis labels -----
-        val labelOffset = radius + textSizePx * 1.4f
-        drawContext.canvas.nativeCanvas.apply {
-            // Lat labels
-            drawText("+LAT", cx + labelOffset, cy + textSizePx / 3f, paint)
-            drawText("–LAT", cx - labelOffset, cy + textSizePx / 3f, paint)
-            // Long labels
-            drawText("+LONG", cx, cy - labelOffset, paint)
-            drawText("–LONG", cx, cy + labelOffset + textSizePx, paint)
-        }
-
-// Optional numeric scale markers
-        val gTicks = listOf(0.5f, 1.0f, 1.5f, 2.0f)
-        gTicks.filter { it <= maxAbsG }.forEach {
+        // Optional numeric scale markers
+        listOf(0.5f, 1.0f, 1.5f, 2.0f).filter { it <= maxAbsG }.forEach {
             val r = radius * (it / maxAbsG)
             drawContext.canvas.nativeCanvas.drawText(
                 "${"%.1f".format(it)}G",
@@ -195,10 +203,35 @@ private fun GGPlot(
             )
         }
 
+        // === Moving G-G dot (drawn last, above wedges) ===
+        val toPx: (Float) -> Float = { g -> (g / maxAbsG) * radius }
+        fun clampToCircle(xIn: Float, yIn: Float): Offset {
+            var x = xIn
+            var y = yIn
+            val dx = x - cx
+            val dy = y - cy
+            val dist = kotlin.math.sqrt(dx * dx + dy * dy)
+            if (dist > radius && dist > 0f) {
+                val s = radius / dist
+                x = cx + dx * s
+                y = cy + dy * s
+            }
+            return Offset(x, y)
+        }
+
+        run {
+            val px = cx + toPx(latG)   // +X → right
+            val py = cy - toPx(longG)  // +Y → up
+            val c  = clampToCircle(px, py)
+            drawCircle(
+                color = Color(0xFF1E88E5), // vivid blue
+                radius = 18f,
+                center = c
+            )
+        }
     }
-
-
 }
+
 
 /** Draw wedge boundaries at 20° and 70° in each quadrant, plus diagonal labels. */
 fun DrawScope.drawGgRadialsAndLabels(
