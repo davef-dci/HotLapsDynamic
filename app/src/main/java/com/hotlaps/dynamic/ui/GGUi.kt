@@ -36,6 +36,7 @@ import kotlin.math.sin
 import androidx.compose.ui.unit.dp
 import android.util.Log
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
@@ -294,6 +295,9 @@ private fun GGPlot(
         // Center dot
         drawCircle(Color.White.copy(alpha = 0.7f), 5f, Offset(cx, cy))
 
+
+
+
         // Wedges + diagonal labels (ported)
         drawGgRadialsAndLabels(
             latG = latG,
@@ -318,6 +322,86 @@ private fun GGPlot(
                 paint
             )
         }
+
+// --- after base grid (circle + axes), before trail/dots ---
+        run {
+            // Proportion of full scale, clamp to rim
+            val frac = (kotlin.math.abs(longG) / maxAbsG).coerceIn(0f, 1f)
+            val len  = radius * frac
+
+            // Color by direction
+            val barColor = if (longG >= 0f)
+                Color(0xFF16A34A)   // accel = green
+            else
+                Color(0xFFDC2626)   // brake = red
+
+            // Make it wider than the thin axis line
+            val stroke = 36f
+
+            // Draw from center toward the correct direction
+            if (longG >= 0f) {
+                // up from center (accel)
+                drawLine(
+                    color = barColor,
+                    start = Offset(cx, cy),
+                    end   = Offset(cx, cy - len),
+                    strokeWidth = stroke,
+                    cap = StrokeCap.Round
+                )
+            } else {
+                // down from center (brake)
+                drawLine(
+                    color = barColor,
+                    start = Offset(cx, cy),
+                    end   = Offset(cx, cy + len),
+                    strokeWidth = stroke,
+                    cap = StrokeCap.Round
+                )
+            }
+        }
+
+// --- horizontal lateral-G bar (drawn under trail/dot) ---
+        run {
+            // Proportion of full scale (0..1), clamp to rim
+            val frac = (kotlin.math.abs(latG) / maxAbsG).coerceIn(0f, 1f)
+            val len  = radius * frac
+
+            // Color by direction (match your pure-axis scheme)
+            val barColor = if (latG >= 0f)
+                Color(0xFFF59E0B)   // right = orange
+            else
+                Color(0xFFA855F7)   // left = violet
+
+            // Same width as vertical bar
+            val stroke = 16f
+
+            // Small deadband to avoid “blob” at center when tiny |g|
+            val minLenPx = stroke * 0.6f      // tweak if you like
+            if (len >= minLenPx) {
+                if (latG >= 0f) {
+                    // fill to the right from center
+                    drawLine(
+                        color = barColor,
+                        start = Offset(cx, cy),
+                        end   = Offset(cx + len, cy),
+                        strokeWidth = stroke,
+                        cap = StrokeCap.Round
+                    )
+                } else {
+                    // fill to the left from center
+                    drawLine(
+                        color = barColor,
+                        start = Offset(cx, cy),
+                        end   = Offset(cx - len, cy),
+                        strokeWidth = stroke,
+                        cap = StrokeCap.Round
+                    )
+                }
+            }
+        }
+
+
+
 
         // --- Fading trail (oldest → youngest) ---
         val now = android.os.SystemClock.elapsedRealtime()
