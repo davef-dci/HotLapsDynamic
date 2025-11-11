@@ -71,6 +71,12 @@ fun GGScreen(
     var latestY by remember { mutableStateOf(0f) }
 // (We ignore Z for the G-G plot)
 
+    var peakLongAccel  by remember { mutableStateOf(0f) }  // +long
+    var peakLongBrake  by remember { mutableStateOf(0f) }  // |-long|
+    var peakRightAccel by remember { mutableStateOf(0f) }  // +lat
+    var peakLeftAccel  by remember { mutableStateOf(0f) }  // |-lat|
+
+
 // 1) Register a sensor listener (Linear Acceleration preferred)
     val ctx = LocalContext.current
     DisposableEffect(Unit) {
@@ -112,12 +118,16 @@ fun GGScreen(
             val latNow  = (latestX / g)               // +right, -left
             val longNow = (-latestY / g)              // +accel, -brake
 
+
             // EMA smooth
             latEma  = alpha * latNow  + (1 - alpha) * latEma
             lonEma  = alpha * longNow + (1 - alpha) * lonEma
 
             latG  = latEma
             longG = lonEma
+
+
+
             ticks++
         }
     }
@@ -212,17 +222,50 @@ fun GGScreen(
 
 
 
-            GGPlot(
-                maxAbsG = ggMaxG,
-                latG = latG,
-                longG = longG,
-                trailSeconds = ggTrailWindow,
-                ticks = ticks,
-                brakeThreshG = trailBrakeG,
+// --- Plot + summary (container under the HUD) ---
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
-            )
+            ) {
+                // 1) The plot itself
+                GGPlot(
+                    maxAbsG = ggMaxG,
+                    latG = latG,
+                    longG = longG,
+                    trailSeconds = ggTrailWindow,
+                    ticks = ticks,
+                    brakeThreshG = trailBrakeG,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1f),
+                    onPeaks = { longMax, longBrakeMax, rightMax, leftMax ->
+                        peakLongAccel  = longMax
+                        peakLongBrake  = longBrakeMax
+                        peakRightAccel = rightMax
+                        peakLeftAccel  = leftMax
+                    }
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                // 2) Peak summary panel (temporarily shows placeholders; we’ll wire real values next)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    PeakItem("Max Long Accel",   peakLongAccel,  Color(0xFF16A34A), Modifier.weight(1f))
+                    PeakItem("Max Long Braking", peakLongBrake,  Color(0xFFDC2626), Modifier.weight(1f))
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    PeakItem("Max Right Accel",  peakRightAccel, Color(0xFFF59E0B), Modifier.weight(1f))
+                    PeakItem("Max Left Accel",   peakLeftAccel,  Color(0xFFA855F7), Modifier.weight(1f))
+                }
+            }
+
 
 
         } // <-- closes Box
@@ -240,8 +283,10 @@ private fun GGPlot(
     trailSeconds: Float,
     ticks: Long,
     brakeThreshG: Float,
-    modifier: Modifier = Modifier
-) {
+    modifier: Modifier = Modifier,
+    onPeaks: (longMax: Float, longBrakeMax: Float, rightMax: Float, leftMax: Float) -> Unit = { _,_,_,_ -> }
+)
+ {
 
 
     // Rolling trail of recent samples (lat, long, tMillis)
@@ -259,6 +304,24 @@ private fun GGPlot(
         while (trail.isNotEmpty() && trail.first().t < cutoff) trail.removeAt(0)
         if (trail.size > 400) { // hard cap, just in case
             trail.removeRange(0, trail.size - 400)
+
+            // <<< ADD THIS BLOCK >>>
+            // derive peaks from the *pruned* trail so they auto-reset with the window
+            val maxLongUp   = (trail.maxOfOrNull { it.y } ?: 0f).coerceAtLeast(0f)
+            val maxLongDown = (-(trail.minOfOrNull { it.y } ?: 0f)).coerceAtLeast(0f)
+            val maxRight    = (trail.maxOfOrNull { it.x } ?: 0f).coerceAtLeast(0f)
+            val maxLeft     = (-(trail.minOfOrNull { it.x } ?: 0f)).coerceAtLeast(0f)
+
+            // optional small noise gate
+            fun z(v: Float, min: Float = 0.02f) = if (kotlin.math.abs(v) < min) 0f else v
+
+            onPeaks(
+                z(maxLongUp),
+                z(maxLongDown),
+                z(maxRight),
+                z(maxLeft)
+            )
+
         }
     }
 
@@ -444,6 +507,24 @@ private fun GGPlot(
             drawHPeak(minLong, Color(0xFFDC2626)) // brake  peak = red
             drawVPeak(maxLat,  Color(0xFFF59E0B)) // right  peak = orange
             drawVPeak(minLat,  Color(0xFFA855F7)) // left   peak = violet
+
+
+            // --- Peak magnitudes from the current (pruned) trail window ---
+            val maxLongUp   = (trail.maxOfOrNull { it.y } ?: 0f).coerceAtLeast(0f)   // accel +
+            val maxLongDown = (-(trail.minOfOrNull { it.y } ?: 0f)).coerceAtLeast(0f) // braking magnitude
+            val maxRight    = (trail.maxOfOrNull { it.x } ?: 0f).coerceAtLeast(0f)   // right +
+            val maxLeft     = (-(trail.minOfOrNull { it.x } ?: 0f)).coerceAtLeast(0f) // left magnitude
+
+            // Optional: ignore tiny noise
+            fun z(v: Float, min: Float = 0.02f) = if (kotlin.math.abs(v) < min) 0f else v
+
+            val peakLongAccel  = z(maxLongUp)
+            val peakLongBrake  = z(maxLongDown)
+            val peakRightAccel = z(maxRight)
+            val peakLeftAccel  = z(maxLeft)
+
+
+
         }
 
 
@@ -530,6 +611,10 @@ private fun GGPlot(
                 center = c
             )
         }
+
+
+
+
     }
 }
 
@@ -735,5 +820,29 @@ fun DrawScope.drawGgLabels() {
         canvas.nativeCanvas.drawText("Trail Braking",     cx - w*0.35f, cy + h*0.25f, paint)
         canvas.nativeCanvas.drawText("Trail Braking",     cx + w*0.35f, cy + h*0.25f, paint)
         */
+    }
+}
+
+
+@Composable
+private fun PeakItem(
+    label: String,
+    valueG: Float,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier) {
+        Text(
+            text = label,
+            fontSize = 14.sp,
+            color = Color(0xFF6B7280) // gray-500
+        )
+        Text(
+            text = String.format("%.2f g", valueG),
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold,
+            color = color,
+            maxLines = 1
+        )
     }
 }
