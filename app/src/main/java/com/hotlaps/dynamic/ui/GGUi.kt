@@ -188,6 +188,27 @@ private fun GGPlot(
     brakeThreshG: Float,
     modifier: Modifier = Modifier
 ) {
+
+
+    // Rolling trail of recent samples (lat, long, tMillis)
+    data class TrailPt(val x: Float, val y: Float, val t: Long)
+    val trail = remember { mutableStateListOf<TrailPt>() }
+
+// On each 10 Hz tick, append the current point and prune old ones
+    LaunchedEffect(ticks) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        trail.add(TrailPt(latG, longG, now))
+
+        val windowMs = (trailSeconds.coerceAtLeast(0.2f) * 1000f).toLong()
+        val cutoff = now - windowMs
+
+        while (trail.isNotEmpty() && trail.first().t < cutoff) trail.removeAt(0)
+        if (trail.size > 400) { // hard cap, just in case
+            trail.removeRange(0, trail.size - 400)
+        }
+    }
+
+
     Canvas(
         modifier
             .fillMaxWidth()
@@ -245,7 +266,12 @@ private fun GGPlot(
             )
         }
 
-        // === Moving G-G dot (drawn last, above wedges) ===
+        // --- Fading trail (oldest → youngest) ---
+        val now = android.os.SystemClock.elapsedRealtime()
+        val windowMs = (trailSeconds.coerceAtLeast(0.2f) * 1000f).toLong()
+
+// helper from your dot code (already present below). If it's declared later,
+// just re-declare lightweightly here or move the original up.
         val toPx: (Float) -> Float = { g -> (g / maxAbsG) * radius }
         fun clampToCircle(xIn: Float, yIn: Float): Offset {
             var x = xIn
@@ -258,8 +284,59 @@ private fun GGPlot(
                 x = cx + dx * s
                 y = cy + dy * s
             }
-            return Offset(x, y)
+            return Offset(x, y)   // <-- add this
         }
+
+
+        if (trail.isNotEmpty()) {
+            // Build clamped pixel points + alpha (ease fade with square)
+            data class RenderPt(val p: Offset, val a: Float)
+            val renders = buildList {
+                for (pt in trail) {
+                    val age = (now - pt.t).coerceAtLeast(0)
+                    val frac = 1f - (age.toFloat() / windowMs.toFloat()) // 1 → 0
+                    if (frac <= 0f) continue
+                    val alpha = (frac * frac).coerceIn(0f, 1f)
+
+                    val px = cx + toPx(pt.x)
+                    val py = cy - toPx(pt.y)
+                    add(RenderPt(clampToCircle(px, py), alpha))
+                }
+            }
+
+            // Draw segments between consecutive points with round caps
+            for (i in 1 until renders.size) {
+                val a = renders[i - 1]
+                val b = renders[i]
+                val segAlpha = minOf(a.a, b.a)
+                if (segAlpha > 0f) {
+                    drawLine(
+                        // green when accelerating (py above center), red when braking (below)
+                        color = if (b.p.y < cy) Color(0xFF34D399).copy(alpha = segAlpha)
+                        else            Color(0xFFEF4444).copy(alpha = segAlpha),
+                        start = a.p,
+                        end = b.p,
+                        strokeWidth = 8f,
+                        cap = androidx.compose.ui.graphics.StrokeCap.Round
+                    )
+                }
+            }
+
+            // Optional: small dots along the path
+            for (r in renders) {
+                drawCircle(
+                    color = Color(0xFF1E88E5).copy(alpha = r.a),
+                    radius = 6f,
+                    center = r.p
+                )
+            }
+        }
+
+
+
+        // === Moving G-G dot (drawn last, above wedges) ===
+
+
 
         run {
             val px = cx + toPx(latG)   // +X → right
