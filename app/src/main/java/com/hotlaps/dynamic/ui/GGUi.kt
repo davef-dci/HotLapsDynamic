@@ -40,6 +40,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GGScreen(
@@ -122,18 +125,48 @@ fun GGScreen(
             TopAppBar(title = { Text("G-G") })
         }
     ) { inner ->
-        Box(
+        Column(
             modifier = modifier
                 .padding(inner)
-                .fillMaxSize()
+                .fillMaxSize(),
+            verticalArrangement = Arrangement.Top,
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Color the longitudinal readout by phase (Accel/Brake/Neutral)
-            val accelColor =
-                when {
-                    longG >  trailBrakeG -> Color(0xFF34D399) // accelerating (green)
-                    longG < -trailBrakeG -> Color(0xFFEF4444) // braking (red)
-                    else                 -> Color(0xFFE5E7EB) // neutral (light gray)
-                }
+
+            // --- Top HUD ---
+            Column(
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+
+                // Color the longitudinal readout by phase (Accel/Brake/Neutral)
+                val accelColor =
+                    when {
+                        longG >  trailBrakeG -> Color(0xFF34D399) // accelerating (green)
+                        longG < -trailBrakeG -> Color(0xFFEF4444) // braking (red)
+                        else                 -> Color(0xFFE5E7EB) // neutral (light gray)
+                    }
+
+
+                Text(
+                    text = "Long Accel: ${"%.2f".format(longG)} g",
+                    color = accelColor,
+                    fontSize = 44.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false
+                )
+                Text(
+                    text = "Lat Accel:  ${"%.2f".format(latG)} g",
+                    color = Color(0xFF60A5FA),
+                    fontSize = 44.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+
+
 
             GGPlot(
                 maxAbsG = ggMaxG,
@@ -147,30 +180,7 @@ fun GGScreen(
                     .padding(horizontal = 16.dp)
             )
 
-            // --- Top-left HUD with the live numbers ---
-            Column(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .statusBarsPadding()
-                    .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                // Longitudinal Accel (g) — color by braking/accelerating
-                Text(
-                    text = "Long Accel: ${"%.2f".format(longG)} g",
-                    color = accelColor,
-                    fontSize = 44.sp,
-                    fontWeight = FontWeight.Bold
-                )
 
-                // Lateral Accel (g) — bright blue for contrast
-                Text(
-                    text = "Lat Accel:  ${"%.2f".format(latG)} g",
-                    color = Color(0xFF60A5FA),
-                    fontSize = 44.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            } // <-- closes Column
         } // <-- closes Box
     } // <-- closes Scaffold
 }
@@ -480,7 +490,7 @@ fun DrawScope.drawGgRadialsAndLabels(
         textAlign = Paint.Align.CENTER
         typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
         textSize = 18.dp.toPx()
-        alpha = (255 * 0.70f).toInt()
+        alpha = (255 * 0.70f).toInt()  // test
     }
 
     fun drawDiagLabel(text: String, angleDeg: Float, rFrac: Float) {
