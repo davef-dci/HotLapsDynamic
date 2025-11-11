@@ -36,12 +36,14 @@ import kotlin.math.sin
 import androidx.compose.ui.unit.dp
 import android.util.Log
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -122,8 +124,18 @@ fun GGScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text("G-G") })
+            TopAppBar(
+                title = {
+                    Text(
+                        text = "Dynamic G-Force Map",
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Center
+                    )
+                }
+            )
         }
+
     ) { inner ->
         Column(
             modifier = modifier
@@ -148,22 +160,53 @@ fun GGScreen(
                     }
 
 
-                Text(
-                    text = "Long Accel: ${"%.2f".format(longG)} g",
-                    color = accelColor,
+                val numberStyle = TextStyle(
                     fontSize = 44.sp,
                     fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    softWrap = false
+                    // Tabular numbers so digits don't reflow
+                    fontFeatureSettings = "tnum" // works with Roboto
+                    // or: fontFamily = FontFamily.Monospace
                 )
-                Text(
-                    text = "Lat Accel:  ${"%.2f".format(latG)} g",
-                    color = Color(0xFF60A5FA),
-                    fontSize = 44.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    softWrap = false
-                )
+
+                Row {
+                    Text(
+                        text = "Long Accel:",
+                        fontSize = 44.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
+                    Box(Modifier.width(180.dp)) { // tweak width for your devices
+                        Text(
+                            text = "${"%+.2f".format(longG)} g", // always shows + or -
+                            style = numberStyle,
+                            color = accelColor,
+                            maxLines = 1,
+                            softWrap = false,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+
+                Row {
+                    Text(
+                        text = "Lat Accel:",
+                        fontSize = 44.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
+                    Box(Modifier.width(180.dp)) {
+                        Text(
+                            text = "${"%+.2f".format(latG)} g",
+                            style = numberStyle,
+                            color = Color(0xFF60A5FA),
+                            maxLines = 1,
+                            softWrap = false,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
             }
 
 
