@@ -55,25 +55,67 @@ fun GGScreen(
     val trailBrakeG   by repo.trailBrakeG.collectAsStateWithLifecycle(initialValue = 0.30f)
 
 
-// === 10 Hz ticker + live g-values (TEMP simulation shows motion) ===
+// --- Sensor hookup: keep the same states you already have ---
     var ticks by remember { mutableStateOf(0L) }
     var latG  by remember { mutableStateOf(0f) }
     var longG by remember { mutableStateOf(0f) }
 
+// Latest raw linear-accel sample in m/s^2 (device axes)
+    var latestX by remember { mutableStateOf(0f) }
+    var latestY by remember { mutableStateOf(0f) }
+// (We ignore Z for the G-G plot)
+
+// 1) Register a sensor listener (Linear Acceleration preferred)
+    val ctx = LocalContext.current
+    DisposableEffect(Unit) {
+        val mgr = ctx.getSystemService(android.content.Context.SENSOR_SERVICE) as android.hardware.SensorManager
+        val lin = mgr.getDefaultSensor(android.hardware.Sensor.TYPE_LINEAR_ACCELERATION)
+        val listener = object : android.hardware.SensorEventListener {
+            override fun onSensorChanged(e: android.hardware.SensorEvent) {
+                // Android axes: +X is screen-right, +Y is screen-down.
+                // If the tablet top edge points forward in the car:
+                //  • Lateral G  ≈  +X / g  (right = +, left = -)
+                //  • Longitudinal G ≈  -Y / g  (accel up = +, brake = -)
+                latestX = e.values[0]
+                latestY = e.values[1]
+            }
+            override fun onAccuracyChanged(s: android.hardware.Sensor?, a: Int) {}
+        }
+
+        if (lin != null) {
+            // ~100 Hz; OS may vary. We'll still publish at 10 Hz.
+            mgr.registerListener(listener, lin, android.hardware.SensorManager.SENSOR_DELAY_GAME)
+        }
+
+        onDispose {
+            mgr.unregisterListener(listener)
+        }
+    }
+
+// 2) 10 Hz publisher: convert to g's + small EMA smoothing, then tick
     LaunchedEffect(Unit) {
-        // 10 Hz loop (every 100 ms)
+        val g = android.hardware.SensorManager.GRAVITY_EARTH // 9.80665 m/s^2
+        var latEma = 0f
+        var lonEma = 0f
+        val alpha = 0.25f  // smoothing (0=noise, 1=raw)
+
         while (true) {
             kotlinx.coroutines.delay(100)
 
-            // ---- TEMP SIMULATION (replace with real sensor reads later) ----
-            val t = ticks * 0.1f
-            latG  = (0.85f * kotlin.math.sin(t.toDouble())).toFloat()
-            longG = (0.65f * kotlin.math.cos(1.3f * t.toDouble())).toFloat()
-            // ----------------------------------------------------------------
+            // Map device axes to our G-G:
+            val latNow  = (latestX / g)               // +right, -left
+            val longNow = (-latestY / g)              // +accel, -brake
 
-            ticks++  // drives GGPlot trail timing too
+            // EMA smooth
+            latEma  = alpha * latNow  + (1 - alpha) * latEma
+            lonEma  = alpha * longNow + (1 - alpha) * lonEma
+
+            latG  = latEma
+            longG = lonEma
+            ticks++
         }
     }
+
 
     Scaffold(
         topBar = {
