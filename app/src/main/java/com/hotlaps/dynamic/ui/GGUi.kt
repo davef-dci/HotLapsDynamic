@@ -305,24 +305,26 @@ private fun GGPlot(
         if (trail.size > 400) { // hard cap, just in case
             trail.removeRange(0, trail.size - 400)
 
-            // <<< ADD THIS BLOCK >>>
-            // derive peaks from the *pruned* trail so they auto-reset with the window
-            val maxLongUp   = (trail.maxOfOrNull { it.y } ?: 0f).coerceAtLeast(0f)
-            val maxLongDown = (-(trail.minOfOrNull { it.y } ?: 0f)).coerceAtLeast(0f)
-            val maxRight    = (trail.maxOfOrNull { it.x } ?: 0f).coerceAtLeast(0f)
-            val maxLeft     = (-(trail.minOfOrNull { it.x } ?: 0f)).coerceAtLeast(0f)
 
-            // optional small noise gate
-            fun z(v: Float, min: Float = 0.02f) = if (kotlin.math.abs(v) < min) 0f else v
-
-            onPeaks(
-                z(maxLongUp),
-                z(maxLongDown),
-                z(maxRight),
-                z(maxLeft)
-            )
 
         }
+
+        // <<< ADD THIS BLOCK >>>
+        // derive peaks from the *pruned* trail so they auto-reset with the window
+        val maxLongUp   = (trail.maxOfOrNull { it.y } ?: 0f).coerceAtLeast(0f)
+        val maxLongDown = (-(trail.minOfOrNull { it.y } ?: 0f)).coerceAtLeast(0f)
+        val maxRight    = (trail.maxOfOrNull { it.x } ?: 0f).coerceAtLeast(0f)
+        val maxLeft     = (-(trail.minOfOrNull { it.x } ?: 0f)).coerceAtLeast(0f)
+
+        // optional small noise gate
+        fun z(v: Float, min: Float = 0.02f) = if (kotlin.math.abs(v) < min) 0f else v
+
+        onPeaks(
+            z(maxLongUp),
+            z(maxLongDown),
+            z(maxRight),
+            z(maxLeft)
+        )
     }
 
 
