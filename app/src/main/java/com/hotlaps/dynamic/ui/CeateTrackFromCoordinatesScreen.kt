@@ -12,6 +12,18 @@ import androidx.compose.runtime.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 
+// Local UI-only state holder for one corner row in the form.
+// We keep everything as strings for now; we'll parse to numbers on Save.
+private data class CornerFormState(
+    val index: Int,           // 1, 2, 3, ...
+    val name: String = "",
+    val latText: String = "",
+    val lonText: String = "",
+    val beforeMsText: String = "2000",
+    val afterMsText: String = "1000"
+)
+
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -23,12 +35,13 @@ fun CreateTrackFromCoordinatesScreen(
     // Track-level
     var trackName by remember { mutableStateOf("") }
 
-    // Corner 1 fields (we'll generalize to a list later)
-    var cornerName by remember { mutableStateOf("") }
-    var cornerLatText by remember { mutableStateOf("") }
-    var cornerLonText by remember { mutableStateOf("") }
-    var captureBeforeMsText by remember { mutableStateOf("2000") }  // example default
-    var captureAfterMsText by remember { mutableStateOf("1000") }   // example default
+// List of corner form rows; start with Corner 1.
+    val cornerForms = remember {
+        mutableStateListOf(
+            CornerFormState(index = 1)
+        )
+    }
+
 
     Scaffold(
         topBar = {
@@ -71,76 +84,106 @@ fun CreateTrackFromCoordinatesScreen(
 
             Spacer(Modifier.height(24.dp))
 
-            Text(
-                text = "Corner 1 (apex)",
-                style = MaterialTheme.typography.titleMedium
-            )
+            Spacer(Modifier.height(24.dp))
 
-            Spacer(Modifier.height(8.dp))
+// --- Corner list ---
+            cornerForms.forEachIndexed { idx, cornerForm ->
+                val cornerIndex = cornerForm.index
 
-            // Corner name (optional)
-            OutlinedTextField(
-                value = cornerName,
-                onValueChange = { cornerName = it },
-                label = { Text("Corner Name (optional)") },
-                singleLine = true,
+                Text(
+                    text = "Corner $cornerIndex (apex)",
+                    style = MaterialTheme.typography.titleMedium
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                // Corner name (optional)
+                OutlinedTextField(
+                    value = cornerForm.name,
+                    onValueChange = { newName ->
+                        cornerForms[idx] = cornerForm.copy(name = newName)
+                    },
+                    label = { Text("Corner Name (optional)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                // Latitude
+                OutlinedTextField(
+                    value = cornerForm.latText,
+                    onValueChange = { newLat ->
+                        cornerForms[idx] = cornerForm.copy(latText = newLat)
+                    },
+                    label = { Text("Latitude") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                // Longitude
+                OutlinedTextField(
+                    value = cornerForm.lonText,
+                    onValueChange = { newLon ->
+                        cornerForms[idx] = cornerForm.copy(lonText = newLon)
+                    },
+                    label = { Text("Longitude") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                // Capture window BEFORE apex (ms)
+                OutlinedTextField(
+                    value = cornerForm.beforeMsText,
+                    onValueChange = { newBefore ->
+                        cornerForms[idx] = cornerForm.copy(beforeMsText = newBefore)
+                    },
+                    label = { Text("Capture Window Before Apex (ms)") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                // Capture window AFTER apex (ms)
+                OutlinedTextField(
+                    value = cornerForm.afterMsText,
+                    onValueChange = { newAfter ->
+                        cornerForms[idx] = cornerForm.copy(afterMsText = newAfter)
+                    },
+                    label = { Text("Capture Window After Apex (ms)") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(Modifier.height(24.dp))
+            }
+
+// --- Add Corner button ---
+            Button(
+                onClick = {
+                    val nextIndex = cornerForms.size + 1
+                    cornerForms.add(CornerFormState(index = nextIndex))
+                },
                 modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(Modifier.height(12.dp))
-
-            // Latitude
-            OutlinedTextField(
-                value = cornerLatText,
-                onValueChange = { cornerLatText = it },
-                label = { Text("Latitude") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(Modifier.height(12.dp))
-
-            // Longitude
-            OutlinedTextField(
-                value = cornerLonText,
-                onValueChange = { cornerLonText = it },
-                label = { Text("Longitude") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(Modifier.height(12.dp))
-
-            // Capture window BEFORE apex (ms)
-            OutlinedTextField(
-                value = captureBeforeMsText,
-                onValueChange = { captureBeforeMsText = it },
-                label = { Text("Capture Window Before Apex (ms)") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(Modifier.height(12.dp))
-
-            // Capture window AFTER apex (ms)
-            OutlinedTextField(
-                value = captureAfterMsText,
-                onValueChange = { captureAfterMsText = it },
-                label = { Text("Capture Window After Apex (ms)") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth()
-            )
+            ) {
+                Text("Add Corner")
+            }
 
             Spacer(Modifier.height(24.dp))
 
             Text(
-                text = "Next: We'll add support for multiple corners and a Save button that builds a Track object.",
+                text = "Next: We'll add a Save button that turns all of these rows into real Corner objects and a Track.",
                 style = MaterialTheme.typography.bodySmall
             )
         }
-    }
+        }
 }
