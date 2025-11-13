@@ -23,7 +23,7 @@ import com.hotlaps.dynamic.ui.GGScreen
 
 
 @Composable
-private fun BigButton(
+fun BigButton(
     text: String,
     onClick: () -> Unit,
     enabled: Boolean = true,
@@ -100,7 +100,7 @@ fun MainMenuDynamics(
 
         Spacer(Modifier.height(16.dp))
         BigButton(
-            text = if (isCalibrated) "Go!" else "Go! (needs calibration)",
+            text = if (isCalibrated) "Drive!" else "Go! (needs calibration)",
             enabled = isCalibrated,
             onClick = onGo
 

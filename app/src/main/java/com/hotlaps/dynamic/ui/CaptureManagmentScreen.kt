@@ -11,15 +11,13 @@ import androidx.compose.ui.unit.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CornerCaptureManagerScreen(
-    onBack: () -> Unit,
-    onTrackAndCornerSetup: () -> Unit,
-    onCaptures: () -> Unit
+fun CaptureManagementScreen(
+    onBack: () -> Unit
 ) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Corner Capture Manager") },
+                title = { Text("Captures") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
@@ -39,23 +37,19 @@ fun CornerCaptureManagerScreen(
             verticalArrangement = Arrangement.Top,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(Modifier.height(16.dp))
             Text(
-                text = "What would you like to manage?",
+                text = "Capture Management",
                 style = MaterialTheme.typography.titleMedium
             )
-
-            Spacer(Modifier.height(24.dp))
-            BigButton(
-                text = "Track & Corner Setup",
-                onClick = onTrackAndCornerSetup
-            )
-
             Spacer(Modifier.height(16.dp))
-            BigButton(
-                text = "Captures",
-                onClick = onCaptures
-            )
+
+            BigButton("View Captures", onClick = { /* TODO */ })
+            Spacer(Modifier.height(8.dp))
+            BigButton("Share Capture (CSV)", onClick = { /* TODO */ })
+            Spacer(Modifier.height(8.dp))
+            BigButton("Delete Capture", onClick = { /* TODO */ })
+            Spacer(Modifier.height(8.dp))
+            BigButton("Compare Captures (later)", onClick = { /* TODO */ })
         }
     }
 }

@@ -1,6 +1,4 @@
-// MainActivity.kt (core parts)
 package com.hotlaps.dynamic
-
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -18,8 +16,8 @@ import com.hotlaps.dynamic.data.PrefsRepo
 import com.hotlaps.dynamic.ui.settings.SettingsScreen
 import com.hotlaps.dynamic.ui.GGScreen
 import com.hotlaps.dynamic.ui.CornerCaptureManagerScreen
-
-
+import com.hotlaps.dynamic.ui.TrackAndCornerSetupScreen
+import com.hotlaps.dynamic.ui.CaptureManagementScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -44,12 +42,11 @@ class MainActivity : ComponentActivity() {
                             MainMenuDynamics(
                                 onCalibrate       = { nav.navigate("calib") },
                                 onSettings        = { nav.navigate("settings") },
-                                onCornerManager   = { nav.navigate("cornerManager") },   // 🔹 NEW
+                                onCornerManager   = { nav.navigate("cornerManager") },
                                 onGo              = { nav.navigate("go") }
                             )
                         }
 
-                        // Stub out the three targets for now
                         composable("calib") {
                             CalibrateScreen(onBack = { nav.popBackStack() })
                         }
@@ -57,14 +54,30 @@ class MainActivity : ComponentActivity() {
                         composable("settings") {
                             SettingsScreen(onBack = { nav.popBackStack() })
                         }
-                        composable("go") { GGScreen() }
+
+                        composable("go") {
+                            GGScreen()
+                        }
 
                         composable("cornerManager") {
                             CornerCaptureManagerScreen(
+                                onBack = { nav.popBackStack() },
+                                onTrackAndCornerSetup = { nav.navigate("trackSetup") },
+                                onCaptures = { nav.navigate("captures") }
+                            )
+                        }
+
+                        composable("trackSetup") {
+                            TrackAndCornerSetupScreen(
                                 onBack = { nav.popBackStack() }
                             )
                         }
 
+                        composable("captures") {
+                            CaptureManagementScreen(
+                                onBack = { nav.popBackStack() }
+                            )
+                        }
                     }
                 }
             }
