@@ -13,14 +13,8 @@ import androidx.compose.ui.unit.sp
 import com.hotlaps.dynamic.data.CalibRepo
 import com.hotlaps.dynamic.data.PrefsRepo
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-//import com.hotlaps.dynamic.BuildConfig
 import com.hotlaps.dynamic.BuildConfig
 import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.compose.collectAsStateWithLifecycle // if not already
-import com.hotlaps.dynamic.ui.GGScreen
-
-
-
 
 @Composable
 fun BigButton(
@@ -50,21 +44,19 @@ fun BigButton(
 
 @Composable
 fun MainMenuDynamics(
+    onDrive: () -> Unit,
+    onTrackManager: () -> Unit,
+    onEventManager: () -> Unit,
     onCalibrate: () -> Unit,
-    onSettings: () -> Unit,
-    onCornerManager: () -> Unit,
-    onGo: () -> Unit
+    onSettings: () -> Unit
 ) {
 
-    // ✅ Provide Context and remember with it
     val context = LocalContext.current
     val calibRepo = remember(context) { CalibRepo(context) }
-    // If your repos already exist, keep these package paths the same as in your project
     val prefsRepo = remember { PrefsRepo() }
 
     val calibState = calibRepo.state.collectAsStateWithLifecycle(initialValue = null).value
     val isCalibrated = calibState?.vec != null
-
 
     Column(
         modifier = Modifier
@@ -89,28 +81,47 @@ fun MainMenuDynamics(
         )
 
         Spacer(Modifier.height(24.dp))
-        BigButton("Calibrate Accelerometers", onCalibrate)
 
-        Spacer(Modifier.height(16.dp))
-        BigButton("Settings", onSettings)
-
-
-        Spacer(Modifier.height(16.dp))
-        BigButton("Corner Capture Manager", onCornerManager)
-
-        Spacer(Modifier.height(16.dp))
+        // Primary action: Drive
         BigButton(
-            text = if (isCalibrated) "Drive!" else "Go! (needs calibration)",
+            text = if (isCalibrated) "Drive" else "Drive (needs calibration)",
             enabled = isCalibrated,
-            onClick = onGo
-
-
+            onClick = onDrive
         )
 
-// push footer to bottom
+        Spacer(Modifier.height(16.dp))
+
+        // Track Manager
+        BigButton(
+            text = "Track Manager",
+            onClick = onTrackManager
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        // Event Manager
+        BigButton(
+            text = "Event Manager",
+            onClick = onEventManager
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        // Calibrate + Settings at the bottom of the stack
+        BigButton(
+            text = "Calibrate Accelerometers",
+            onClick = onCalibrate
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        BigButton(
+            text = "Settings",
+            onClick = onSettings
+        )
+
         Spacer(Modifier.weight(1f))
 
-// small, subtle rev text
         Text(
             text = "Rev ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) • ${BuildConfig.GIT_SHA} • ${BuildConfig.BUILD_TIME}",
             style = MaterialTheme.typography.labelSmall,
@@ -120,6 +131,5 @@ fun MainMenuDynamics(
                 .padding(vertical = 8.dp),
             textAlign = TextAlign.Center
         )
-
     }
 }

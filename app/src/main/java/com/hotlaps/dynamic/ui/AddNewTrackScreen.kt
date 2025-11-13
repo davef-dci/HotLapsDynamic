@@ -11,14 +11,13 @@ import androidx.compose.ui.unit.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TrackAndCornerSetupScreen(
-    onBack: () -> Unit,
-    onAddNewTrack: () -> Unit
+fun AddNewTrackScreen(
+    onBack: () -> Unit
 ) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Track Manager") },
+                title = { Text("Add New Track") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
@@ -39,35 +38,29 @@ fun TrackAndCornerSetupScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = "Tracks",
+                text = "Choose how to create a new track:",
                 style = MaterialTheme.typography.titleMedium
             )
-            Spacer(Modifier.height(16.dp))
+
+            Spacer(Modifier.height(24.dp))
 
             BigButton(
-                text = "Select Existing Track",
-                onClick = { /* TODO: open track picker later */ }
+                text = "Import Track File",
+                onClick = { /* TODO: implement import flow */ }
             )
 
             Spacer(Modifier.height(12.dp))
 
             BigButton(
-                text = "Add New Track",
-                onClick = onAddNewTrack
+                text = "Create From Coordinates",
+                onClick = { /* TODO: implement coordinate entry UI */ }
             )
 
             Spacer(Modifier.height(12.dp))
 
             BigButton(
-                text = "Edit Track",
-                onClick = { /* TODO: edit currently selected track */ }
-            )
-
-            Spacer(Modifier.height(12.dp))
-
-            BigButton(
-                text = "Delete Track",
-                onClick = { /* TODO: delete currently selected track */ }
+                text = "Teach Corners While Driving",
+                onClick = { /* TODO: hook into live driving mode */ }
             )
         }
     }

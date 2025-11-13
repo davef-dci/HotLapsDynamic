@@ -11,13 +11,13 @@ import androidx.compose.ui.unit.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CaptureManagementScreen(
+fun EventManagerScreen(
     onBack: () -> Unit
 ) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Captures") },
+                title = { Text("Event Manager") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
@@ -38,18 +38,36 @@ fun CaptureManagementScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = "Capture Management",
+                text = "Events",
                 style = MaterialTheme.typography.titleMedium
             )
             Spacer(Modifier.height(16.dp))
 
-            BigButton("View Captures", onClick = { /* TODO */ })
-            Spacer(Modifier.height(8.dp))
-            BigButton("Share Capture (CSV)", onClick = { /* TODO */ })
-            Spacer(Modifier.height(8.dp))
-            BigButton("Delete Capture", onClick = { /* TODO */ })
-            Spacer(Modifier.height(8.dp))
-            BigButton("Compare Captures (later)", onClick = { /* TODO */ })
+            BigButton(
+                text = "View Events",
+                onClick = { /* TODO: list events */ }
+            )
+
+            Spacer(Modifier.height(12.dp))
+
+            BigButton(
+                text = "Share Events",
+                onClick = { /* TODO: share CSV or similar */ }
+            )
+
+            Spacer(Modifier.height(12.dp))
+
+            BigButton(
+                text = "Delete Events",
+                onClick = { /* TODO: delete flow */ }
+            )
+
+            Spacer(Modifier.height(12.dp))
+
+            BigButton(
+                text = "Compare Events",
+                onClick = { /* TODO: compare later */ }
+            )
         }
     }
 }
