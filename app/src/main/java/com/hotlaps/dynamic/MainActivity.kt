@@ -16,6 +16,8 @@ import com.hotlaps.dynamic.ui.GGScreen
 import com.hotlaps.dynamic.ui.TrackAndCornerSetupScreen
 import com.hotlaps.dynamic.ui.AddNewTrackScreen
 import com.hotlaps.dynamic.ui.EventManagerScreen
+import com.hotlaps.dynamic.ui.CreateTrackFromCoordinatesScreen
+
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -59,9 +61,20 @@ class MainActivity : ComponentActivity() {
 
                         composable("addTrack") {
                             AddNewTrackScreen(
+                                onBack = { nav.popBackStack() },
+                                onCreateFromCoordinates = {
+                                    // Navigate to our new screen where we’ll actually enter coords
+                                    nav.navigate("createTrackFromCoordinates")
+                                }
+                            )
+                        }
+
+                        composable("createTrackFromCoordinates") {
+                            CreateTrackFromCoordinatesScreen(
                                 onBack = { nav.popBackStack() }
                             )
                         }
+
 
                         composable("eventManager") {
                             EventManagerScreen(

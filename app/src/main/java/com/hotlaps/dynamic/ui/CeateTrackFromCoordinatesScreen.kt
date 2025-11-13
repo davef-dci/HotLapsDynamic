@@ -11,15 +11,13 @@ import androidx.compose.ui.unit.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddNewTrackScreen(
-    onBack: () -> Unit,
-    onCreateFromCoordinates: () -> Unit
+fun CreateTrackFromCoordinatesScreen(
+    onBack: () -> Unit
 ) {
-
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Add New Track") },
+                title = { Text("Create From Coordinates") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
@@ -40,30 +38,25 @@ fun AddNewTrackScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = "Choose how to create a new track:",
+                text = "Create Track From Coordinates",
                 style = MaterialTheme.typography.titleMedium
             )
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(16.dp))
 
-            BigButton(
-                text = "Import Track File",
-                onClick = { /* TODO: implement import flow */ }
+            Text(
+                text = "Next step: simple UI to enter track name and a list of corner apex coordinates.",
+                style = MaterialTheme.typography.bodyMedium
             )
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(16.dp))
 
-            BigButton(
-                text = "Create From Coordinates",
-                onClick = { onCreateFromCoordinates() }
-            )
-
-            Spacer(Modifier.height(12.dp))
-
-            BigButton(
-                text = "Teach Corners While Driving",
-                onClick = { /* TODO: hook into live driving mode */ }
+            Text(
+                text = "For now, this is just a placeholder so navigation works.",
+                style = MaterialTheme.typography.bodySmall
             )
         }
     }
 }
+
+
