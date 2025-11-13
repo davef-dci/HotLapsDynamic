@@ -82,6 +82,7 @@ dependencies {
     // Jetpack Compose Navigation
     implementation("androidx.navigation:navigation-compose:2.8.3")
     implementation("androidx.compose.ui:ui-text:1.7.0")
+    implementation("com.google.code.gson:gson:2.10.1")
 
 
 
