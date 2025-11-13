@@ -11,6 +11,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+
 
 // Local UI-only state holder for one corner row in the form.
 // We keep everything as strings for now; we'll parse to numbers on Save.
@@ -61,12 +64,14 @@ fun CreateTrackFromCoordinatesScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(innerPadding)
                 .padding(24.dp),
             verticalArrangement = Arrangement.Top,
             horizontalAlignment = Alignment.Start
         ) {
-            Text(
+
+        Text(
                 text = "Create Track From Coordinates",
                 style = MaterialTheme.typography.titleMedium
             )
