@@ -52,6 +52,7 @@ private fun BigButton(
 fun MainMenuDynamics(
     onCalibrate: () -> Unit,
     onSettings: () -> Unit,
+    onCornerManager: () -> Unit,
     onGo: () -> Unit
 ) {
 
@@ -93,11 +94,17 @@ fun MainMenuDynamics(
         Spacer(Modifier.height(16.dp))
         BigButton("Settings", onSettings)
 
+
+        Spacer(Modifier.height(16.dp))
+        BigButton("Corner Capture Manager", onCornerManager)
+
         Spacer(Modifier.height(16.dp))
         BigButton(
             text = if (isCalibrated) "Go!" else "Go! (needs calibration)",
             enabled = isCalibrated,
             onClick = onGo
+
+
         )
 
 // push footer to bottom

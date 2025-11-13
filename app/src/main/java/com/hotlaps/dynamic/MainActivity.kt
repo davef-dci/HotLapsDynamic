@@ -17,6 +17,8 @@ import com.hotlaps.dynamic.data.CalibRepo
 import com.hotlaps.dynamic.data.PrefsRepo
 import com.hotlaps.dynamic.ui.settings.SettingsScreen
 import com.hotlaps.dynamic.ui.GGScreen
+import com.hotlaps.dynamic.ui.CornerCaptureManagerScreen
+
 
 
 class MainActivity : ComponentActivity() {
@@ -40,9 +42,10 @@ class MainActivity : ComponentActivity() {
 
                         composable("menu") {
                             MainMenuDynamics(
-                                onCalibrate = { nav.navigate("calib") },
-                                onSettings  = { nav.navigate("settings") },
-                                onGo        = { nav.navigate("go") }
+                                onCalibrate       = { nav.navigate("calib") },
+                                onSettings        = { nav.navigate("settings") },
+                                onCornerManager   = { nav.navigate("cornerManager") },   // 🔹 NEW
+                                onGo              = { nav.navigate("go") }
                             )
                         }
 
@@ -55,6 +58,12 @@ class MainActivity : ComponentActivity() {
                             SettingsScreen(onBack = { nav.popBackStack() })
                         }
                         composable("go") { GGScreen() }
+
+                        composable("cornerManager") {
+                            CornerCaptureManagerScreen(
+                                onBack = { nav.popBackStack() }
+                            )
+                        }
 
                     }
                 }

@@ -76,6 +76,10 @@ fun GGScreen(
     var peakRightAccel by remember { mutableStateOf(0f) }  // +lat
     var peakLeftAccel  by remember { mutableStateOf(0f) }  // |-lat|
 
+    // Last time the user cleared peaks
+
+
+
 
 // 1) Register a sensor listener (Linear Acceleration preferred)
     val ctx = LocalContext.current
@@ -287,7 +291,7 @@ private fun GGPlot(
     onPeaks: (longMax: Float, longBrakeMax: Float, rightMax: Float, leftMax: Float) -> Unit = { _,_,_,_ -> }
 )
  {
-
+     var peaksSinceMs by remember { mutableStateOf(android.os.SystemClock.elapsedRealtime()) }
 
     // Rolling trail of recent samples (lat, long, tMillis)
     data class TrailPt(val x: Float, val y: Float, val t: Long)
@@ -309,22 +313,6 @@ private fun GGPlot(
 
         }
 
-        // <<< ADD THIS BLOCK >>>
-        // derive peaks from the *pruned* trail so they auto-reset with the window
-        val maxLongUp   = (trail.maxOfOrNull { it.y } ?: 0f).coerceAtLeast(0f)
-        val maxLongDown = (-(trail.minOfOrNull { it.y } ?: 0f)).coerceAtLeast(0f)
-        val maxRight    = (trail.maxOfOrNull { it.x } ?: 0f).coerceAtLeast(0f)
-        val maxLeft     = (-(trail.minOfOrNull { it.x } ?: 0f)).coerceAtLeast(0f)
-
-        // optional small noise gate
-        fun z(v: Float, min: Float = 0.02f) = if (kotlin.math.abs(v) < min) 0f else v
-
-        onPeaks(
-            z(maxLongUp),
-            z(maxLongDown),
-            z(maxRight),
-            z(maxLeft)
-        )
     }
 
 
