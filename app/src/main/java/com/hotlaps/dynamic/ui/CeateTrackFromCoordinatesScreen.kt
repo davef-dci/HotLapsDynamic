@@ -217,7 +217,6 @@ fun CreateTrackFromCoordinatesScreen(
                         val afterMs = form.afterMsText.toIntOrNull()
 
                         if (lat == null || lon == null || beforeMs == null || afterMs == null) {
-                            // Skip corners that are missing required numeric data
                             println("SaveTrack: Skipping corner ${form.index} due to invalid data")
                             null
                         } else {
@@ -247,24 +246,19 @@ fun CreateTrackFromCoordinatesScreen(
                         corners = corners
                     )
 
-                    // --- Serialize to JSON and save to internal storage ---
+                    // --- Serialize to JSON and save to external app-specific storage ---
                     try {
                         val json = gson.toJson(track)
 
-                        // Create a "tracks" subdirectory under the app's internal files dir
-// Create a "tracks" directory inside external app-specific storage
                         val tracksDir = File(context.getExternalFilesDir(null), "tracks").apply {
                             if (!exists()) mkdirs()
                         }
 
-                        // File name pattern: track_<id>.json
                         val file = File(tracksDir, "track_${trackId}.json")
                         file.writeText(json)
 
                         println("SaveTrack: Saved track to ${file.absolutePath}")
                         Toast.makeText(context, "Track saved", Toast.LENGTH_SHORT).show()
-
-                        // (Optional) You could clear the form or navigate back here later.
                     } catch (e: Exception) {
                         e.printStackTrace()
                         Toast.makeText(context, "Error saving track", Toast.LENGTH_SHORT).show()
@@ -275,13 +269,54 @@ fun CreateTrackFromCoordinatesScreen(
                 Text("Save Track")
             }
 
+            Spacer(Modifier.height(16.dp))
+
+// --- Delete all saved tracks (debug) ---
+            Button(
+                onClick = {
+                    try {
+                        val tracksDir = File(context.getExternalFilesDir(null), "tracks")
+                        if (!tracksDir.exists()) {
+                            Toast.makeText(context, "No tracks directory found", Toast.LENGTH_SHORT).show()
+                            println("DeleteTracks: tracks directory does not exist")
+                            return@Button
+                        }
+
+                        val files = tracksDir.listFiles()?.toList().orEmpty()
+                        if (files.isEmpty()) {
+                            Toast.makeText(context, "No saved tracks to delete", Toast.LENGTH_SHORT).show()
+                            println("DeleteTracks: no files found in ${tracksDir.absolutePath}")
+                            return@Button
+                        }
+
+                        var deletedCount = 0
+                        files.forEach { f ->
+                            println("DeleteTracks: deleting ${f.absolutePath}")
+                            if (f.delete()) {
+                                deletedCount++
+                            } else {
+                                println("DeleteTracks: FAILED to delete ${f.absolutePath}")
+                            }
+                        }
+
+                        Toast.makeText(context, "Deleted $deletedCount track file(s)", Toast.LENGTH_SHORT).show()
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        Toast.makeText(context, "Error deleting tracks", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Delete All Saved Tracks (Debug)")
+            }
 
             Spacer(Modifier.height(24.dp))
 
             Text(
-                text = "Next: We'll write this Track out to local storage as JSON so it persists on the device.",
+                text = "Tracks are saved under Android/data/com.hotlaps.dynamic/files/tracks on your device.",
                 style = MaterialTheme.typography.bodySmall
             )
+
 
         }
         }
