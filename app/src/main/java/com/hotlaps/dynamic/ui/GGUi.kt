@@ -44,12 +44,17 @@ import kotlin.math.roundToInt
 
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
+import com.hotlaps.dynamic.viewmodel.TrackSelectionViewModel
+import androidx.compose.runtime.collectAsState
+
+
 
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GGScreen(
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+            trackSelectionViewModel: TrackSelectionViewModel
 ) {
     // === Read Settings (same pattern as SettingsScreen) ===
     val context = LocalContext.current
@@ -78,7 +83,10 @@ fun GGScreen(
 
     // Last time the user cleared peaks
 
-
+// === Active track (from TrackSelectionViewModel) ===
+    val activeTrack by trackSelectionViewModel
+        .selectedTrack
+        .collectAsState(initial = null)
 
 
 // 1) Register a sensor listener (Linear Acceleration preferred)
@@ -222,6 +230,26 @@ fun GGScreen(
                         )
                     }
                 }
+
+                // --- Show active track ---
+                val t = activeTrack
+                if (t != null) {
+                    Text(
+                        text = "Track: ${t.name} (${t.corners.size} corners)",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                } else {
+                    Text(
+                        text = "Track: (none selected)",
+                        fontSize = 20.sp,
+                        color = Color.Red,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+
+
             }
 
 

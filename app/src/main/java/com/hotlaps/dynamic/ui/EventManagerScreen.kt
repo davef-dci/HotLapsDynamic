@@ -45,28 +45,32 @@ fun EventManagerScreen(
 
             BigButton(
                 text = "View Events",
-                onClick = { /* TODO: list events */ }
+                onClick = {},
+                enabled = false
             )
 
             Spacer(Modifier.height(12.dp))
 
             BigButton(
                 text = "Share Events",
-                onClick = { /* TODO: share CSV or similar */ }
+                onClick = {},
+                enabled = false
             )
 
             Spacer(Modifier.height(12.dp))
 
             BigButton(
                 text = "Delete Events",
-                onClick = { /* TODO: delete flow */ }
+                onClick = {},
+                enabled = false
             )
 
             Spacer(Modifier.height(12.dp))
 
             BigButton(
                 text = "Compare Events",
-                onClick = { /* TODO: compare later */ }
+                onClick = {},
+                enabled = false
             )
         }
     }

@@ -19,6 +19,8 @@ import com.hotlaps.dynamic.ui.EventManagerScreen
 import com.hotlaps.dynamic.ui.CreateTrackFromCoordinatesScreen
 import com.hotlaps.dynamic.model.Track
 import com.hotlaps.dynamic.ui.TrackManagerScreen
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.hotlaps.dynamic.viewmodel.TrackSelectionViewModel
 
 
 
@@ -29,6 +31,10 @@ class MainActivity : ComponentActivity() {
             MaterialTheme {
                 Surface {
                     val nav = rememberNavController()
+
+                    // Create ONE shared ViewModel for the whole app
+                    val trackSelectionViewModel: TrackSelectionViewModel = viewModel()
+
                     NavHost(navController = nav, startDestination = "splash") {
 
                         composable("splash") {
@@ -52,7 +58,9 @@ class MainActivity : ComponentActivity() {
                         }
 
                         composable("drive") {
-                            GGScreen()
+                            GGScreen(
+                                trackSelectionViewModel = trackSelectionViewModel
+                            )
                         }
 
 
@@ -62,7 +70,8 @@ class MainActivity : ComponentActivity() {
                             TrackAndCornerSetupScreen(
                                 onBack = { nav.popBackStack() },
                                 onAddNewTrack = { nav.navigate("addTrack") },
-                                onSelectExistingTrack = { nav.navigate("trackManager") }
+                                onSelectExistingTrack = { nav.navigate("trackManager") },
+                                onDeleteTrack = { nav.navigate("trackManager") }
                             )
                         }
 
@@ -87,6 +96,7 @@ class MainActivity : ComponentActivity() {
                         composable("eventManager") {
                             EventManagerScreen(
                                 onBack = { nav.popBackStack() }
+
                             )
                         }
 
@@ -100,16 +110,17 @@ class MainActivity : ComponentActivity() {
 
                         composable("trackManager") {
                             TrackManagerScreen(
+                                trackSelectionViewModel = trackSelectionViewModel,   // ← NEW
                                 onBack = { nav.popBackStack() },
                                 onUseTrack = { track: Track ->
-                                    // e.g. stash in ViewModel later
-                                    // Log.d("TrackManager", "Selected track: ${track.name}")
+                                    nav.navigate("drive")
                                 },
                                 onEditTrack = { track: Track ->
-                                    // nav.navigate("editTrack/${...}") later
+                                    // (future work)
                                 }
                             )
                         }
+
 
 
                     }

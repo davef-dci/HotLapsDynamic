@@ -48,7 +48,8 @@ fun AddNewTrackScreen(
 
             BigButton(
                 text = "Import Track File",
-                onClick = { /* TODO: implement import flow */ }
+                onClick = {},
+                enabled = false
             )
 
             Spacer(Modifier.height(12.dp))
@@ -62,7 +63,8 @@ fun AddNewTrackScreen(
 
             BigButton(
                 text = "Teach Corners While Driving",
-                onClick = { /* TODO: hook into live driving mode */ }
+                onClick = {},
+                enabled = false
             )
         }
     }

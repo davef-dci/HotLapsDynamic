@@ -15,10 +15,13 @@ import android.util.Log
 import com.hotlaps.dynamic.data.TrackStorage
 import com.hotlaps.dynamic.data.TrackStorage.TrackWithFile
 import com.hotlaps.dynamic.model.Track
+import com.hotlaps.dynamic.viewmodel.TrackSelectionViewModel
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TrackManagerScreen(
+    trackSelectionViewModel: TrackSelectionViewModel,
     modifier: Modifier = Modifier,
     onBack: () -> Unit,
     onUseTrack: (Track) -> Unit,
@@ -29,6 +32,7 @@ fun TrackManagerScreen(
     var tracks by remember { mutableStateOf<List<TrackWithFile>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
+    var trackToDelete by remember { mutableStateOf<TrackWithFile?>(null) }
 
     LaunchedEffect(Unit) {
         try {
@@ -89,18 +93,49 @@ fun TrackManagerScreen(
                         items(tracks, key = { it.id }) { trackWithFile ->
                             TrackRow(
                                 trackWithFile = trackWithFile,
+                                trackSelectionViewModel = trackSelectionViewModel,
                                 onUseTrack = onUseTrack,
                                 onEditTrack = onEditTrack,
                                 onDelete = {
-                                    if (TrackStorage.deleteTrackFile(trackWithFile)) {
-                                        tracks = tracks.filter { it.id != trackWithFile.id }
-                                    }
+                                    trackToDelete = trackWithFile
                                 }
                             )
                         }
                     }
                 }
             }
+
+            if (trackToDelete != null) {
+                val pending = trackToDelete!!
+
+                AlertDialog(
+                    onDismissRequest = { trackToDelete = null },
+                    title = { Text("Delete Track") },
+                    text = {
+                        Text("Are you sure you want to delete \"${pending.track.name}\"?")
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                if (TrackStorage.deleteTrackFile(pending)) {
+                                    tracks = tracks.filter { it.id != pending.id }
+                                }
+                                trackToDelete = null
+                            }
+                        ) {
+                            Text("Delete")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { trackToDelete = null }) {
+                            Text("Cancel")
+                        }
+                    }
+                )
+            }
+
+
+
         }
     }
 }
@@ -108,6 +143,7 @@ fun TrackManagerScreen(
 @Composable
 private fun TrackRow(
     trackWithFile: TrackWithFile,
+    trackSelectionViewModel: TrackSelectionViewModel,
     onUseTrack: (Track) -> Unit,
     onEditTrack: (Track) -> Unit,
     onDelete: () -> Unit
@@ -138,12 +174,23 @@ private fun TrackRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                OutlinedButton(
-                    onClick = { onUseTrack(track) },
-                    modifier = Modifier.weight(1f)
+
+
+                Button(
+                    onClick = {
+                        // STEP A: save the selected track globally
+                        trackSelectionViewModel.selectTrack(trackWithFile.track)
+
+                        // STEP B: notify MainActivity (it will navigate to Drive)
+                        onUseTrack(trackWithFile.track)
+                    }
                 ) {
                     Text("Use Track")
                 }
+
+
+
+
                 OutlinedButton(
                     onClick = { onEditTrack(track) },
                     modifier = Modifier.weight(1f)
