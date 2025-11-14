@@ -6,6 +6,9 @@ import com.hotlaps.dynamic.model.EventSample
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
+import com.hotlaps.dynamic.util.GeoUtils
+
+
 /**
  * Holds all Drive-mode state:
  *  - Current Event (if any)
@@ -73,4 +76,28 @@ class DriveViewModel : ViewModel() {
         _longG.value = long
         _zG.value = z
     }
+
+    /**
+     * Distance in meters from the current GPS position
+     * to an arbitrary lat/lon (e.g., a corner).
+     *
+     * If we don't yet have a meaningful GPS fix, this will
+     * still return a number, but you may choose to ignore
+     * it until speed / fix quality is good.
+     */
+    fun distanceToLatLonMeters(
+        targetLatDeg: Double,
+        targetLonDeg: Double
+    ): Double {
+        val currLat = gpsLat.value
+        val currLon = gpsLon.value
+
+        return GeoUtils.haversineMeters(
+            currLat,
+            currLon,
+            targetLatDeg,
+            targetLonDeg
+        )
+    }
+
 }

@@ -61,6 +61,9 @@ import androidx.compose.runtime.LaunchedEffect
 import com.hotlaps.dynamic.model.Event
 
 
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
 
 
 
@@ -102,6 +105,26 @@ fun GGScreen(
     val activeTrack by trackSelectionViewModel
         .selectedTrack
         .collectAsState(initial = null)
+
+
+    val vmGpsLat by driveViewModel.gpsLat.collectAsState()
+    val vmGpsLon by driveViewModel.gpsLon.collectAsState()
+// First corner of the active track (if any)
+    val firstCorner = activeTrack?.corners?.firstOrNull()
+
+// Distance in meters from current GPS to that first corner
+    val distanceToFirstCorner: Double? =
+        if (firstCorner != null) {
+            com.hotlaps.dynamic.util.GeoUtils.haversineMeters(
+                vmGpsLat,
+                vmGpsLon,
+                firstCorner.lat,
+                firstCorner.lon
+            )
+        } else {
+            null
+        }
+
 
 // Auto-start a new event when Drive opens (only once)
     LaunchedEffect(activeTrack) {
@@ -361,6 +384,30 @@ fun GGScreen(
 
                 Text("VM G: lat=${"%.2f".format(vmLatG)}, long=${"%.2f".format(vmLongG)}")
 
+                val x = activeTrack
+                if (x != null) {
+                    Text(
+                        text = "Track: ${x.name} (${x.corners.size} corners)",
+                        // styling…
+                    )
+                }
+
+                Text(
+                    text = "GPS: ${"%.6f".format(vmGpsLat)}, ${"%.6f".format(vmGpsLon)}",
+                    // styling…
+                )
+
+                val d = distanceToFirstCorner
+                if (t != null && firstCorner != null && d != null) {
+                    Text(
+                        text = "Corner 1 distance: ${"%.1f".format(d)} m",
+                        // styling…
+                    )
+                } else {
+                    Text(
+                        text = "Corner 1 distance: (n/a)",
+                    )
+                }
 
 
             }
