@@ -65,9 +65,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.LaunchedEffect
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 
 
-@OptIn(ExperimentalMaterial3Api::class)
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun GGScreen(
     modifier: Modifier = Modifier,
@@ -83,36 +89,41 @@ fun GGScreen(
     val ggTrailWindow by repo.ggTrailWindowS.collectAsStateWithLifecycle(initialValue = 3.0f)
     val trailBrakeG   by repo.trailBrakeG.collectAsStateWithLifecycle(initialValue = 0.30f)
 
-
-// --- Sensor hookup: keep the same states you already have ---
+    // --- Sensor hookup: keep the same states you already have ---
     var ticks by remember { mutableStateOf(0L) }
     var latG  by remember { mutableStateOf(0f) }
     var longG by remember { mutableStateOf(0f) }
 
-// Latest raw linear-accel sample in m/s^2 (device axes)
+    // Latest raw linear-accel sample in m/s^2 (device axes)
     var latestX by remember { mutableStateOf(0f) }
     var latestY by remember { mutableStateOf(0f) }
-// (We ignore Z for the G-G plot)
+    // (We ignore Z for the G-G plot)
 
     var peakLongAccel  by remember { mutableStateOf(0f) }  // +long
     var peakLongBrake  by remember { mutableStateOf(0f) }  // |-long|
     var peakRightAccel by remember { mutableStateOf(0f) }  // +lat
     var peakLeftAccel  by remember { mutableStateOf(0f) }  // |-lat|
 
-    // Last time the user cleared peaks
-
-// === Active track (from TrackSelectionViewModel) ===
+    // === Active track (from TrackSelectionViewModel) ===
     val activeTrack by trackSelectionViewModel
         .selectedTrack
         .collectAsState(initial = null)
 
+    // === GPS values in the screen (local copy) ===
+    var gpsLat by remember { mutableStateOf(0.0) }
+    var gpsLon by remember { mutableStateOf(0.0) }
 
-    val vmGpsLat by driveViewModel.gpsLat.collectAsState()
-    val vmGpsLon by driveViewModel.gpsLon.collectAsState()
-// First corner of the active track (if any)
+    // === ViewModel GPS / G values ===
+    val vmGpsLat  by driveViewModel.gpsLat.collectAsState()
+    val vmGpsLon  by driveViewModel.gpsLon.collectAsState()
+    val vmLatG    by driveViewModel.latG.collectAsState()
+    val vmLongG   by driveViewModel.longG.collectAsState()
+    val currentEvent by driveViewModel.currentEvent.collectAsState()
+
+    // First corner (if any)
     val firstCorner = activeTrack?.corners?.firstOrNull()
 
-// Distance in meters from current GPS to that first corner
+    // Distance to first corner (based on VM GPS)
     val distanceToFirstCorner: Double? =
         if (firstCorner != null) {
             com.hotlaps.dynamic.util.GeoUtils.haversineMeters(
@@ -125,41 +136,59 @@ fun GGScreen(
             null
         }
 
+    // Nearest-corner logic: loop over all corners and pick the closest
+    val nearestCornerInfo: Pair<String, Double>? =
+        activeTrack?.corners
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { corners ->
+                // If GPS hasn't moved from 0,0 yet, just bail
+                if (vmGpsLat == 0.0 && vmGpsLon == 0.0) {
+                    null
+                } else {
+                    var bestLabel: String? = null
+                    var bestDist = Double.MAX_VALUE
+                    for (corner in corners) {
+                        val d = com.hotlaps.dynamic.util.GeoUtils.haversineMeters(
+                            vmGpsLat,
+                            vmGpsLon,
+                            corner.lat,
+                            corner.lon
+                        )
+                        if (d < bestDist) {
+                            bestDist = d
+                            // Prefer officialNumber; fall back to our internal index
+                            bestLabel = corner.officialNumber?.toString() ?: corner.index.toString()
+                        }
+                    }
+                    if (bestLabel != null) bestLabel to bestDist else null
+                }
+            }
 
-// Auto-start a new event when Drive opens (only once)
+    // Auto-start a new event when Drive opens (only once per track selection)
     LaunchedEffect(activeTrack) {
         val track = activeTrack
         val existing = driveViewModel.currentEvent.value
 
         if (track != null && existing == null) {
-            // Create a simple default event name for now
             val defaultName = "Session - ${track.name}"
+            val now = System.currentTimeMillis()
 
-            // Create the Event object
             val newEvent = Event(
-                id = System.currentTimeMillis(),
+                id = now,
                 name = defaultName,
                 trackId = track.id,
                 trackName = track.name,
-                createdUtcMs = System.currentTimeMillis()
+                createdUtcMs = now
             )
 
-            // Tell DriveViewModel to activate it
             driveViewModel.startEvent(newEvent)
         }
     }
 
-
-
-    // === GPS values ===
-    var gpsLat by remember { mutableStateOf(0.0) }
-    var gpsLon by remember { mutableStateOf(0.0) }
-
-
-// 1) Register a sensor listener (Linear Acceleration preferred)
+    // 1) Register a sensor listener (Linear Acceleration preferred)
     val ctx = LocalContext.current
     DisposableEffect(Unit) {
-        val mgr = ctx.getSystemService(android.content.Context.SENSOR_SERVICE) as android.hardware.SensorManager
+        val mgr = ctx.getSystemService(Context.SENSOR_SERVICE) as android.hardware.SensorManager
         val lin = mgr.getDefaultSensor(android.hardware.Sensor.TYPE_LINEAR_ACCELERATION)
         val listener = object : android.hardware.SensorEventListener {
             override fun onSensorChanged(e: android.hardware.SensorEvent) {
@@ -174,7 +203,6 @@ fun GGScreen(
         }
 
         if (lin != null) {
-            // ~100 Hz; OS may vary. We'll still publish at 10 Hz.
             mgr.registerListener(listener, lin, android.hardware.SensorManager.SENSOR_DELAY_GAME)
         }
 
@@ -183,8 +211,7 @@ fun GGScreen(
         }
     }
 
-
-    // 2) GPS Location Updates  ← A.3 goes here
+    // 2) GPS Location Updates
     DisposableEffect(Unit) {
         val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
@@ -195,9 +222,8 @@ fun GGScreen(
             gpsLat = lat      // keep UI copy for now
             gpsLon = lon
 
-            driveViewModel.updateGps(lat, lon)   // <-- NEW: send to ViewModel
+            driveViewModel.updateGps(lat, lon)   // send to ViewModel
         }
-
 
         try {
             if (
@@ -221,7 +247,7 @@ fun GGScreen(
         }
     }
 
-// 2) 10 Hz publisher: convert to g's + small EMA smoothing, then tick
+    // 3) 10 Hz publisher: convert to g's + small EMA smoothing, then tick
     LaunchedEffect(Unit) {
         val g = android.hardware.SensorManager.GRAVITY_EARTH // 9.80665 m/s^2
         var latEma = 0f
@@ -235,7 +261,6 @@ fun GGScreen(
             val latNow  = (latestX / g)               // +right, -left
             val longNow = (-latestY / g)              // +accel, -brake
 
-
             // EMA smooth
             latEma  = alpha * latNow  + (1 - alpha) * latEma
             lonEma  = alpha * longNow + (1 - alpha) * lonEma
@@ -245,14 +270,13 @@ fun GGScreen(
 
             driveViewModel.updateGForces(latG, longG)
 
-
-
             ticks++
         }
     }
 
-
-
+    // --- Pager state for swipeable Drive / Debug pages ---
+    val pagerState = rememberPagerState(initialPage = 0, pageCount = { 2 })
+    val scope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
@@ -272,199 +296,259 @@ fun GGScreen(
         Column(
             modifier = modifier
                 .padding(inner)
-                .fillMaxSize(),
-            verticalArrangement = Arrangement.Top,
-            horizontalAlignment = Alignment.CenterHorizontally
+                .fillMaxSize()
         ) {
-
-            // --- Top HUD ---
-            Column(
-                modifier = Modifier.padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-
-                // Color the longitudinal readout by phase (Accel/Brake/Neutral)
-                val accelColor =
-                    when {
-                        longG >  trailBrakeG -> Color(0xFF34D399) // accelerating (green)
-                        longG < -trailBrakeG -> Color(0xFFEF4444) // braking (red)
-                        else                 -> Color(0xFFE5E7EB) // neutral (light gray)
-                    }
-
-
-                val numberStyle = TextStyle(
-                    fontSize = 44.sp,
-                    fontWeight = FontWeight.Bold,
-                    // Tabular numbers so digits don't reflow
-                    fontFeatureSettings = "tnum" // works with Roboto
-                    // or: fontFamily = FontFamily.Monospace
-                )
-
-                Row {
-                    Text(
-                        text = "Long Accel:",
-                        fontSize = 44.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(end = 8.dp)
-                    )
-                    Box(Modifier.width(180.dp)) { // tweak width for your devices
-                        Text(
-                            text = "${"%+.2f".format(longG)} g", // always shows + or -
-                            style = numberStyle,
-                            color = accelColor,
-                            maxLines = 1,
-                            softWrap = false,
-                            textAlign = TextAlign.End,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                }
-
-                Row {
-                    Text(
-                        text = "Lat Accel:",
-                        fontSize = 44.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(end = 8.dp)
-                    )
-                    Box(Modifier.width(180.dp)) {
-                        Text(
-                            text = "${"%+.2f".format(latG)} g",
-                            style = numberStyle,
-                            color = Color(0xFF60A5FA),
-                            maxLines = 1,
-                            softWrap = false,
-                            textAlign = TextAlign.End,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                }
-
-                // --- Show active track ---
-                val t = activeTrack
-                if (t != null) {
-                    Text(
-                        text = "Track: ${t.name} (${t.corners.size} corners)",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(12.dp)
-                    )
-                } else {
-                    Text(
-                        text = "Track: (none selected)",
-                        fontSize = 20.sp,
-                        color = Color.Red,
-                        modifier = Modifier.padding(12.dp)
-                    )
-                }
-
-                val event = driveViewModel.currentEvent.collectAsState().value
-
-                Text("Event: ${event?.name ?: "(none)"}")
-
-
-                Text(
-                    text = "GPS: ${"%.6f".format(gpsLat)}, ${"%.6f".format(gpsLon)}",
-                    fontSize = 18.sp,
-                    modifier = Modifier.padding(8.dp)
-                )
-
-                val vmLat by driveViewModel.gpsLat.collectAsState()
-                val vmLon by driveViewModel.gpsLon.collectAsState()
-
-                Text(
-                    text = "VM GPS: ${"%.6f".format(vmLat)}, ${"%.6f".format(vmLon)}",
-                    fontSize = 16.sp,
-                    color = Color.Gray,
-                    modifier = Modifier.padding(8.dp)
-                )
-
-                val vmLatG by driveViewModel.latG.collectAsState()
-                val vmLongG by driveViewModel.longG.collectAsState()
-
-                Text("VM G: lat=${"%.2f".format(vmLatG)}, long=${"%.2f".format(vmLongG)}")
-
-                val x = activeTrack
-                if (x != null) {
-                    Text(
-                        text = "Track: ${x.name} (${x.corners.size} corners)",
-                        // styling…
-                    )
-                }
-
-                Text(
-                    text = "GPS: ${"%.6f".format(vmGpsLat)}, ${"%.6f".format(vmGpsLon)}",
-                    // styling…
-                )
-
-                val d = distanceToFirstCorner
-                if (t != null && firstCorner != null && d != null) {
-                    Text(
-                        text = "Corner 1 distance: ${"%.1f".format(d)} m",
-                        // styling…
-                    )
-                } else {
-                    Text(
-                        text = "Corner 1 distance: (n/a)",
-                    )
-                }
-
-
-            }
-
-
-
-// --- Plot + summary (container under the HUD) ---
-            Column(
+            // Small header to hint at swiping + allow tap navigation
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
+                    .padding(vertical = 4.dp, horizontal = 8.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly
             ) {
-                // 1) The plot itself
-                GGPlot(
-                    maxAbsG = ggMaxG,
-                    latG = latG,
-                    longG = longG,
-                    trailSeconds = ggTrailWindow,
-                    ticks = ticks,
-                    brakeThreshG = trailBrakeG,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(1f),
-                    onPeaks = { longMax, longBrakeMax, rightMax, leftMax ->
-                        peakLongAccel  = longMax
-                        peakLongBrake  = longBrakeMax
-                        peakRightAccel = rightMax
-                        peakLeftAccel  = leftMax
+                @Composable
+                fun tabText(label: String, page: Int) {
+                    val isSelected = pagerState.currentPage == page
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                pagerState.animateScrollToPage(page)
+                            }
+                        }
+                    ) {
+                        Text(
+                            text = label,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                        )
                     }
-                )
-
-                Spacer(Modifier.height(8.dp))
-
-                // 2) Peak summary panel (temporarily shows placeholders; we’ll wire real values next)
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    PeakItem("Max Long Accel",   peakLongAccel,  Color(0xFF16A34A), Modifier.weight(1f))
-                    PeakItem("Max Long Braking", peakLongBrake,  Color(0xFFDC2626), Modifier.weight(1f))
                 }
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    PeakItem("Max Right Accel",  peakRightAccel, Color(0xFFF59E0B), Modifier.weight(1f))
-                    PeakItem("Max Left Accel",   peakLeftAccel,  Color(0xFFA855F7), Modifier.weight(1f))
-                }
+
+                tabText("Drive", 0)
+                tabText("Debug", 1)
             }
 
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize()
+            ) { page ->
+                when (page) {
+                    // === Page 0: Main driving HUD + G-G plot ===
+                    0 -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 12.dp),
+                            verticalArrangement = Arrangement.Top,
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            // --- Top HUD (trimmed to essentials) ---
+                            Column(
+                                modifier = Modifier.padding(top = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                // Longitudinal readout w/ color
+                                val accelColor =
+                                    when {
+                                        longG >  trailBrakeG -> Color(0xFF34D399) // accelerating (green)
+                                        longG < -trailBrakeG -> Color(0xFFEF4444) // braking (red)
+                                        else                 -> Color(0xFFE5E7EB) // neutral (light gray)
+                                    }
 
+                                val numberStyle = TextStyle(
+                                    fontSize = 44.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFeatureSettings = "tnum"
+                                )
 
-        } // <-- closes Box
-    } // <-- closes Scaffold
+                                Row {
+                                    Text(
+                                        text = "Long Accel:",
+                                        fontSize = 44.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(end = 8.dp)
+                                    )
+                                    Box(Modifier.width(180.dp)) {
+                                        Text(
+                                            text = "${"%+.2f".format(longG)} g",
+                                            style = numberStyle,
+                                            color = accelColor,
+                                            maxLines = 1,
+                                            softWrap = false,
+                                            textAlign = TextAlign.End,
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
+                                }
+
+                                Row {
+                                    Text(
+                                        text = "Lat Accel:",
+                                        fontSize = 44.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(end = 8.dp)
+                                    )
+                                    Box(Modifier.width(180.dp)) {
+                                        Text(
+                                            text = "${"%+.2f".format(latG)} g",
+                                            style = numberStyle,
+                                            color = Color(0xFF60A5FA),
+                                            maxLines = 1,
+                                            softWrap = false,
+                                            textAlign = TextAlign.End,
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
+                                }
+
+                                // Track + Event
+                                val t = activeTrack
+                                if (t != null) {
+                                    Text(
+                                        text = "Track: ${t.name} (${t.corners.size} corners)",
+                                        fontSize = 20.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(top = 4.dp)
+                                    )
+                                } else {
+                                    Text(
+                                        text = "Track: (none selected)",
+                                        fontSize = 20.sp,
+                                        color = Color.Red,
+                                        modifier = Modifier.padding(top = 4.dp)
+                                    )
+                                }
+
+                                Text(
+                                    text = "Event: ${currentEvent?.name ?: "(none)"}",
+                                    fontSize = 16.sp
+                                )
+
+                                // Nearest corner summary (headline for Drive page)
+                                nearestCornerInfo?.let { (label, distM) ->
+                                    Text(
+                                        text = "Nearest corner: #$label (${String.format("%.1f", distM)} m)",
+                                        fontSize = 18.sp,
+                                        modifier = Modifier.padding(top = 4.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(Modifier.height(8.dp))
+
+                            // --- Plot + peak summary ---
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 4.dp)
+                            ) {
+                                GGPlot(
+                                    maxAbsG = ggMaxG,
+                                    latG = latG,
+                                    longG = longG,
+                                    trailSeconds = ggTrailWindow,
+                                    ticks = ticks,
+                                    brakeThreshG = trailBrakeG,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .aspectRatio(1f),
+                                    onPeaks = { longMax, longBrakeMax, rightMax, leftMax ->
+                                        peakLongAccel  = longMax
+                                        peakLongBrake  = longBrakeMax
+                                        peakRightAccel = rightMax
+                                        peakLeftAccel  = leftMax
+                                    }
+                                )
+
+                                Spacer(Modifier.height(8.dp))
+
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    PeakItem("Max Long Accel",   peakLongAccel,  Color(0xFF16A34A), Modifier.weight(1f))
+                                    PeakItem("Max Long Braking", peakLongBrake,  Color(0xFFDC2626), Modifier.weight(1f))
+                                }
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    PeakItem("Max Right Accel",  peakRightAccel, Color(0xFFF59E0B), Modifier.weight(1f))
+                                    PeakItem("Max Left Accel",   peakLeftAccel,  Color(0xFFA855F7), Modifier.weight(1f))
+                                }
+                            }
+                        }
+                    }
+
+                    // === Page 1: Debug panel ===
+                    1 -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.Top,
+                            horizontalAlignment = Alignment.Start
+                        ) {
+                            Text(
+                                text = "Debug Panel",
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+
+                            val t = activeTrack
+
+                            Text("Track: ${t?.name ?: "(none)"}")
+                            if (t != null) {
+                                Text("Corners: ${t.corners.size}")
+                            }
+
+                            Spacer(Modifier.height(8.dp))
+
+                            Text("Raw GPS (screen): ${"%.6f".format(gpsLat)}, ${"%.6f".format(gpsLon)}")
+                            Text("VM GPS: ${"%.6f".format(vmGpsLat)}, ${"%.6f".format(vmGpsLon)}")
+                            Text("VM G: lat=${"%.2f".format(vmLatG)}, long=${"%.2f".format(vmLongG)}")
+
+                            Spacer(Modifier.height(8.dp))
+
+                            if (t != null && firstCorner != null && distanceToFirstCorner != null) {
+                                Text(
+                                    "Corner 1 distance: ${"%.1f".format(distanceToFirstCorner)} m"
+                                )
+                            } else {
+                                Text("Corner 1 distance: (n/a)")
+                            }
+
+                            // Show whether we are inside the trigger radius
+                            nearestCornerInfo?.let { (_, distM) ->
+                                val inside = driveViewModel.isWithinCornerTriggerRadius(distM)
+                                Text("Inside trigger radius: $inside")
+                            } ?: run {
+                                Text("Inside trigger radius: (n/a)")
+                            }
+
+                            nearestCornerInfo?.let { (label, distM) ->
+                                Text(
+                                    text = "Nearest corner (all): #$label (${String.format("%.1f", distM)} m)",
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                            } ?: run {
+                                Text(
+                                    text = "Nearest corner (all): (n/a)",
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                            }
+
+                            Spacer(Modifier.height(12.dp))
+
+                            Text("Event ID: ${currentEvent?.id ?: 0L}")
+                            Text("Event name: ${currentEvent?.name ?: "(none)"}")
+                            Text("TrackId on Event: ${currentEvent?.trackId ?: 0L}")
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
-
-
 
 
 @Composable

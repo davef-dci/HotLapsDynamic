@@ -20,6 +20,12 @@ import com.hotlaps.dynamic.util.GeoUtils
  */
 class DriveViewModel : ViewModel() {
 
+    companion object {
+        // Corner trigger radius in meters.
+        // Easy to tweak as we learn more from real-world testing.
+        private const val CORNER_TRIGGER_RADIUS_M = 30.0
+    }
+
     // ------------------------
     // EVENT STATE
     // ------------------------
@@ -99,5 +105,15 @@ class DriveViewModel : ViewModel() {
             targetLonDeg
         )
     }
+
+    /**
+     * Returns true if the given distance (in meters) is within
+     * our corner trigger radius.
+     */
+    fun isWithinCornerTriggerRadius(distanceM: Double?): Boolean {
+        if (distanceM == null) return false
+        return distanceM <= CORNER_TRIGGER_RADIUS_M
+    }
+
 
 }
