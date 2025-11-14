@@ -8,6 +8,13 @@ import kotlinx.coroutines.flow.StateFlow
 
 import com.hotlaps.dynamic.util.GeoUtils
 import com.hotlaps.dynamic.model.Track
+import com.hotlaps.dynamic.data.EventStorage
+import com.hotlaps.dynamic.model.CornerVisit
+
+import android.content.Context
+
+
+
 
 /**
  * Holds all Drive-mode state:
@@ -19,6 +26,12 @@ import com.hotlaps.dynamic.model.Track
  *  - Logic for writing EventSamples (later)
  */
 class DriveViewModel : ViewModel() {
+
+    private enum class CornerCaptureState {
+        Idle,
+        Capturing
+    }
+
 
     companion object {
         // Corner trigger radius in meters.
@@ -34,9 +47,44 @@ class DriveViewModel : ViewModel() {
     private val _currentEvent = MutableStateFlow<Event?>(null)
     val currentEvent: StateFlow<Event?> get() = _currentEvent
 
-    fun startEvent(event: Event) {
+    // In-memory buffer of samples for the current Event.
+// (We'll later stream these to disk / export.)
+    private val _samples = mutableListOf<EventSample>()
+    val samples: List<EventSample> get() = _samples
+
+    // Corner capture state machine
+    private var cornerCaptureState: CornerCaptureState = CornerCaptureState.Idle
+
+    // Which corner we are currently capturing (track cornerIndex), or null if none
+    private var activeCornerIndex: Int? = null
+
+    // Nth visit to this corner within the current Event (1,2,3…)
+    private var activeVisitNumber: Int = 0
+
+    // Per-corner visit counters within this Event: cornerIndex -> visits so far
+    private val cornerVisitCounts = mutableMapOf<Int, Int>()
+
+    // List of all corner visits (metadata only; we’ll fill this later)
+    private val cornerVisits = mutableListOf<CornerVisit>()
+
+
+
+    fun startEvent(context: Context, track: Track) {
+        val eventName = "${track.name} – ${System.currentTimeMillis()}"
+        val event = EventStorage.createEvent(
+            context = context,
+            name = eventName,
+            trackId = track.id,
+            trackName = track.name
+        )
         _currentEvent.value = event
+        cornerCaptureState = CornerCaptureState.Idle
+        activeCornerIndex = null
+        activeVisitNumber = 0
+        cornerVisitCounts.clear()
+        cornerVisits.clear()
     }
+
 
     fun stopEvent() {
         _currentEvent.value = null
@@ -44,8 +92,12 @@ class DriveViewModel : ViewModel() {
 
     // Placeholder for receiving new samples (later)
     fun addSample(sample: EventSample) {
-        // Will save to storage later
+        // Only record if we actually have an active Event
+        if (_currentEvent.value == null) return
+
+        _samples.add(sample)
     }
+
 
     // ------------------------
     // GPS STATE
@@ -82,6 +134,51 @@ class DriveViewModel : ViewModel() {
         _longG.value = long
         _zG.value = z
     }
+
+    fun recordCurrentSample() {
+        val event = _currentEvent.value ?: return   // no active event -> do nothing
+
+        val nowUtc = System.currentTimeMillis()
+        val intervalMs = nowUtc - event.createdUtcMs
+
+        // Default: not in any corner window
+        var cornerIndex = 0
+        var visitNumber = 0
+
+        // If we're currently capturing a corner, tag this sample with that info
+        if (cornerCaptureState == CornerCaptureState.Capturing &&
+            activeCornerIndex != null &&
+            activeVisitNumber > 0
+        ) {
+            cornerIndex = activeCornerIndex!!
+            visitNumber = activeVisitNumber
+        }
+
+        val long = _longG.value
+        val lat = _latG.value
+        val z   = _zG.value
+
+        val gSum = kotlin.math.sqrt(
+            (long * long) +
+                    (lat * lat) +
+                    (z * z)
+        )
+
+        val sample = EventSample(
+            eventId = event.id,
+            cornerIndex = cornerIndex,
+            visitNumber = visitNumber,
+            intervalMs = intervalMs,
+            utcMs = nowUtc,
+            longG = long,
+            latG = lat,
+            zG = z,
+            gSum = gSum
+        )
+
+        addSample(sample)
+    }
+
 
     /**
      * Distance in meters from the current GPS position
@@ -158,6 +255,167 @@ class DriveViewModel : ViewModel() {
         } else {
             null
         }
+    }
+
+
+
+
+    /**
+     * Given the current GPS position and a track, find the nearest corner
+     * by its index (1,2,3,...).
+     *
+     * Returns:
+     *   Pair(cornerIndex, distanceMeters)
+     * or null if no track / corners / invalid GPS.
+     */
+    fun findNearestCornerIndex(track: Track?): Pair<Int, Double>? {
+        val corners = track?.corners ?: return null
+        if (corners.isEmpty()) return null
+
+        val lat = gpsLat.value
+        val lon = gpsLon.value
+
+        // Ignore obviously-bogus GPS (still 0,0)
+        if (lat == 0.0 && lon == 0.0) return null
+
+        var bestCornerIndex: Int? = null
+        var bestDistance = Double.MAX_VALUE
+
+        for (corner in corners) {
+            val d = GeoUtils.haversineMeters(
+                lat,
+                lon,
+                corner.lat,
+                corner.lon
+            )
+
+            if (d < bestDistance) {
+                bestDistance = d
+                bestCornerIndex = corner.index
+            }
+        }
+
+        return if (bestCornerIndex != null) {
+            bestCornerIndex to bestDistance
+        } else {
+            null
+        }
+    }
+
+    /**
+     * Update the corner capture state machine based on the current GPS position
+     * and the given track.
+     *
+     * For now this only handles:
+     *   - Idle  -> Capturing  when we enter a corner trigger radius
+     *   - Capturing stays Capturing (we'll add exit logic later)
+     */
+    fun updateCornerCaptureState(track: Track?) {
+        // If there's no active event, we don't capture anything
+        val event = _currentEvent.value ?: return
+
+        when (cornerCaptureState) {
+
+            CornerCaptureState.Idle -> {
+                // Find the nearest corner by index + distance
+                val nearest = findNearestCornerIndex(track) ?: return
+                val (cornerIndex, distanceM) = nearest
+
+                // Only react if we're within the trigger radius
+                if (!isWithinCornerTriggerRadius(distanceM)) {
+                    return
+                }
+
+                // We've just "hit" a corner: increment visit count
+                val visitsSoFar = cornerVisitCounts[cornerIndex] ?: 0
+                val newVisitNumber = visitsSoFar + 1
+                cornerVisitCounts[cornerIndex] = newVisitNumber
+
+                activeCornerIndex = cornerIndex
+                activeVisitNumber = newVisitNumber
+                cornerCaptureState = CornerCaptureState.Capturing
+
+                // For now, treat the instant we enter the trigger radius as apex/start/end.
+                // We'll refine these times later using capture-before / capture-after windows.
+                val nowUtc = System.currentTimeMillis()
+                val eventId = event.id
+
+                val visit = CornerVisit(
+                    eventId = eventId,
+                    cornerIndex = cornerIndex,
+                    visitNumber = newVisitNumber,
+                    startUtcMs = nowUtc,
+                    apexUtcMs = nowUtc,
+                    endUtcMs = nowUtc
+                )
+
+                cornerVisits.add(visit)
+            }
+
+
+            CornerCaptureState.Capturing -> {
+                val event = _currentEvent.value ?: return
+
+                val cornerIndex = activeCornerIndex ?: return
+                val visitNumber = activeVisitNumber
+
+                // If we somehow don't have a visit number, bail
+                if (visitNumber <= 0) return
+
+                // Look up this corner's lat/lon in the track
+                val corners = track?.corners ?: return
+                val corner = corners.firstOrNull { it.index == cornerIndex } ?: return
+
+                val lat = gpsLat.value
+                val lon = gpsLon.value
+
+                // Ignore obviously invalid GPS
+                if (lat == 0.0 && lon == 0.0) return
+
+                // Compute distance from current GPS to this corner's apex
+                val distanceM = GeoUtils.haversineMeters(
+                    lat,
+                    lon,
+                    corner.lat,
+                    corner.lon
+                )
+
+                // If we're still within the trigger radius, keep capturing
+                if (isWithinCornerTriggerRadius(distanceM)) {
+                    return
+                }
+
+                // We have LEFT the trigger radius -> stop capturing this corner
+                val nowUtc = System.currentTimeMillis()
+
+                // Find the most recent CornerVisit for this event/corner/visit
+                val idx = cornerVisits.indexOfLast { visit ->
+                    visit.eventId == event.id &&
+                            visit.cornerIndex == cornerIndex &&
+                            visit.visitNumber == visitNumber
+                }
+
+                if (idx != -1) {
+                    val oldVisit = cornerVisits[idx]
+                    cornerVisits[idx] = oldVisit.copy(endUtcMs = nowUtc)
+                }
+
+                // Reset active capture state
+                cornerCaptureState = CornerCaptureState.Idle
+                activeCornerIndex = null
+                activeVisitNumber = 0
+            }
+
+        }
+    }
+
+
+    /**
+     * Expose the corner trigger radius (in meters) so the UI
+     * can display it for debugging / tuning.
+     */
+    fun getCornerTriggerRadiusMeters(): Double {
+        return CORNER_TRIGGER_RADIUS_M
     }
 
 

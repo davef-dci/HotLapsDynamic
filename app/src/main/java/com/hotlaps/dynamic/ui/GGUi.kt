@@ -71,6 +71,9 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+
+
 
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -108,6 +111,8 @@ fun GGScreen(
     val activeTrack by trackSelectionViewModel
         .selectedTrack
         .collectAsState(initial = null)
+
+
 
     // === GPS values in the screen (local copy) ===
     var gpsLat by remember { mutableStateOf(0.0) }
@@ -161,7 +166,6 @@ fun GGScreen(
                 createdUtcMs = now
             )
 
-            driveViewModel.startEvent(newEvent)
         }
     }
 
@@ -249,6 +253,12 @@ fun GGScreen(
             longG = lonEma
 
             driveViewModel.updateGForces(latG, longG)
+
+            // record a sample (only works when an Event is active)
+            driveViewModel.recordCurrentSample()
+
+            // NEW: update corner state machine based on current GPS + track
+            driveViewModel.updateCornerCaptureState(activeTrack)
 
             ticks++
         }
@@ -504,6 +514,11 @@ fun GGScreen(
                             } ?: run {
                                 Text("Inside trigger radius: (n/a)")
                             }
+
+                            Text(
+                                text = "Corner trigger radius: ${"%.1f".format(driveViewModel.getCornerTriggerRadiusMeters())} m",
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
 
                             nearestCornerInfo?.let { (label, distM) ->
                                 Text(

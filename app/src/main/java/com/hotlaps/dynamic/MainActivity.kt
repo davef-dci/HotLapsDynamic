@@ -25,6 +25,8 @@ import androidx.core.app.ActivityCompat
 import android.content.pm.PackageManager
 import com.hotlaps.dynamic.viewmodel.DriveViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.ui.platform.LocalContext
+
 
 
 
@@ -71,14 +73,29 @@ class MainActivity : ComponentActivity() {
                         }
 
                         composable("menu") {
+
+                            val context = LocalContext.current
+
                             MainMenuDynamics(
-                                onDrive = { nav.navigate("drive") },
+                                onDrive = {
+                                    // 1. Get the track the user has selected
+                                    val track = trackSelectionViewModel.selectedTrack.value
+
+                                    // 2. Only start an event if a track is selected
+                                    if (track != null) {
+                                        driveViewModel.startEvent(context, track)
+                                    }
+
+                                    // 3. Navigate into Drive mode
+                                    nav.navigate("drive")
+                                },
                                 onTrackManager = { nav.navigate("trackSetup") },
                                 onEventManager = { nav.navigate("eventManager") },
                                 onCalibrate = { nav.navigate("calib") },
                                 onSettings = { nav.navigate("settings") }
                             )
                         }
+
 
                         composable("drive") {
                             GGScreen(
