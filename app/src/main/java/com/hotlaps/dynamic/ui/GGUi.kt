@@ -63,6 +63,7 @@ import com.hotlaps.dynamic.model.Event
 
 
 
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GGScreen(
@@ -164,10 +165,16 @@ fun GGScreen(
     DisposableEffect(Unit) {
         val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
-        val listener = LocationListener { loc ->
-            gpsLat = loc.latitude
-            gpsLon = loc.longitude
+        val listener = LocationListener { loc: Location ->
+            val lat = loc.latitude
+            val lon = loc.longitude
+
+            gpsLat = lat      // keep UI copy for now
+            gpsLon = lon
+
+            driveViewModel.updateGps(lat, lon)   // <-- NEW: send to ViewModel
         }
+
 
         try {
             if (
@@ -212,6 +219,8 @@ fun GGScreen(
 
             latG  = latEma
             longG = lonEma
+
+            driveViewModel.updateGForces(latG, longG)
 
 
 
@@ -336,6 +345,22 @@ fun GGScreen(
                     fontSize = 18.sp,
                     modifier = Modifier.padding(8.dp)
                 )
+
+                val vmLat by driveViewModel.gpsLat.collectAsState()
+                val vmLon by driveViewModel.gpsLon.collectAsState()
+
+                Text(
+                    text = "VM GPS: ${"%.6f".format(vmLat)}, ${"%.6f".format(vmLon)}",
+                    fontSize = 16.sp,
+                    color = Color.Gray,
+                    modifier = Modifier.padding(8.dp)
+                )
+
+                val vmLatG by driveViewModel.latG.collectAsState()
+                val vmLongG by driveViewModel.longG.collectAsState()
+
+                Text("VM G: lat=${"%.2f".format(vmLatG)}, long=${"%.2f".format(vmLongG)}")
+
 
 
             }
