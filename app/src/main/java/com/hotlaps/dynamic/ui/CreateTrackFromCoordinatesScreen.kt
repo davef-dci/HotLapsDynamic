@@ -17,8 +17,8 @@ import com.hotlaps.dynamic.model.Track
 import com.hotlaps.dynamic.model.Corner
 import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
-import com.google.gson.Gson
 import java.io.File
+import com.hotlaps.dynamic.data.TrackStorage
 
 
 
@@ -56,7 +56,7 @@ fun CreateTrackFromCoordinatesScreen(
     }
 
     val context = LocalContext.current
-    val gson = remember { Gson() }
+   // val gson = remember { Gson() }
 
 
     Scaffold(
@@ -200,16 +200,13 @@ fun CreateTrackFromCoordinatesScreen(
             Spacer(Modifier.height(24.dp))
 
 // --- Save Track button ---
-// --- Save Track button ---
             Button(
                 onClick = {
-                    // Basic validation: need a track name
                     if (trackName.isBlank()) {
                         Toast.makeText(context, "Please enter a track name", Toast.LENGTH_SHORT).show()
                         return@Button
                     }
 
-                    // Convert each corner form into a real Corner, skipping incomplete rows
                     val corners = cornerForms.mapNotNull { form ->
                         val lat = form.latText.toDoubleOrNull()
                         val lon = form.lonText.toDoubleOrNull()
@@ -238,7 +235,6 @@ fun CreateTrackFromCoordinatesScreen(
                         return@Button
                     }
 
-                    // Create a Track with a simple time-based ID for now
                     val trackId = System.currentTimeMillis()
                     val track = Track(
                         id = trackId,
@@ -246,21 +242,10 @@ fun CreateTrackFromCoordinatesScreen(
                         corners = corners
                     )
 
-                    // --- Serialize to JSON and save to external app-specific storage ---
-                    try {
-                        val json = gson.toJson(track)
-
-                        val tracksDir = File(context.getExternalFilesDir(null), "tracks").apply {
-                            if (!exists()) mkdirs()
-                        }
-
-                        val file = File(tracksDir, "track_${trackId}.json")
-                        file.writeText(json)
-
-                        println("SaveTrack: Saved track to ${file.absolutePath}")
+                    val ok = TrackStorage.saveTrack(context, track)
+                    if (ok) {
                         Toast.makeText(context, "Track saved", Toast.LENGTH_SHORT).show()
-                    } catch (e: Exception) {
-                        e.printStackTrace()
+                    } else {
                         Toast.makeText(context, "Error saving track", Toast.LENGTH_SHORT).show()
                     }
                 },
@@ -268,7 +253,6 @@ fun CreateTrackFromCoordinatesScreen(
             ) {
                 Text("Save Track")
             }
-
             Spacer(Modifier.height(16.dp))
 
 // --- Delete all saved tracks (debug) ---

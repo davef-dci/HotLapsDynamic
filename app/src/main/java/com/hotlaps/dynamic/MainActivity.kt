@@ -17,6 +17,9 @@ import com.hotlaps.dynamic.ui.TrackAndCornerSetupScreen
 import com.hotlaps.dynamic.ui.AddNewTrackScreen
 import com.hotlaps.dynamic.ui.EventManagerScreen
 import com.hotlaps.dynamic.ui.CreateTrackFromCoordinatesScreen
+import com.hotlaps.dynamic.model.Track
+import com.hotlaps.dynamic.ui.TrackManagerScreen
+
 
 
 class MainActivity : ComponentActivity() {
@@ -41,7 +44,7 @@ class MainActivity : ComponentActivity() {
                         composable("menu") {
                             MainMenuDynamics(
                                 onDrive = { nav.navigate("drive") },
-                                onTrackManager = { nav.navigate("trackManager") },
+                                onTrackManager = { nav.navigate("trackSetup") },
                                 onEventManager = { nav.navigate("eventManager") },
                                 onCalibrate = { nav.navigate("calib") },
                                 onSettings = { nav.navigate("settings") }
@@ -52,12 +55,17 @@ class MainActivity : ComponentActivity() {
                             GGScreen()
                         }
 
-                        composable("trackManager") {
+
+
+// Track menu
+                        composable("trackSetup") {
                             TrackAndCornerSetupScreen(
                                 onBack = { nav.popBackStack() },
-                                onAddNewTrack = { nav.navigate("addTrack") }
+                                onAddNewTrack = { nav.navigate("addTrack") },
+                                onSelectExistingTrack = { nav.navigate("trackManager") }
                             )
                         }
+
 
                         composable("addTrack") {
                             AddNewTrackScreen(
@@ -89,6 +97,21 @@ class MainActivity : ComponentActivity() {
                         composable("settings") {
                             SettingsScreen(onBack = { nav.popBackStack() })
                         }
+
+                        composable("trackManager") {
+                            TrackManagerScreen(
+                                onBack = { nav.popBackStack() },
+                                onUseTrack = { track: Track ->
+                                    // e.g. stash in ViewModel later
+                                    // Log.d("TrackManager", "Selected track: ${track.name}")
+                                },
+                                onEditTrack = { track: Track ->
+                                    // nav.navigate("editTrack/${...}") later
+                                }
+                            )
+                        }
+
+
                     }
                 }
             }

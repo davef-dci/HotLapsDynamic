@@ -13,7 +13,8 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun TrackAndCornerSetupScreen(
     onBack: () -> Unit,
-    onAddNewTrack: () -> Unit
+    onAddNewTrack: () -> Unit,
+    onSelectExistingTrack: () -> Unit  // NEW
 ) {
     Scaffold(
         topBar = {
@@ -46,7 +47,7 @@ fun TrackAndCornerSetupScreen(
 
             BigButton(
                 text = "Select Existing Track",
-                onClick = { /* TODO: open track picker later */ }
+                onClick = onSelectExistingTrack
             )
 
             Spacer(Modifier.height(12.dp))
