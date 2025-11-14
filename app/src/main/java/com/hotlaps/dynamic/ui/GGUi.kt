@@ -136,33 +136,13 @@ fun GGScreen(
             null
         }
 
-    // Nearest-corner logic: loop over all corners and pick the closest
-    val nearestCornerInfo: Pair<String, Double>? =
-        activeTrack?.corners
-            ?.takeIf { it.isNotEmpty() }
-            ?.let { corners ->
-                // If GPS hasn't moved from 0,0 yet, just bail
-                if (vmGpsLat == 0.0 && vmGpsLon == 0.0) {
-                    null
-                } else {
-                    var bestLabel: String? = null
-                    var bestDist = Double.MAX_VALUE
-                    for (corner in corners) {
-                        val d = com.hotlaps.dynamic.util.GeoUtils.haversineMeters(
-                            vmGpsLat,
-                            vmGpsLon,
-                            corner.lat,
-                            corner.lon
-                        )
-                        if (d < bestDist) {
-                            bestDist = d
-                            // Prefer officialNumber; fall back to our internal index
-                            bestLabel = corner.officialNumber?.toString() ?: corner.index.toString()
-                        }
-                    }
-                    if (bestLabel != null) bestLabel to bestDist else null
-                }
-            }
+    // Nearest-corner logic now handled by DriveViewModel
+    val nearestCornerInfo = driveViewModel.computeNearestCorner(
+        track = activeTrack,
+        gpsLatDeg = vmGpsLat,
+        gpsLonDeg = vmGpsLon
+    )
+
 
     // Auto-start a new event when Drive opens (only once per track selection)
     LaunchedEffect(activeTrack) {

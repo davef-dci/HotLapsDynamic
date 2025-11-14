@@ -7,7 +7,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 import com.hotlaps.dynamic.util.GeoUtils
-
+import com.hotlaps.dynamic.model.Track
 
 /**
  * Holds all Drive-mode state:
@@ -114,6 +114,52 @@ class DriveViewModel : ViewModel() {
         if (distanceM == null) return false
         return distanceM <= CORNER_TRIGGER_RADIUS_M
     }
+
+    /**
+     * Given a track and the current GPS position, find the nearest corner.
+     *
+     * Returns:
+     *   Pair(label, distanceMeters)  OR  null if we can't compute it.
+     *
+     * label = corner.officialNumber if present, otherwise the corner.index.
+     */
+    fun computeNearestCorner(
+        track: Track?,
+        gpsLatDeg: Double,
+        gpsLonDeg: Double
+    ): Pair<String, Double>? {
+        // No track? Nothing to do.
+        val corners = track?.corners ?: return null
+        if (corners.isEmpty()) return null
+
+        // If GPS hasn't locked yet, (0,0) is garbage -> bail out.
+        if (gpsLatDeg == 0.0 && gpsLonDeg == 0.0) return null
+
+        var bestLabel: String? = null
+        var bestDistance = Double.MAX_VALUE
+
+        for (corner in corners) {
+            val d = GeoUtils.haversineMeters(
+                gpsLatDeg,
+                gpsLonDeg,
+                corner.lat,
+                corner.lon
+            )
+
+            if (d < bestDistance) {
+                bestDistance = d
+                // Prefer officialNumber, otherwise index
+                bestLabel = corner.officialNumber?.toString() ?: corner.index.toString()
+            }
+        }
+
+        return if (bestLabel != null) {
+            bestLabel to bestDistance
+        } else {
+            null
+        }
+    }
+
 
 
 }
