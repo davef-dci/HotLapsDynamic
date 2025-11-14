@@ -55,6 +55,11 @@ import android.content.Context
 import androidx.core.app.ActivityCompat
 import android.content.pm.PackageManager
 
+import com.hotlaps.dynamic.viewmodel.DriveViewModel
+
+import androidx.compose.runtime.LaunchedEffect
+import com.hotlaps.dynamic.model.Event
+
 
 
 
@@ -62,7 +67,8 @@ import android.content.pm.PackageManager
 @Composable
 fun GGScreen(
     modifier: Modifier = Modifier,
-            trackSelectionViewModel: TrackSelectionViewModel
+    trackSelectionViewModel: TrackSelectionViewModel,
+    driveViewModel: DriveViewModel
 ) {
     // === Read Settings (same pattern as SettingsScreen) ===
     val context = LocalContext.current
@@ -95,6 +101,30 @@ fun GGScreen(
     val activeTrack by trackSelectionViewModel
         .selectedTrack
         .collectAsState(initial = null)
+
+// Auto-start a new event when Drive opens (only once)
+    LaunchedEffect(activeTrack) {
+        val track = activeTrack
+        val existing = driveViewModel.currentEvent.value
+
+        if (track != null && existing == null) {
+            // Create a simple default event name for now
+            val defaultName = "Session - ${track.name}"
+
+            // Create the Event object
+            val newEvent = Event(
+                id = System.currentTimeMillis(),
+                name = defaultName,
+                trackId = track.id,
+                trackName = track.name,
+                createdUtcMs = System.currentTimeMillis()
+            )
+
+            // Tell DriveViewModel to activate it
+            driveViewModel.startEvent(newEvent)
+        }
+    }
+
 
 
     // === GPS values ===
@@ -295,6 +325,11 @@ fun GGScreen(
                         modifier = Modifier.padding(12.dp)
                     )
                 }
+
+                val event = driveViewModel.currentEvent.collectAsState().value
+
+                Text("Event: ${event?.name ?: "(none)"}")
+
 
                 Text(
                     text = "GPS: ${"%.6f".format(gpsLat)}, ${"%.6f".format(gpsLon)}",

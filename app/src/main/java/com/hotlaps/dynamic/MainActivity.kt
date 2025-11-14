@@ -23,6 +23,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hotlaps.dynamic.viewmodel.TrackSelectionViewModel
 import androidx.core.app.ActivityCompat
 import android.content.pm.PackageManager
+import com.hotlaps.dynamic.viewmodel.DriveViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
+
 
 
 
@@ -51,6 +54,10 @@ class MainActivity : ComponentActivity() {
                     // Create ONE shared ViewModel for the whole app
                     val trackSelectionViewModel: TrackSelectionViewModel = viewModel()
 
+                    // ViewModel that manages event recording & GPS/corner logic (later)
+                    val driveViewModel: DriveViewModel = viewModel()
+
+
                     NavHost(navController = nav, startDestination = "splash") {
 
                         composable("splash") {
@@ -75,7 +82,8 @@ class MainActivity : ComponentActivity() {
 
                         composable("drive") {
                             GGScreen(
-                                trackSelectionViewModel = trackSelectionViewModel
+                                trackSelectionViewModel = trackSelectionViewModel,
+                                driveViewModel = driveViewModel
                             )
                         }
 
