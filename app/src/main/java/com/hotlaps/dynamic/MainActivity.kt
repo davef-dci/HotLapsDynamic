@@ -21,12 +21,28 @@ import com.hotlaps.dynamic.model.Track
 import com.hotlaps.dynamic.ui.TrackManagerScreen
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hotlaps.dynamic.viewmodel.TrackSelectionViewModel
+import androidx.core.app.ActivityCompat
+import android.content.pm.PackageManager
+
 
 
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+// Ask for GPS permission if not granted
+        if (ActivityCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION),
+                1001
+            )
+        }
+
+
         setContent {
             MaterialTheme {
                 Surface {

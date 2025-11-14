@@ -47,6 +47,14 @@ import androidx.compose.ui.text.style.TextAlign
 import com.hotlaps.dynamic.viewmodel.TrackSelectionViewModel
 import androidx.compose.runtime.collectAsState
 
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.content.Context
+
+import androidx.core.app.ActivityCompat
+import android.content.pm.PackageManager
+
 
 
 
@@ -89,6 +97,11 @@ fun GGScreen(
         .collectAsState(initial = null)
 
 
+    // === GPS values ===
+    var gpsLat by remember { mutableStateOf(0.0) }
+    var gpsLon by remember { mutableStateOf(0.0) }
+
+
 // 1) Register a sensor listener (Linear Acceleration preferred)
     val ctx = LocalContext.current
     DisposableEffect(Unit) {
@@ -113,6 +126,38 @@ fun GGScreen(
 
         onDispose {
             mgr.unregisterListener(listener)
+        }
+    }
+
+
+    // 2) GPS Location Updates  ← A.3 goes here
+    DisposableEffect(Unit) {
+        val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+
+        val listener = LocationListener { loc ->
+            gpsLat = loc.latitude
+            gpsLon = loc.longitude
+        }
+
+        try {
+            if (
+                ActivityCompat.checkSelfPermission(ctx, android.Manifest.permission.ACCESS_FINE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED
+            ) {
+                lm.requestLocationUpdates(
+                    LocationManager.GPS_PROVIDER,
+                    200L,
+                    0f,
+                    listener
+                )
+            }
+
+        } catch (e: SecurityException) {
+            e.printStackTrace()
+        }
+
+        onDispose {
+            lm.removeUpdates(listener)
         }
     }
 
@@ -143,6 +188,8 @@ fun GGScreen(
             ticks++
         }
     }
+
+
 
 
     Scaffold(
@@ -248,6 +295,12 @@ fun GGScreen(
                         modifier = Modifier.padding(12.dp)
                     )
                 }
+
+                Text(
+                    text = "GPS: ${"%.6f".format(gpsLat)}, ${"%.6f".format(gpsLon)}",
+                    fontSize = 18.sp,
+                    modifier = Modifier.padding(8.dp)
+                )
 
 
             }
