@@ -148,6 +148,14 @@ fun GGScreen(
         gpsLonDeg = vmGpsLon
     )
 
+    // 🚨 Safety net: if we have a track but no event, start one
+    LaunchedEffect(activeTrack, currentEvent) {
+        if (activeTrack != null && currentEvent == null) {
+            driveViewModel.startEvent(context, activeTrack!!)
+            Log.d("CornerFSM", "Auto-started event from GGScreen for track=${activeTrack!!.name}")
+        }
+    }
+
 
     // Auto-start a new event when Drive opens (only once per track selection)
     LaunchedEffect(activeTrack) {
@@ -558,16 +566,7 @@ fun GGScreen(
                                     Text("Teleport INSIDE corner 1")
                                 }
 
-                                // Teleport far away from corner 1 (well outside trigger radius)
-                                Button(
-                                    onClick = {
-                                        val farLat = firstCorner.lat + 0.02  // ~2 km north-ish
-                                        val farLon = firstCorner.lon
-                                        driveViewModel.updateGps(farLat, farLon)
-                                    }
-                                ) {
-                                    Text("Teleport FAR away")
-                                }
+
                             } else {
                                 Text("GPS Simulation: (needs a track with at least one corner)")
                             }
