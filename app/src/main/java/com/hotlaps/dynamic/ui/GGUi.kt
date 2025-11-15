@@ -537,6 +537,41 @@ fun GGScreen(
                             Text("Event ID: ${currentEvent?.id ?: 0L}")
                             Text("Event name: ${currentEvent?.name ?: "(none)"}")
                             Text("TrackId on Event: ${currentEvent?.trackId ?: 0L}")
+
+                            Spacer(Modifier.height(12.dp))
+
+// Simple GPS simulation controls for desk testing
+                            if (t != null && firstCorner != null) {
+                                Text(
+                                    text = "GPS Simulation (Debug only)",
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(bottom = 4.dp)
+                                )
+
+                                // Teleport directly to corner 1 apex (inside trigger radius)
+                                Button(
+                                    onClick = {
+                                        driveViewModel.updateGps(firstCorner.lat, firstCorner.lon)
+                                    },
+                                    modifier = Modifier.padding(bottom = 4.dp)
+                                ) {
+                                    Text("Teleport INSIDE corner 1")
+                                }
+
+                                // Teleport far away from corner 1 (well outside trigger radius)
+                                Button(
+                                    onClick = {
+                                        val farLat = firstCorner.lat + 0.02  // ~2 km north-ish
+                                        val farLon = firstCorner.lon
+                                        driveViewModel.updateGps(farLat, farLon)
+                                    }
+                                ) {
+                                    Text("Teleport FAR away")
+                                }
+                            } else {
+                                Text("GPS Simulation: (needs a track with at least one corner)")
+                            }
+
                         }
                     }
                 }

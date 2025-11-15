@@ -12,6 +12,8 @@ import com.hotlaps.dynamic.data.EventStorage
 import com.hotlaps.dynamic.model.CornerVisit
 
 import android.content.Context
+import android.util.Log
+
 
 
 
@@ -83,6 +85,9 @@ class DriveViewModel : ViewModel() {
         activeVisitNumber = 0
         cornerVisitCounts.clear()
         cornerVisits.clear()
+
+        Log.d("DriveViewModel", "Event started: id=${event.id}, trackId=${event.trackId}, name=${event.name}")
+
     }
 
 
@@ -311,6 +316,12 @@ class DriveViewModel : ViewModel() {
      *   - Capturing stays Capturing (we'll add exit logic later)
      */
     fun updateCornerCaptureState(track: Track?) {
+        // Debug: prove this function is actually being called
+        Log.d(
+            "CornerFSM",
+            "tick: track=${track?.name}, eventId=${_currentEvent.value?.id}, gps=(${gpsLat.value}, ${gpsLon.value})"
+        )
+
         // If there's no active event, we don't capture anything
         val event = _currentEvent.value ?: return
 
@@ -335,13 +346,15 @@ class DriveViewModel : ViewModel() {
                 activeVisitNumber = newVisitNumber
                 cornerCaptureState = CornerCaptureState.Capturing
 
-                // For now, treat the instant we enter the trigger radius as apex/start/end.
-                // We'll refine these times later using capture-before / capture-after windows.
-                val nowUtc = System.currentTimeMillis()
-                val eventId = event.id
+                Log.d(
+                    "CornerFSM",
+                    "Started capturing corner=$cornerIndex visit=$newVisitNumber, distanceM=${"%.1f".format(distanceM)}"
+                )
 
+                // For now, treat the instant we enter the trigger radius as apex/start/end.
+                val nowUtc = System.currentTimeMillis()
                 val visit = CornerVisit(
-                    eventId = eventId,
+                    eventId = event.id,
                     cornerIndex = cornerIndex,
                     visitNumber = newVisitNumber,
                     startUtcMs = nowUtc,
@@ -352,14 +365,9 @@ class DriveViewModel : ViewModel() {
                 cornerVisits.add(visit)
             }
 
-
             CornerCaptureState.Capturing -> {
-                val event = _currentEvent.value ?: return
-
                 val cornerIndex = activeCornerIndex ?: return
                 val visitNumber = activeVisitNumber
-
-                // If we somehow don't have a visit number, bail
                 if (visitNumber <= 0) return
 
                 // Look up this corner's lat/lon in the track
@@ -400,14 +408,22 @@ class DriveViewModel : ViewModel() {
                     cornerVisits[idx] = oldVisit.copy(endUtcMs = nowUtc)
                 }
 
+                val sampleCountForVisit = _samples.count {
+                    it.cornerIndex == cornerIndex && it.visitNumber == visitNumber
+                }
+                Log.d(
+                    "CornerFSM",
+                    "Stopped capturing corner=$cornerIndex visit=$visitNumber at nowUtc=$nowUtc, samplesForVisit=$sampleCountForVisit"
+                )
+
                 // Reset active capture state
                 cornerCaptureState = CornerCaptureState.Idle
                 activeCornerIndex = null
                 activeVisitNumber = 0
             }
-
         }
     }
+
 
 
     /**
