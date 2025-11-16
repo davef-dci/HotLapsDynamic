@@ -18,6 +18,7 @@ import android.util.Log
 
 
 
+
 /**
  * Holds all Drive-mode state:
  *  - Current Event (if any)
@@ -28,6 +29,13 @@ import android.util.Log
  *  - Logic for writing EventSamples (later)
  */
 class DriveViewModel : ViewModel() {
+
+    private lateinit var appContext: Context
+
+    fun setAppContext(context: Context) {
+        appContext = context.applicationContext
+    }
+
 
     private enum class CornerCaptureState {
         Idle,
@@ -185,6 +193,12 @@ class DriveViewModel : ViewModel() {
             zG = z,
             gSum = gSum
         )
+
+        if (::appContext.isInitialized) {
+            EventStorage.appendSample(appContext, sample)
+        } else {
+            Log.w("DriveViewModel", "appendSample: appContext not initialized yet")
+        }
 
         addSample(sample)
     }

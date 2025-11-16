@@ -19,22 +19,9 @@ object EventStorage {
     // -----------------------
     // Directory management
     // -----------------------
-    private fun eventsDir(context: Context): File? {
-        val base = context.getExternalFilesDir(null)
-        if (base == null) {
-            Log.e(TAG, "eventsDir: getExternalFilesDir(null) returned null")
-            return null
-        }
+    private fun eventsDir(context: Context): File? =
+        FileHelper.eventsDir(context)
 
-        val dir = File(base, "events")
-        if (!dir.exists()) {
-            if (!dir.mkdirs()) {
-                Log.e(TAG, "eventsDir: failed to create ${dir.absolutePath}")
-                return null
-            }
-        }
-        return dir
-    }
 
     // -----------------------
     // Event creation
@@ -54,12 +41,50 @@ object EventStorage {
     }
 
     // -----------------------
-    // Append a sample (not implemented yet)
-    // -----------------------
+// Append a sample (CSV per event)
+// -----------------------
     fun appendSample(context: Context, sample: EventSample) {
-        // Implementation comes later
-        // (write a row of CSV or binary to event_<id>.csv)
+        val dir = eventsDir(context) ?: return
+
+        // One CSV file per event:
+        //   event_<eventId>.csv
+        val file = File(dir, "event_${sample.eventId}.csv")
+        val isNewFile = !file.exists()
+
+        try {
+            // If it's a brand-new file, write a header row first.
+            if (isNewFile) {
+                file.appendText(
+                    "intervalMs,utcMs,cornerIndex,visitNumber,longG,latG,zG,gSum\n"
+                )
+            }
+
+            // Write one CSV line for this sample
+            val line = buildString {
+                append(sample.intervalMs)
+                append(',')
+                append(sample.utcMs)
+                append(',')
+                append(sample.cornerIndex)
+                append(',')
+                append(sample.visitNumber)
+                append(',')
+                append(sample.longG)
+                append(',')
+                append(sample.latG)
+                append(',')
+                append(sample.zG)
+                append(',')
+                append(sample.gSum)
+                append('\n')
+            }
+
+            file.appendText(line)
+        } catch (e: Exception) {
+            Log.e(TAG, "appendSample: error writing sample for event ${sample.eventId}", e)
+        }
     }
+
 
     // -----------------------
     // (Future) Load an event file
@@ -68,4 +93,62 @@ object EventStorage {
         // Implementation comes later
         return emptyList()
     }
+
+
+    // -----------------------
+    // Housekeeping helpers
+    // -----------------------
+
+    /**
+     * Delete all files in the events directory.
+     *
+     * @return number of files successfully deleted.
+     */
+    fun deleteAllEvents(context: Context): Int {
+        val dir = eventsDir(context) ?: return 0
+        val files = dir.listFiles() ?: return 0
+
+        var deleted = 0
+        for (f in files) {
+            if (f.isFile && f.delete()) {
+                deleted++
+            }
+        }
+        Log.d(TAG, "deleteAllEvents: deleted $deleted file(s) from ${dir.absolutePath}")
+        return deleted
+    }
+
+    /**
+     * Copies all event files from the app-private directory into:
+     *    /Download/HotLapsDynamic/events/
+     *
+     * Returns the number of files successfully copied.
+     */
+    fun exportAllEventsToPublicDownloads(context: Context): Int {
+        val srcDir = eventsDir(context) ?: return 0
+        val dstDir = FileHelper.publicEventsExportDir() ?: return 0
+
+        val files = srcDir.listFiles() ?: return 0
+        var copied = 0
+
+        for (src in files) {
+            if (!src.isFile) continue
+
+            val dst = java.io.File(dstDir, src.name)
+            try {
+                src.copyTo(dst, overwrite = true)
+                copied++
+            } catch (e: Exception) {
+                Log.e(TAG, "exportAllEvents: failed copying ${src.name}", e)
+            }
+        }
+
+        Log.d(
+            TAG,
+            "exportAllEvents: copied $copied file(s) to ${dstDir.absolutePath}"
+        )
+        return copied
+    }
+
+
 }

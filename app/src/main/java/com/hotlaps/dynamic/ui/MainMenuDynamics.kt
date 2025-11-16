@@ -101,10 +101,11 @@ fun MainMenuDynamics(
 
         // Event Manager
         BigButton(
-            text = "Event Manager (coming soon)",
-            onClick = {},
-            enabled = false
+            text = "Event Manager",
+            onClick = onEventManager,
+            enabled = true
         )
+
 
         Spacer(Modifier.height(16.dp))
 

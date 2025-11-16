@@ -26,6 +26,8 @@ import android.content.pm.PackageManager
 import com.hotlaps.dynamic.viewmodel.DriveViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.LaunchedEffect
+
 
 
 
@@ -58,6 +60,12 @@ class MainActivity : ComponentActivity() {
 
                     // ViewModel that manages event recording & GPS/corner logic (later)
                     val driveViewModel: DriveViewModel = viewModel()
+
+                    val context = LocalContext.current
+
+                    LaunchedEffect(Unit) {
+                        driveViewModel.setAppContext(context)
+                    }
 
 
                     NavHost(navController = nav, startDestination = "splash") {
