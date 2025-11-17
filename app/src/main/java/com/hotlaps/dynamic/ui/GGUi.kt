@@ -247,7 +247,7 @@ fun GGScreen(
         val alpha = 0.25f  // smoothing (0=noise, 1=raw)
 
         while (true) {
-            kotlinx.coroutines.delay(100)
+            kotlinx.coroutines.delay(20)
 
             // Map device axes to our G-G:
             val latNow  = (latestX / g)               // +right, -left

@@ -34,13 +34,21 @@ fun CalibrateScreen(onBack: () -> Unit) {
     var collected by remember { mutableStateOf(0) }
     var status by remember { mutableStateOf("Ready to calibrate") }
     var forwardVec by remember { mutableStateOf<FloatArray?>(null) }
-    var hasLinearAccel by remember { mutableStateOf(false) }
 
-    // EMA smoothing (light)
+    var hasLinearAccel by remember { mutableStateOf(false) }
+    var usingAccelFallback by remember { mutableStateOf(false) }
+
+    // EMA smoothing (for linear accel)
     var sX by remember { mutableStateOf(0f) }
     var sY by remember { mutableStateOf(0f) }
     var sZ by remember { mutableStateOf(0f) }
     val alpha = 0.20f
+
+    // Gravity estimate (for accelerometer fallback)
+    var gX by remember { mutableStateOf(0f) }
+    var gY by remember { mutableStateOf(0f) }
+    var gZ by remember { mutableStateOf(0f) }
+    val gravityAlpha = 0.10f   // slower; tracks gravity not quick throttle blips
 
     // sample buffers
     val xs = remember { mutableStateListOf<Float>() }
@@ -51,15 +59,48 @@ fun CalibrateScreen(onBack: () -> Unit) {
     DisposableEffect(collecting) {
         val sm = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
         val lin = sm.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
-        hasLinearAccel = lin != null
+        val accel = sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+
+        val usingLinear = lin != null
+        hasLinearAccel = usingLinear
+        usingAccelFallback = !usingLinear && accel != null
+
+        val sensorToUse: Sensor? = when {
+            usingLinear -> lin
+            accel != null -> accel
+            else -> null
+        }
 
         val listener = object : SensorEventListener {
             override fun onSensorChanged(e: SensorEvent) {
-                if (!collecting || e.sensor.type != Sensor.TYPE_LINEAR_ACCELERATION) return
+                if (!collecting) return
+                if (sensorToUse == null) return
+
+                if (usingLinear && e.sensor.type != Sensor.TYPE_LINEAR_ACCELERATION) return
+                if (!usingLinear && e.sensor.type != Sensor.TYPE_ACCELEROMETER) return
+
+                val rawX = e.values[0]
+                val rawY = e.values[1]
+                val rawZ = e.values[2]
+
+                // Get linear acceleration: direct from sensor if we have it,
+                // otherwise derive from accelerometer by subtracting gravity estimate.
+                val (linX, linY, linZ) =
+                    if (usingLinear) {
+                        Triple(rawX, rawY, rawZ)
+                    } else {
+                        // Update gravity low-pass
+                        gX = ema(gX, rawX, gravityAlpha)
+                        gY = ema(gY, rawY, gravityAlpha)
+                        gZ = ema(gZ, rawZ, gravityAlpha)
+                        // High-pass: accel - gravity
+                        Triple(rawX - gX, rawY - gY, rawZ - gZ)
+                    }
+
                 // Smooth for stability
-                sX = ema(sX, e.values[0], alpha)
-                sY = ema(sY, e.values[1], alpha)
-                sZ = ema(sZ, e.values[2], alpha)
+                sX = ema(sX, linX, alpha)
+                sY = ema(sY, linY, alpha)
+                sZ = ema(sZ, linZ, alpha)
 
                 xs.add(sX); ys.add(sY); zs.add(sZ)
                 collected = xs.size
@@ -80,11 +121,16 @@ fun CalibrateScreen(onBack: () -> Unit) {
                         "Calibration failed; try again."
                 }
             }
+
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
         }
 
-        if (collecting && lin != null) {
-            sm.registerListener(listener, lin, SensorManager.SENSOR_DELAY_GAME)
+        if (collecting && sensorToUse != null) {
+            sm.registerListener(
+                listener,
+                sensorToUse,
+                SensorManager.SENSOR_DELAY_GAME
+            )
         }
         onDispose { sm.unregisterListener(listener) }
     }
@@ -118,10 +164,17 @@ fun CalibrateScreen(onBack: () -> Unit) {
                 lineHeight = 20.sp
             )
 
-            if (!hasLinearAccel) {
+            val modeText = when {
+                hasLinearAccel -> "Using linear acceleration sensor"
+                usingAccelFallback -> "Linear accel not available; using accelerometer fallback"
+                else -> "No suitable acceleration sensor found"
+            }
+            Text(modeText, style = MaterialTheme.typography.bodySmall)
+
+            if (!hasLinearAccel && !usingAccelFallback) {
                 Text(
-                    "Your device doesn’t report linear acceleration. " +
-                            "You can still race using manual axis/flip (add later in Settings).",
+                    "Your device doesn’t report usable acceleration sensors. " +
+                            "Calibration may not work on this device.",
                     color = MaterialTheme.colorScheme.error
                 )
             }
@@ -142,6 +195,11 @@ fun CalibrateScreen(onBack: () -> Unit) {
                         collected = 0
                         forwardVec = null
                         status = "Collecting… 0 / $samplesTarget"
+
+                        // Reset filters
+                        sX = 0f; sY = 0f; sZ = 0f
+                        gX = 0f; gY = 0f; gZ = 0f
+
                         collecting = true
                     }
                 ) { Text("Start Calibration") }
