@@ -73,6 +73,20 @@ import kotlinx.coroutines.launch
 
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+
+import com.hotlaps.dynamic.data.CalibRepo
+import com.hotlaps.dynamic.data.CalibState
+
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.runtime.DisposableEffect
+
+
 
 
 
@@ -83,6 +97,20 @@ fun GGScreen(
     trackSelectionViewModel: TrackSelectionViewModel,
     driveViewModel: DriveViewModel
 ) {
+
+    // Keep screen on while this Composable is visible
+    val view = LocalView.current
+    DisposableEffect(Unit) {
+        val oldFlag = view.keepScreenOn
+        view.keepScreenOn = true
+        onDispose {
+            view.keepScreenOn = oldFlag
+        }
+    }
+
+
+
+
     // === Read Settings (same pattern as SettingsScreen) ===
     val context = LocalContext.current
     val repo = remember(context) { SettingsRepo(context) }
@@ -112,7 +140,23 @@ fun GGScreen(
         .selectedTrack
         .collectAsState(initial = null)
 
+    val sensorManager = remember(context) {
+        context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+    }
 
+    // Calibration repo + current state (forward unit vector)
+    val calibRepo = remember(context) { CalibRepo(context) }
+    val calibState by calibRepo.state
+        .collectAsStateWithLifecycle(initialValue = CalibState(vec = null, savedAtEpochMs = null))
+
+    // Latest sensor readings
+    var latestAccelX by remember { mutableStateOf(0f) }
+    var latestAccelY by remember { mutableStateOf(0f) }
+    var latestAccelZ by remember { mutableStateOf(0f) }
+
+    var latestGravX by remember { mutableStateOf(0f) }
+    var latestGravY by remember { mutableStateOf(0f) }
+    var latestGravZ by remember { mutableStateOf(0f) }
 
     // === GPS values in the screen (local copy) ===
     var gpsLat by remember { mutableStateOf(0.0) }
@@ -179,29 +223,50 @@ fun GGScreen(
 
     // 1) Register a sensor listener (Linear Acceleration preferred)
     val ctx = LocalContext.current
+    // --- Sensor listener: linear accel + gravity (no projection here yet) ---
     DisposableEffect(Unit) {
-        val mgr = ctx.getSystemService(Context.SENSOR_SERVICE) as android.hardware.SensorManager
-        val lin = mgr.getDefaultSensor(android.hardware.Sensor.TYPE_LINEAR_ACCELERATION)
-        val listener = object : android.hardware.SensorEventListener {
-            override fun onSensorChanged(e: android.hardware.SensorEvent) {
-                // Android axes: +X is screen-right, +Y is screen-down.
-                // If the tablet top edge points forward in the car:
-                //  • Lateral G  ≈  +X / g  (right = +, left = -)
-                //  • Longitudinal G ≈  -Y / g  (accel up = +, brake = -)
-                latestX = e.values[0]
-                latestY = e.values[1]
+        val lin = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
+        val grav = sensorManager.getDefaultSensor(Sensor.TYPE_GRAVITY)
+
+        val listener = object : SensorEventListener {
+            override fun onSensorChanged(e: SensorEvent) {
+                when (e.sensor.type) {
+                    Sensor.TYPE_LINEAR_ACCELERATION -> {
+                        latestAccelX = e.values[0]
+                        latestAccelY = e.values[1]
+                        latestAccelZ = e.values[2]
+                    }
+                    Sensor.TYPE_GRAVITY -> {
+                        latestGravX = e.values[0]
+                        latestGravY = e.values[1]
+                        latestGravZ = e.values[2]
+                    }
+                }
             }
-            override fun onAccuracyChanged(s: android.hardware.Sensor?, a: Int) {}
+
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
         }
 
         if (lin != null) {
-            mgr.registerListener(listener, lin, android.hardware.SensorManager.SENSOR_DELAY_GAME)
+            sensorManager.registerListener(
+                listener,
+                lin,
+                SensorManager.SENSOR_DELAY_GAME
+            )
+        }
+        if (grav != null) {
+            sensorManager.registerListener(
+                listener,
+                grav,
+                SensorManager.SENSOR_DELAY_GAME
+            )
         }
 
         onDispose {
-            mgr.unregisterListener(listener)
+            sensorManager.unregisterListener(listener)
         }
     }
+
 
     // 2) GPS Location Updates
     DisposableEffect(Unit) {
@@ -240,36 +305,83 @@ fun GGScreen(
     }
 
     // 3) 10 Hz publisher: convert to g's + small EMA smoothing, then tick
-    LaunchedEffect(Unit) {
-        val g = android.hardware.SensorManager.GRAVITY_EARTH // 9.80665 m/s^2
+    // --- 10 Hz loop: project sensors into calibrated car axes, smooth, and publish ---
+    LaunchedEffect(calibState.vec) {
+        val g = SensorManager.GRAVITY_EARTH           // 9.80665 m/s^2
+        val tauMs = 600.0f                       // EMA time constant (~0.5 s) 500.0f
+
         var latEma = 0f
-        var lonEma = 0f
-        val alpha = 0.25f  // smoothing (0=noise, 1=raw)
+        var longEma = 0f
+        var lastUpdateMs = System.currentTimeMillis()
 
         while (true) {
-            kotlinx.coroutines.delay(20)
+            kotlinx.coroutines.delay(50) // ~20 Hz world tick
 
-            // Map device axes to our G-G:
-            val latNow  = (latestX / g)               // +right, -left
-            val longNow = (-latestY / g)              // +accel, -brake
+            // Pick forward vector: use calibration if present, else guess
+            val forward = normalize3(
+                calibState.vec?.getOrNull(0) ?: 0f,
+                calibState.vec?.getOrNull(1) ?: -1f,   // assume -Y is forward if no calib
+                calibState.vec?.getOrNull(2) ?: 0f
+            ) ?: floatArrayOf(0f, -1f, 0f)
 
-            // EMA smooth
-            latEma  = alpha * latNow  + (1 - alpha) * latEma
-            lonEma  = alpha * longNow + (1 - alpha) * lonEma
+            // Gravity vector → "down" direction
+            val down = normalize3(latestGravX, latestGravY, latestGravZ)
+                ?: floatArrayOf(0f, 0f, 1f)
 
-            latG  = latEma
-            longG = lonEma
+            // "Up" is opposite of gravity
+            val up = floatArrayOf(-down[0], -down[1], -down[2])
 
+            // Right = up × forward (lateral axis)
+            val rightRaw = cross(up, forward)
+            val right = normalize3(rightRaw[0], rightRaw[1], rightRaw[2])
+                ?: floatArrayOf(1f, 0f, 0f)
+
+            // Current linear acceleration vector
+            val ax = latestAccelX
+            val ay = latestAccelY
+            val az = latestAccelZ
+
+            val longMs2 = dot3(ax, ay, az, forward[0], forward[1], forward[2])
+            val latMs2  = dot3(ax, ay, az, right[0], right[1], right[2])
+
+            val longNow = longMs2 / g       // + = accel, - = brake
+            val latNow  = latMs2 / g        // + = right, - = left
+
+            // 1) Clamp crazy spikes
+            val G_CLAMP = 2.0f            // +/- 3g should be plenty
+            val longClamped = longNow.coerceIn(-G_CLAMP, G_CLAMP)
+            val latClamped  = latNow.coerceIn(-G_CLAMP, G_CLAMP)
+
+            // 2) Time-aware EMA on clamped values
+            val nowMs = System.currentTimeMillis()
+            val dtMs = (nowMs - lastUpdateMs).coerceAtLeast(1L)
+            lastUpdateMs = nowMs
+
+            val alpha = 1f - kotlin.math.exp(-dtMs.toFloat() / tauMs)
+
+            val longEmaNew = longEma + alpha * (longClamped - longEma)
+            val latEmaNew  = latEma  + alpha * (latClamped  - latEma)
+
+            // 3) Deadband to keep “coast” from jittering
+            val DEAD_BAND_G = 0.04f       // tweak; ~0.03–0.05g works well
+
+            val longSmooth = if (kotlin.math.abs(longEmaNew) < DEAD_BAND_G) 0f else longEmaNew
+            val latSmooth  = if (kotlin.math.abs(latEmaNew)  < DEAD_BAND_G) 0f else latEmaNew
+
+            longEma = longEmaNew
+            latEma  = latEmaNew
+
+            longG = longSmooth
+            latG  = latSmooth
+
+            // Feed into ViewModel, just like before
             driveViewModel.updateGForces(latG, longG)
-
-            // record a sample (only works when an Event is active)
             driveViewModel.recordCurrentSample()
-
-            // NEW: update corner state machine based on current GPS + track
             driveViewModel.updateCornerCaptureState(activeTrack)
 
             ticks++
         }
+
     }
 
     // --- Pager state for swipeable Drive / Debug pages ---
@@ -647,7 +759,7 @@ private fun GGPlot(
         }
 
         // Center dot
-        drawCircle(Color.White.copy(alpha = 0.7f), 5f, Offset(cx, cy))
+       // drawCircle(Color.White.copy(alpha = 0.7f), 5f, Offset(cx, cy))
 
 
 
@@ -690,7 +802,7 @@ private fun GGPlot(
                 Color(0xFFDC2626)   // brake = red
 
             // Make it wider than the thin axis line
-            val stroke = 36f
+            val stroke = 6f
 
             // Draw from center toward the correct direction
             if (longG >= 0f) {
@@ -727,7 +839,7 @@ private fun GGPlot(
                 Color(0xFFA855F7)   // left = violet
 
             // Same width as vertical bar
-            val stroke = 16f
+            val stroke = 6f
 
             // Small deadband to avoid “blob” at center when tiny |g|
             val minLenPx = stroke * 0.6f      // tweak if you like
@@ -1137,3 +1249,23 @@ private fun PeakItem(
         )
     }
 }
+
+
+private fun normalize3(x: Float, y: Float, z: Float): FloatArray? {
+    val mag = kotlin.math.sqrt(x * x + y * y + z * z)
+    if (mag < 1e-4f) return null
+    return floatArrayOf(x / mag, y / mag, z / mag)
+}
+
+private fun dot3(ax: Float, ay: Float, az: Float, bx: Float, by: Float, bz: Float): Float {
+    return ax * bx + ay * by + az * bz
+}
+
+private fun cross(a: FloatArray, b: FloatArray): FloatArray {
+    return floatArrayOf(
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0]
+    )
+}
+

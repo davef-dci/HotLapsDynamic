@@ -112,7 +112,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 modifier = Modifier.fillMaxWidth(),
-                supportingText = { Text("Enter 0.2 to 2.0 G (e.g., 1.3)") }
+                supportingText = { Text("Enter 0.1 to 2.0 G (e.g., 1.3)") }
             )
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -121,7 +121,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                     if (v == null) {
                         status = "Please enter a valid number"
                     } else {
-                        val clamped = v.coerceIn(0.2f, 2.0f)
+                        val clamped = v.coerceIn(0.1f, 2.0f)
                         ggMaxText = "%.1f".format(clamped)
                         scope.launch {
                             repo.updateGgMaxG(clamped)
