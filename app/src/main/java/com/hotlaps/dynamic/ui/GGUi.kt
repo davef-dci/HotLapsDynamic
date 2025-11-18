@@ -139,11 +139,6 @@ fun GGScreen(
     var latestY by remember { mutableStateOf(0f) }
     // (We ignore Z for the G-G plot)
 
-    var peakLongAccel  by remember { mutableStateOf(0f) }  // +long
-    var peakLongBrake  by remember { mutableStateOf(0f) }  // |-long|
-    var peakRightAccel by remember { mutableStateOf(0f) }  // +lat
-    var peakLeftAccel  by remember { mutableStateOf(0f) }  // |-lat|
-
     // === Moving-average smoothing for G-G plot ===
     var smoothingSamples by remember { mutableStateOf(10) }  // user-adjustable
     val ma = remember { MovingAverage2D(smoothingSamples) }
@@ -632,12 +627,6 @@ fun GGScreen(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .aspectRatio(1f),
-                                    onPeaks = { longMax, longBrakeMax, rightMax, leftMax ->
-                                        peakLongAccel  = longMax
-                                        peakLongBrake  = longBrakeMax
-                                        peakRightAccel = rightMax
-                                        peakLeftAccel  = leftMax
-                                    }
                                 )
 
                                 Spacer(Modifier.height(8.dp))
@@ -645,20 +634,7 @@ fun GGScreen(
 
 
 
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    PeakItem("Max Long Accel",   peakLongAccel,  Color(0xFF16A34A), Modifier.weight(1f))
-                                    PeakItem("Max Long Braking", peakLongBrake,  Color(0xFFDC2626), Modifier.weight(1f))
-                                }
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    PeakItem("Max Right Accel",  peakRightAccel, Color(0xFFF59E0B), Modifier.weight(1f))
-                                    PeakItem("Max Left Accel",   peakLeftAccel,  Color(0xFFA855F7), Modifier.weight(1f))
-                                }
+
                             }
                         }
                     }
@@ -1338,28 +1314,7 @@ fun DrawScope.drawGgLabels() {
 }
 
 
-@Composable
-private fun PeakItem(
-    label: String,
-    valueG: Float,
-    color: Color,
-    modifier: Modifier = Modifier
-) {
-    Column(modifier = modifier) {
-        Text(
-            text = label,
-            fontSize = 14.sp,
-            color = Color(0xFF6B7280) // gray-500
-        )
-        Text(
-            text = String.format("%.2f g", valueG),
-            fontSize = 22.sp,
-            fontWeight = FontWeight.Bold,
-            color = color,
-            maxLines = 1
-        )
-    }
-}
+
 
 
 private fun normalize3(x: Float, y: Float, z: Float): FloatArray? {
