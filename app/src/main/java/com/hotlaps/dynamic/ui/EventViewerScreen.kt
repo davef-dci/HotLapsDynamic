@@ -1,5 +1,6 @@
 package com.hotlaps.dynamic.ui
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -20,6 +21,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import java.io.File
 
 
@@ -133,8 +135,45 @@ fun EventViewerScreen(
             }
 
 
+            Spacer(Modifier.height(24.dp))
+
+            // --- NEW: Show a GG plot placeholder when we have a selected event ---
+            if (selectedFile != null && samplesForSelected.isNotEmpty()) {
+                Text(
+                    text = "G-G Plot (entire event):",
+                    style = MaterialTheme.typography.titleSmall
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                SimpleGGPlot()
+            }
+
+
+
+
 
         }
 
+    }
+}
+
+
+// --- NEW: Very simple GG plot placeholder ---
+// For now this just draws a box and a label. We'll add real plotting logic next.
+@Composable
+fun SimpleGGPlot() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(1f)           // square box, like a GG circle
+            .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+            .padding(8.dp)
+    ) {
+        Text(
+            text = "GG plot will go here",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.align(Alignment.Center)
+        )
     }
 }
