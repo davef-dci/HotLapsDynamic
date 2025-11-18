@@ -97,6 +97,10 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.collectAsState
+
+
 
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -204,38 +208,8 @@ fun GGScreen(
         gpsLonDeg = vmGpsLon
     )
 
-    /* comment out after adding record buttons
-    // 🚨 Safety net: if we have a track but no event, start one
-    LaunchedEffect(activeTrack, currentEvent) {
-        if (activeTrack != null && currentEvent == null) {
-            driveViewModel.startEvent(context, activeTrack!!)
-            Log.d("CornerFSM", "Auto-started event from GGScreen for track=${activeTrack!!.name}")
-        }
-    }
 
 
-     */
-
-
-    // Auto-start a new event when Drive opens (only once per track selection)
-    LaunchedEffect(activeTrack) {
-        val track = activeTrack
-        val existing = driveViewModel.currentEvent.value
-
-        if (track != null && existing == null) {
-            val defaultName = "Session - ${track.name}"
-            val now = System.currentTimeMillis()
-
-            val newEvent = Event(
-                id = now,
-                name = defaultName,
-                trackId = track.id,
-                trackName = track.name,
-                createdUtcMs = now
-            )
-
-        }
-    }
 
     // 1) Register a sensor listener (Linear Acceleration preferred)
     val ctx = LocalContext.current

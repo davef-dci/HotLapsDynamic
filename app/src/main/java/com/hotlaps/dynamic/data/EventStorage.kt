@@ -30,15 +30,18 @@ object EventStorage {
         val id = System.currentTimeMillis()  // simple unique ID
         val now = System.currentTimeMillis()
 
-        // Placeholder Event object
         return Event(
             id = id,
             name = name,
             trackId = trackId,
             trackName = trackName,
-            createdUtcMs = now
+            startTime = now,          // 👈 NEW: event start time
+            displayName = name,       // 👈 NEW: human-friendly name (same as name for now)
+            createdUtcMs = now,       // when event began
+            notes = null
         )
     }
+
 
     // -----------------------
 // Append a sample (CSV per event)
@@ -55,9 +58,10 @@ object EventStorage {
             // If it's a brand-new file, write a header row first.
             if (isNewFile) {
                 file.appendText(
-                    "intervalMs,utcMs,trackName,cornerIndex,visitNumber,longG,latG,zG,gSum\n"
+                    "intervalMs,utcMs,trackName,eventName,cornerIndex,visitNumber,latG,longG,zG,gSum\n"
                 )
             }
+
 
             // Write one CSV line for this sample
             val line = buildString {
@@ -65,21 +69,24 @@ object EventStorage {
                 append(',')
                 append(sample.utcMs)
                 append(',')
-                append(sample.trackName)   // NEW
+                append(sample.trackName)
+                append(',')
+                append(sample.eventName)
                 append(',')
                 append(sample.cornerIndex)
                 append(',')
                 append(sample.visitNumber)
                 append(',')
-                append(sample.longG)
+                append(sample.latG)   // lat first
                 append(',')
-                append(sample.latG)
+                append(sample.longG)  // then long
                 append(',')
                 append(sample.zG)
                 append(',')
                 append(sample.gSum)
                 append('\n')
             }
+
 
             file.appendText(line)
         } catch (e: Exception) {

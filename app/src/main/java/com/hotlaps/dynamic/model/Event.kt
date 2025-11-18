@@ -11,6 +11,8 @@ data class Event(
     val name: String,        // e.g. "Road America Test – Nov 2025"
     val trackId: Long,       // matches Track.id
     val trackName: String,   // matches Track.name
+    val startTime: Long,
+    val displayName: String = "",      // human-friendly name for the session
     val createdUtcMs: Long,  // when event began (UTC millis)
     val notes: String? = null
 )
@@ -43,6 +45,7 @@ data class EventSample(
 
     // NEW: track name
     val trackName: String = "",   // Event's track name; blank if no track
+    val eventName: String = ""    // Human-friendly event name
 
 )
 

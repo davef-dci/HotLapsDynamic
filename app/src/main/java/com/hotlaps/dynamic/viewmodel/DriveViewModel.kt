@@ -21,6 +21,10 @@ import com.hotlaps.dynamic.viewmodel.TrackSelectionViewModel
 import androidx.compose.runtime.collectAsState
 import com.hotlaps.dynamic.viewmodel.DriveViewModel
 
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
 
 
 
@@ -116,46 +120,31 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
 
 
 
-    fun startEvent(context: Context, track: Track) {
-        val eventName = "${track.name} – ${System.currentTimeMillis()}"
-        val event = EventStorage.createEvent(
-            context = context,
-            name = eventName,
-            trackId = track.id,
-            trackName = track.name
-        )
-        _currentEvent.value = event
 
-        // NEW: we are now actively recording
-        _recordingState.value = RecordingState.Recording
-
-        cornerCaptureState = CornerCaptureState.Idle
-        activeCornerIndex = null
-        activeVisitNumber = 0
-        cornerVisitCounts.clear()
-        cornerVisits.clear()
-        perCornerState.clear()   // <-- add this
-
-        Log.d("DriveViewModel", "Event started: id=${event.id}, trackId=${event.trackId}, name=${event.name}")
-
-    }
 
 
     // NEW: start an event even if no track is selected
     fun startManualEvent(context: Context, track: Track?) {
-        val baseName = track?.name ?: "Untitled"
-        val eventName = "$baseName – ${System.currentTimeMillis()}"
 
+        val baseName = track?.name ?: "Untitled"
+
+        // Create a friendly timestamp like "2025-11-18 13:42"
+        val now = System.currentTimeMillis()
+        val formatter = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
+        val formattedTime = formatter.format(Date(now))
+
+        // Human-friendly name
+        val eventName = "$baseName – $formattedTime"
+
+        // Let EventStorage generate the ID and timestamps
         val event = EventStorage.createEvent(
             context = context,
             name = eventName,
-            trackId = track?.id ?: 0L,      // 0 when no track
-            trackName = track?.name ?: ""   // blank when no track
+            trackId = track?.id ?: 0L,
+            trackName = track?.name ?: ""
         )
 
         _currentEvent.value = event
-
-        // NEW: we are now actively recording
         _recordingState.value = RecordingState.Recording
 
         // Reset any corner-related state
@@ -273,9 +262,12 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
                     (z * z)
         )
 
+        val eventNameForSample = event.displayName.ifBlank { event.name }
+
         val sample = EventSample(
             eventId = event.id,
             trackName = event.trackName,   // NEW: propagate track name into each row
+            eventName = eventNameForSample,   // NEW: event name
             cornerIndex = cornerIndex,
             visitNumber = visitNumber,
             intervalMs = intervalMs,
