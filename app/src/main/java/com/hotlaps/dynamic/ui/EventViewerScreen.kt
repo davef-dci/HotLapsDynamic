@@ -33,6 +33,12 @@ import androidx.compose.ui.unit.dp
 import kotlin.math.abs
 import kotlin.math.max
 
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+
+import androidx.compose.material3.Checkbox
+
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,6 +65,7 @@ fun EventViewerScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(24.dp)
+                .verticalScroll(rememberScrollState())
         ) {
 
             // --- NEW: Load event files from storage ---
@@ -73,6 +80,27 @@ fun EventViewerScreen(
                     EventStorage.loadSamplesFromCsv(file)
                 } ?: emptyList()
             }
+            // --- NEW: Detect distinct (cornerIndex, visitNumber) groups in the selected event ---
+            val cornerVisitGroups = remember(samplesForSelected) {
+                samplesForSelected
+                    // Only keep samples that are actually tagged to a corner visit
+                    .filter { it.cornerIndex > 0 && it.visitNumber > 0 }
+                    // Group by (cornerIndex, visitNumber)
+                    .groupBy { it.cornerIndex to it.visitNumber }
+                    // We only need the unique keys (the groups themselves)
+                    .keys
+                    // Sort nicely: by corner, then by visit number
+                    .sortedWith(
+                        compareBy<Pair<Int, Int>> { it.first }.thenBy { it.second }
+                    )
+            }
+
+            // --- NEW: Which (cornerIndex, visitNumber) groups are selected for plotting ---
+            var selectedCornerVisits by remember(cornerVisitGroups) {
+                // By default, select all corner/visit groups when they first appear
+                mutableStateOf(cornerVisitGroups.toSet())
+            }
+
 
 
 
@@ -89,12 +117,16 @@ fun EventViewerScreen(
                 style = MaterialTheme.typography.bodySmall
             )
 
+
+
+
             Spacer(Modifier.height(16.dp))
 
             // --- NEW: Show each event file name in a simple vertical list ---
-            LazyColumn {
-                items(eventFiles) { file ->
-                    // --- NEW: highlight the selected file and allow tapping ---
+            // --- FILE LIST ---
+// Simple column because the outer layout is already scrollable
+            Column {
+                eventFiles.forEach { file ->
                     val isSelected = (file == selectedFile)
 
                     Text(
@@ -108,53 +140,99 @@ fun EventViewerScreen(
                             }
                             .padding(vertical = 4.dp)
                     )
-
                     Spacer(Modifier.height(4.dp))
                 }
             }
 
+
             Spacer(Modifier.height(24.dp))
 
-            // --- NEW: Show a small preview of the selected event's samples ---
+            // --- CORNER/VISIT SUMMARY FOR SELECTED EVENT ---
             if (selectedFile != null) {
-                Text(
-                    text = "Sample preview (up to 5 rows):",
-                    style = MaterialTheme.typography.titleSmall
-                )
-
-                Spacer(Modifier.height(8.dp))
-
-                // Show up to the first 5 samples with basic fields
-                samplesForSelected.take(5).forEach { sample ->
+                if (cornerVisitGroups.isEmpty()) {
                     Text(
-                        text = "t=${sample.intervalMs}ms, latG=${sample.latG}, longG=${sample.longG}, " +
-                                "corner=${sample.cornerIndex}, visit=${sample.visitNumber}",
+                        text = "This event has no corner-tagged samples.",
                         style = MaterialTheme.typography.bodySmall
                     )
+                } else {
+                    Text(
+                        text = "Corner visits found (toggle to include in plot):",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+
                     Spacer(Modifier.height(4.dp))
+
+                    cornerVisitGroups.forEach { (cornerIdx, visitNum) ->
+                        val groupKey = cornerIdx to visitNum
+                        val isChecked = selectedCornerVisits.contains(groupKey)
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    // Toggle selection when row is tapped
+                                    selectedCornerVisits =
+                                        if (isChecked) {
+                                            selectedCornerVisits - groupKey
+                                        } else {
+                                            selectedCornerVisits + groupKey
+                                        }
+                                }
+                                .padding(vertical = 2.dp)
+                        ) {
+                            Checkbox(
+                                checked = isChecked,
+                                onCheckedChange = { checked ->
+                                    // Toggle selection when checkbox itself is tapped
+                                    selectedCornerVisits =
+                                        if (checked) {
+                                            selectedCornerVisits + groupKey
+                                        } else {
+                                            selectedCornerVisits - groupKey
+                                        }
+                                }
+                            )
+
+                            Text(
+                                text = "Corner $cornerIdx – Visit $visitNum",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
                 }
 
-                if (samplesForSelected.size > 5) {
-                    Text(
-                        text = "... (${samplesForSelected.size - 5} more samples)",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
+                Spacer(Modifier.height(16.dp))
             }
 
 
-            Spacer(Modifier.height(24.dp))
+            // --- NEW: Filter samples based on selected corner/visit groups ---
+            val samplesForPlot =
+                if (cornerVisitGroups.isNotEmpty() && selectedCornerVisits.isNotEmpty()) {
+                    val filtered = samplesForSelected.filter { sample ->
+                        // Only keep samples whose (cornerIndex, visitNumber) is selected
+                        selectedCornerVisits.contains(sample.cornerIndex to sample.visitNumber)
+                    }
 
-            // --- NEW: Show a GG plot placeholder when we have a selected event ---
-            if (selectedFile != null && samplesForSelected.isNotEmpty()) {
+                    // If filtering somehow yields nothing, fall back to all samples
+                    if (filtered.isNotEmpty()) filtered else samplesForSelected
+                } else {
+                    // If there are no corner groups, or none selected, just plot everything
+                    samplesForSelected
+                }
+
+
+
+
+// --- G-G PLOT FOR SELECTED EVENT ---
+            if (selectedFile != null && samplesForPlot.isNotEmpty()) {
                 Text(
-                    text = "G-G Plot (entire event):",
+                    text = "G-G Plot (selected corner visits):",
                     style = MaterialTheme.typography.titleSmall
                 )
-
                 Spacer(Modifier.height(8.dp))
-// Pass all samples for this event into the plot
-                SimpleGGPlot(samplesForSelected)
+
+                SimpleGGPlot(samplesForPlot)
             }
 
 
