@@ -221,6 +221,65 @@ object EventStorage {
     }
 
 
+    // --- NEW: Load all samples from a single event CSV file ---
+    fun loadSamplesFromCsv(file: File): List<EventSample> {
+        val result = mutableListOf<EventSample>()
+
+        try {
+            val lines = file.readLines()
+            if (lines.isEmpty()) return emptyList()
+
+            // First line is the header: skip it
+            for (i in 1 until lines.size) {
+                val line = lines[i]
+                if (line.isBlank()) continue
+
+                val parts = line.split(',')
+                if (parts.size < 10) {
+                    // Malformed row: skip it
+                    continue
+                }
+
+                // Header is:
+                // intervalMs,utcMs,trackName,eventName,cornerIndex,visitNumber,latG,longG,zG,gSum
+                val intervalMs   = parts[0].toLongOrNull() ?: continue
+                val utcMs        = parts[1].toLongOrNull() ?: continue
+                val trackName    = parts[2]
+                val eventName    = parts[3]
+                val cornerIndex  = parts[4].toIntOrNull() ?: 0
+                val visitNumber  = parts[5].toIntOrNull() ?: 0
+                val latG         = parts[6].toFloatOrNull() ?: 0f
+                val longG        = parts[7].toFloatOrNull() ?: 0f
+                val zG           = parts[8].toFloatOrNull() ?: 0f
+                val gSum         = parts[9].toFloatOrNull() ?: 0f
+
+                // We don't know the eventId from the file name here,
+                // so set it to 0 for now. For plotting, we don't need it.
+                val sample = EventSample(
+                    eventId = 0L,
+                    cornerIndex = cornerIndex,
+                    visitNumber = visitNumber,
+                    intervalMs = intervalMs,
+                    utcMs = utcMs,
+                    longG = longG,
+                    latG = latG,
+                    zG = zG,
+                    gSum = gSum,
+                    trackName = trackName,
+                    eventName = eventName
+                )
+
+                result.add(sample)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "loadSamplesFromCsv: error reading ${file.name}", e)
+            return emptyList()
+        }
+
+        return result
+    }
+
+
 
 
 }

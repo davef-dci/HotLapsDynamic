@@ -57,9 +57,27 @@ fun EventViewerScreen(
             // --- NEW: which event file the user has selected (if any) ---
             var selectedFile by remember { mutableStateOf<File?>(null) }
 
+            // --- NEW: Load samples for the currently selected file (or empty if none selected) ---
+            val samplesForSelected = remember(selectedFile) {
+                selectedFile?.let { file ->
+                    EventStorage.loadSamplesFromCsv(file)
+                } ?: emptyList()
+            }
+
+
 
             // --- NEW: Display simple status message ---
             Text("Found ${eventFiles.size} event file(s)")
+
+            // --- NEW: Show how many samples are in the selected event (if any) ---
+            Text(
+                text = if (selectedFile == null) {
+                    "No event selected"
+                } else {
+                    "Selected event has ${samplesForSelected.size} sample(s)"
+                },
+                style = MaterialTheme.typography.bodySmall
+            )
 
             Spacer(Modifier.height(16.dp))
 
@@ -84,6 +102,36 @@ fun EventViewerScreen(
                     Spacer(Modifier.height(4.dp))
                 }
             }
+
+            Spacer(Modifier.height(24.dp))
+
+            // --- NEW: Show a small preview of the selected event's samples ---
+            if (selectedFile != null) {
+                Text(
+                    text = "Sample preview (up to 5 rows):",
+                    style = MaterialTheme.typography.titleSmall
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                // Show up to the first 5 samples with basic fields
+                samplesForSelected.take(5).forEach { sample ->
+                    Text(
+                        text = "t=${sample.intervalMs}ms, latG=${sample.latG}, longG=${sample.longG}, " +
+                                "corner=${sample.cornerIndex}, visit=${sample.visitNumber}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(Modifier.height(4.dp))
+                }
+
+                if (samplesForSelected.size > 5) {
+                    Text(
+                        text = "... (${samplesForSelected.size - 5} more samples)",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+
 
 
         }
