@@ -5,6 +5,10 @@ import android.util.Log
 import com.hotlaps.dynamic.model.Event
 import com.hotlaps.dynamic.model.EventSample
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 /**
  * Responsible for saving and loading Event sessions.
@@ -58,34 +62,36 @@ object EventStorage {
             // If it's a brand-new file, write a header row first.
             if (isNewFile) {
                 file.appendText(
-                    "intervalMs,utcMs,trackName,eventName,cornerIndex,visitNumber,latG,longG,zG,gSum\n"
+                    "intervalMs,utcMs,localTime,trackName,eventName," +
+                            "cornerIndex,visitNumber,latG,longG,zG,gSum,gpsLat,gpsLon\n"
                 )
             }
 
 
+            val localTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+                .apply { timeZone = TimeZone.getDefault() }
+                .format(Date(sample.utcMs))
+
+
             // Write one CSV line for this sample
             val line = buildString {
-                append(sample.intervalMs)
-                append(',')
-                append(sample.utcMs)
-                append(',')
-                append(sample.trackName)
-                append(',')
-                append(sample.eventName)
-                append(',')
-                append(sample.cornerIndex)
-                append(',')
-                append(sample.visitNumber)
-                append(',')
-                append(sample.latG)   // lat first
-                append(',')
-                append(sample.longG)  // then long
-                append(',')
-                append(sample.zG)
-                append(',')
-                append(sample.gSum)
+                append(sample.intervalMs); append(',')
+                append(sample.utcMs); append(',')
+                append(localTime); append(',')
+                append(sample.trackName); append(',')
+                append(sample.eventName); append(',')
+                append(sample.cornerIndex); append(',')
+                append(sample.visitNumber); append(',')
+                append(sample.latG); append(',')
+                append(sample.longG); append(',')
+                append(sample.zG); append(',')
+                append(sample.gSum); append(',')
+                append(sample.gpsLat); append(',')
+                append(sample.gpsLon)
                 append('\n')
             }
+
+
 
 
             file.appendText(line)

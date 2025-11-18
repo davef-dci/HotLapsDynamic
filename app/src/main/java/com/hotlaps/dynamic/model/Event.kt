@@ -45,7 +45,11 @@ data class EventSample(
 
     // NEW: track name
     val trackName: String = "",   // Event's track name; blank if no track
-    val eventName: String = ""    // Human-friendly event name
+    val eventName: String = "",   // Human-friendly event name
+
+    // NEW: where we were when this sample was taken
+    val gpsLat: Double = 0.0,
+    val gpsLon: Double = 0.0
 
 )
 

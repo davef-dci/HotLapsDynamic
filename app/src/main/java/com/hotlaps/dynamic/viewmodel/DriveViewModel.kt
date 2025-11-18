@@ -276,7 +276,9 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
             longG = long,
             latG = lat,
             zG = z,
-            gSum = gSum
+            gSum = gSum,
+            gpsLat = gpsLat.value,   // NEW
+            gpsLon = gpsLon.value    // NEW
         )
 
         if (::appContext.isInitialized) {
