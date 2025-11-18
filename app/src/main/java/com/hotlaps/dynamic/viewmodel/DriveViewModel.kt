@@ -17,6 +17,10 @@ import android.util.Log
 import com.hotlaps.dynamic.util.MovingAverage2D
 import kotlin.math.abs
 
+import com.hotlaps.dynamic.viewmodel.TrackSelectionViewModel
+import androidx.compose.runtime.collectAsState
+import com.hotlaps.dynamic.viewmodel.DriveViewModel
+
 
 
 
@@ -41,6 +45,14 @@ class DriveViewModel : ViewModel() {
     private enum class CornerCaptureState {
         Idle,
         Capturing
+    }
+
+
+    // NEW: high-level recording state for the whole event
+    enum class RecordingState {
+        Idle,       // no event, not recording
+        Recording,  // actively writing samples
+        Paused      // event exists but samples are not being written
     }
 
     // Per-corner state for the corner detector
@@ -69,6 +81,10 @@ class DriveViewModel : ViewModel() {
     // Active driving event (null if not recording)
     private val _currentEvent = MutableStateFlow<Event?>(null)
     val currentEvent: StateFlow<Event?> get() = _currentEvent
+
+    // NEW: high-level recording state
+    private val _recordingState = MutableStateFlow(RecordingState.Idle)
+    val recordingState: StateFlow<RecordingState> get() = _recordingState
 
     // In-memory buffer of samples for the current Event.
 // (We'll later stream these to disk / export.)
@@ -109,6 +125,10 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
             trackName = track.name
         )
         _currentEvent.value = event
+
+        // NEW: we are now actively recording
+        _recordingState.value = RecordingState.Recording
+
         cornerCaptureState = CornerCaptureState.Idle
         activeCornerIndex = null
         activeVisitNumber = 0
@@ -121,9 +141,39 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
     }
 
 
-fun stopEvent() {
+    // NEW: start an event even if no track is selected
+    fun startManualEvent(context: Context, track: Track?) {
+        val baseName = track?.name ?: "Untitled"
+        val eventName = "$baseName – ${System.currentTimeMillis()}"
+
+        val event = EventStorage.createEvent(
+            context = context,
+            name = eventName,
+            trackId = track?.id ?: 0L,      // 0 when no track
+            trackName = track?.name ?: ""   // blank when no track
+        )
+
+        _currentEvent.value = event
+
+        // NEW: we are now actively recording
+        _recordingState.value = RecordingState.Recording
+
+        // Reset any corner-related state
+        cornerCaptureState = CornerCaptureState.Idle
+        activeCornerIndex = null
+        activeVisitNumber = 0
+        cornerVisitCounts.clear()
+        cornerVisits.clear()
+        perCornerState.clear()
+    }
+
+
+
+    fun stopEvent() {
     _currentEvent.value = null
     cornerCaptureState = CornerCaptureState.Idle
+    // NEW: not recording anymore
+    _recordingState.value = RecordingState.Idle
     activeCornerIndex = null
     activeVisitNumber = 0
     activeVisitStartUtcMs = 0L
@@ -131,10 +181,28 @@ fun stopEvent() {
     perCornerState.clear()
 }
 
+    fun pauseRecording() {
+        if (_recordingState.value == RecordingState.Recording) {
+            _recordingState.value = RecordingState.Paused
+        }
+    }
+
+    fun resumeRecording() {
+        if (_recordingState.value == RecordingState.Paused) {
+            _recordingState.value = RecordingState.Recording
+        }
+    }
+
+
+
+
     // Placeholder for receiving new samples (later)
     fun addSample(sample: EventSample) {
         // Only record if we actually have an active Event
         if (_currentEvent.value == null) return
+
+        // NEW: only save when actively Recording (not Idle/Paused)
+        if (_recordingState.value != RecordingState.Recording) return
 
         _samples.add(sample)
     }

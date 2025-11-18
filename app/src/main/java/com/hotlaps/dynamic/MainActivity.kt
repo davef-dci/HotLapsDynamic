@@ -86,15 +86,6 @@ class MainActivity : ComponentActivity() {
 
                             MainMenuDynamics(
                                 onDrive = {
-                                    // 1. Get the track the user has selected
-                                    val track = trackSelectionViewModel.selectedTrack.value
-
-                                    // 2. Only start an event if a track is selected
-                                    if (track != null) {
-                                        driveViewModel.startEvent(context, track)
-                                    }
-
-                                    // 3. Navigate into Drive mode
                                     nav.navigate("drive")
                                 },
                                 onTrackManager = { nav.navigate("trackSetup") },

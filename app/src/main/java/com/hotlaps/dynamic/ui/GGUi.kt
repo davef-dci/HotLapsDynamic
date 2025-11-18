@@ -77,6 +77,8 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
@@ -87,6 +89,13 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.runtime.DisposableEffect
 
 
+import androidx.compose.runtime.collectAsState
+
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 
 
 
@@ -173,6 +182,10 @@ fun GGScreen(
     val vmLongG   by driveViewModel.longG.collectAsState()
     val currentEvent by driveViewModel.currentEvent.collectAsState()
 
+    // NEW: high-level recording state from DriveViewModel
+    val recordingState by driveViewModel.recordingState.collectAsState()
+
+
     // First corner (if any)
     val firstCorner = activeTrack?.corners?.firstOrNull()
 
@@ -196,6 +209,7 @@ fun GGScreen(
         gpsLonDeg = vmGpsLon
     )
 
+    /* comment out after adding record buttons
     // 🚨 Safety net: if we have a track but no event, start one
     LaunchedEffect(activeTrack, currentEvent) {
         if (activeTrack != null && currentEvent == null) {
@@ -203,6 +217,9 @@ fun GGScreen(
             Log.d("CornerFSM", "Auto-started event from GGScreen for track=${activeTrack!!.name}")
         }
     }
+
+
+     */
 
 
     // Auto-start a new event when Drive opens (only once per track selection)
@@ -536,6 +553,93 @@ fun GGScreen(
                                     )
                                 }
 
+                                // NEW: show current recording state
+                                Text(
+                                    text = when (recordingState) {
+                                        DriveViewModel.RecordingState.Idle -> "Recording: Idle"
+                                        DriveViewModel.RecordingState.Recording -> "Recording: LIVE"
+                                        DriveViewModel.RecordingState.Paused -> "Recording: Paused"
+                                    },
+                                    fontSize = 16.sp,
+                                    color = when (recordingState) {
+                                        DriveViewModel.RecordingState.Idle -> Color.Gray
+                                        DriveViewModel.RecordingState.Recording -> Color.Red
+                                        DriveViewModel.RecordingState.Paused -> Color(0xFFFFC107) // amber-ish
+                                    },
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+
+// NEW: Manual recording controls
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceEvenly,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    when (recordingState) {
+                                        DriveViewModel.RecordingState.Idle -> {
+                                            // Show a big red Record button — always allowed, even with no track
+                                            IconButton(
+                                                onClick = {
+                                                    val track = activeTrack   // may be null
+                                                    driveViewModel.startManualEvent(context, track)
+                                                    Log.d("GGScreen", "Record pressed — startManualEvent, track=${track?.name ?: "(none)"}")
+                                                }
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.FiberManualRecord,
+                                                    contentDescription = "Start recording",
+                                                    tint = Color.Red,
+                                                    modifier = Modifier.size(48.dp)
+                                                )
+                                            }
+                                        }
+
+
+                                        DriveViewModel.RecordingState.Recording -> {
+                                            // Show Pause + Stop
+                                            IconButton(onClick = { driveViewModel.pauseRecording() }) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.Pause,
+                                                    contentDescription = "Pause recording",
+                                                    tint = Color.Yellow,
+                                                    modifier = Modifier.size(40.dp)
+                                                )
+                                            }
+                                            IconButton(onClick = { driveViewModel.stopEvent() }) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.Stop,
+                                                    contentDescription = "Stop recording",
+                                                    tint = Color.Red,
+                                                    modifier = Modifier.size(40.dp)
+                                                )
+                                            }
+                                        }
+
+                                        DriveViewModel.RecordingState.Paused -> {
+                                            // Show Resume + Stop
+                                            IconButton(onClick = { driveViewModel.resumeRecording() }) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.PlayArrow,
+                                                    contentDescription = "Resume recording",
+                                                    tint = Color.Green,
+                                                    modifier = Modifier.size(40.dp)
+                                                )
+                                            }
+                                            IconButton(onClick = { driveViewModel.stopEvent() }) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.Stop,
+                                                    contentDescription = "Stop recording",
+                                                    tint = Color.Red,
+                                                    modifier = Modifier.size(40.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+
                                 Text(
                                     text = "Event: ${currentEvent?.name ?: "(none)"}",
                                     fontSize = 16.sp
@@ -557,6 +661,7 @@ fun GGScreen(
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .verticalScroll(rememberScrollState())
                                     .padding(horizontal = 4.dp)
                             ) {
                                 GGPlot(
@@ -578,6 +683,9 @@ fun GGScreen(
                                 )
 
                                 Spacer(Modifier.height(8.dp))
+
+
+
 
                                 Row(
                                     horizontalArrangement = Arrangement.spacedBy(12.dp),
