@@ -18,8 +18,10 @@ import androidx.compose.runtime.setValue
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EventManagerScreen(
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onViewEvents: () -> Unit
 ) {
+
 
     val context = LocalContext.current
     var statusMessage by remember { mutableStateOf<String?>(null) }
@@ -54,9 +56,10 @@ fun EventManagerScreen(
 
             BigButton(
                 text = "View Events",
-                onClick = {},
-                enabled = false
+                onClick = onViewEvents,
+                enabled = true
             )
+
 
             Spacer(Modifier.height(12.dp))
 

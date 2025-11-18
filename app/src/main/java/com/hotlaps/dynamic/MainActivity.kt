@@ -23,6 +23,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hotlaps.dynamic.viewmodel.TrackSelectionViewModel
 import androidx.core.app.ActivityCompat
 import android.content.pm.PackageManager
+import androidx.compose.material3.Text
 import com.hotlaps.dynamic.viewmodel.DriveViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.platform.LocalContext
@@ -135,10 +136,16 @@ class MainActivity : ComponentActivity() {
 
                         composable("eventManager") {
                             EventManagerScreen(
-                                onBack = { nav.popBackStack() }
-
+                                onBack = { nav.popBackStack() },
+                                onViewEvents = { nav.navigate("eventViewer") }
                             )
                         }
+
+
+                        composable("eventViewer") {
+                            Text("Event Viewer (placeholder)")
+                        }
+
 
                         composable("calib") {
                             CalibrateScreen(onBack = { nav.popBackStack() })
@@ -160,6 +167,8 @@ class MainActivity : ComponentActivity() {
                                 }
                             )
                         }
+
+
 
 
 
