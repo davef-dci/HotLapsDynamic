@@ -134,7 +134,8 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
         val formattedTime = formatter.format(Date(now))
 
         // Human-friendly name
-        val eventName = "$baseName – $formattedTime"
+        val eventName = "$baseName - $formattedTime"
+
 
         // Let EventStorage generate the ID and timestamps
         val event = EventStorage.createEvent(
@@ -537,6 +538,20 @@ fun updateCornerCaptureState(track: Track?) {
         }
     }
 }
+
+    fun renameCurrentEvent(context: Context, newName: String) {
+        val current = _currentEvent.value ?: return
+
+        val updated = current.copy(
+            name = newName,
+            displayName = newName
+        )
+
+        _currentEvent.value = updated
+
+        // Also update the CSV on disk
+        EventStorage.updateEventNameInCsv(context, current.id, newName)
+    }
 
 
 

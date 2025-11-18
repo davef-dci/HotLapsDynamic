@@ -100,7 +100,10 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.collectAsState
 
-
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -183,6 +186,9 @@ fun GGScreen(
 
     // NEW: high-level recording state from DriveViewModel
     val recordingState by driveViewModel.recordingState.collectAsState()
+
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var pendingEventName by remember { mutableStateOf("") }
 
 
     // First corner (if any)
@@ -383,6 +389,54 @@ fun GGScreen(
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { 2 })
     val scope = rememberCoroutineScope()
 
+    if (showRenameDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                // If they back out, just keep the default name and stop the event
+                showRenameDialog = false
+                driveViewModel.stopEvent()
+            },
+            title = {
+                Text("Name this session")
+            },
+            text = {
+                OutlinedTextField(
+                    value = pendingEventName,
+                    onValueChange = { pendingEventName = it },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Session name") }
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        // Save the new name (and update CSV), then stop the event
+                        driveViewModel.renameCurrentEvent(context, pendingEventName)
+                        showRenameDialog = false
+                        driveViewModel.stopEvent()
+                    }
+
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        // Use the existing name and just stop
+                        showRenameDialog = false
+                        driveViewModel.stopEvent()
+                    }
+                ) {
+                    Text("Use default")
+                }
+            }
+        )
+    }
+
+
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -513,7 +567,18 @@ fun GGScreen(
                                             }
 
                                             Button(
-                                                onClick = { driveViewModel.stopEvent() },
+                                                onClick = {
+                                                    val evt = currentEvent
+                                                    if (evt != null) {
+                                                        // Pre-fill with the current displayName or fallback to name
+                                                        pendingEventName = evt.displayName.ifBlank { evt.name }
+                                                        showRenameDialog = true
+                                                    } else {
+                                                        // No current event; just stop to be safe
+                                                        driveViewModel.stopEvent()
+                                                    }
+                                                }
+                                                ,
                                                 colors = ButtonDefaults.buttonColors(
                                                     containerColor = Color(0xFFDC2626), // red
                                                     contentColor = Color.White
@@ -548,7 +613,18 @@ fun GGScreen(
                                             }
 
                                             Button(
-                                                onClick = { driveViewModel.stopEvent() },
+                                                onClick = {
+                                                    val evt = currentEvent
+                                                    if (evt != null) {
+                                                        // Pre-fill with the current displayName or fallback to name
+                                                        pendingEventName = evt.displayName.ifBlank { evt.name }
+                                                        showRenameDialog = true
+                                                    } else {
+                                                        // No current event; just stop to be safe
+                                                        driveViewModel.stopEvent()
+                                                    }
+                                                }
+                                                ,
                                                 colors = ButtonDefaults.buttonColors(
                                                     containerColor = Color(0xFFDC2626), // red
                                                     contentColor = Color.White

@@ -160,4 +160,52 @@ object EventStorage {
     }
 
 
+    fun updateEventNameInCsv(context: Context, eventId: Long, newName: String) {
+        val dir = eventsDir(context) ?: return
+        val file = File(dir, "event_${eventId}.csv")
+        if (!file.exists()) {
+            Log.w(TAG, "updateEventNameInCsv: no CSV found for eventId=$eventId")
+            return
+        }
+
+        try {
+            val lines = file.readLines()
+            if (lines.isEmpty()) return
+
+            val header = lines[0]
+            val updatedLines = mutableListOf<String>()
+            updatedLines.add(header)
+
+            // We know header is:
+            // intervalMs,utcMs,trackName,eventName,cornerIndex,visitNumber,latG,longG,zG,gSum
+            val EVENT_NAME_INDEX = 3
+
+            for (i in 1 until lines.size) {
+                val line = lines[i]
+                if (line.isBlank()) {
+                    updatedLines.add(line)
+                    continue
+                }
+
+                val parts = line.split(',')
+                if (parts.size <= EVENT_NAME_INDEX) {
+                    // malformed row, keep as-is
+                    updatedLines.add(line)
+                    continue
+                }
+
+                val mutable = parts.toMutableList()
+                mutable[EVENT_NAME_INDEX] = newName
+                updatedLines.add(mutable.joinToString(","))
+            }
+
+            file.writeText(updatedLines.joinToString("\n"))
+            Log.d(TAG, "updateEventNameInCsv: updated eventName for eventId=$eventId")
+        } catch (e: Exception) {
+            Log.e(TAG, "updateEventNameInCsv: error updating CSV for eventId=$eventId", e)
+        }
+    }
+
+
+
 }
