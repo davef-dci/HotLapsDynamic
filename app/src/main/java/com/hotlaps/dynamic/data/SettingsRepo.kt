@@ -55,7 +55,7 @@ class SettingsRepo(private val context: Context) {
     }
 
     suspend fun updateGgMaxG(v: Float) {
-        context.settingsDataStore.edit { it[K.GG_MAX_G] = v.coerceIn(0.2f, 3f) }
+        context.settingsDataStore.edit { it[K.GG_MAX_G] = v.coerceIn(0.1f, 3f) }
     }
 
     suspend fun updateGgTrailWindowS(v: Float) {

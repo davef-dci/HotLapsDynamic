@@ -135,6 +135,10 @@ fun GGScreen(
     var peakRightAccel by remember { mutableStateOf(0f) }  // +lat
     var peakLeftAccel  by remember { mutableStateOf(0f) }  // |-lat|
 
+    // === Moving-average smoothing for G-G plot ===
+    var smoothingSamples by remember { mutableStateOf(10) }  // user-adjustable
+    val ma = remember { MovingAverage2D(smoothingSamples) }
+
     // === Active track (from TrackSelectionViewModel) ===
     val activeTrack by trackSelectionViewModel
         .selectedTrack
@@ -348,7 +352,7 @@ fun GGScreen(
             val latNow  = latMs2 / g        // + = right, - = left
 
             // 1) Clamp crazy spikes
-            val G_CLAMP = 2.0f            // +/- 3g should be plenty
+            val G_CLAMP = 2.0f            // +/- 2g should be plenty
             val longClamped = longNow.coerceIn(-G_CLAMP, G_CLAMP)
             val latClamped  = latNow.coerceIn(-G_CLAMP, G_CLAMP)
 
@@ -362,17 +366,21 @@ fun GGScreen(
             val longEmaNew = longEma + alpha * (longClamped - longEma)
             val latEmaNew  = latEma  + alpha * (latClamped  - latEma)
 
-            // 3) Deadband to keep “coast” from jittering
-            val DEAD_BAND_G = 0.04f       // tweak; ~0.03–0.05g works well
-
-            val longSmooth = if (kotlin.math.abs(longEmaNew) < DEAD_BAND_G) 0f else longEmaNew
-            val latSmooth  = if (kotlin.math.abs(latEmaNew)  < DEAD_BAND_G) 0f else latEmaNew
-
             longEma = longEmaNew
             latEma  = latEmaNew
 
-            longG = longSmooth
-            latG  = latSmooth
+            // 3) Deadband to keep “coast” from jittering
+            val DEAD_BAND_G = 0.04f       // tweak; ~0.03–0.05g works well
+            val longDb = if (kotlin.math.abs(longEmaNew) < DEAD_BAND_G) 0f else longEmaNew
+            val latDb  = if (kotlin.math.abs(latEmaNew)  < DEAD_BAND_G) 0f else latEmaNew
+
+            // 4) Moving-average smoothing on top of EMA + deadband
+            //    NOTE: we store lat first, long second
+            val (latMa, longMa) = ma.add(latDb, longDb)
+
+            // Final values used by the rest of the UI
+            latG  = latMa
+            longG = longMa
 
             // Feed into ViewModel, just like before
             driveViewModel.updateGForces(latG, longG)
@@ -380,6 +388,7 @@ fun GGScreen(
             driveViewModel.updateCornerCaptureState(activeTrack)
 
             ticks++
+
         }
 
     }
@@ -659,6 +668,31 @@ fun GGScreen(
                             Text("TrackId on Event: ${currentEvent?.trackId ?: 0L}")
 
                             Spacer(Modifier.height(12.dp))
+
+                            Spacer(Modifier.height(16.dp))
+
+                            Text(
+                                text = "G-G Smoothing",
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Samples: $smoothingSamples (~${"%.2f".format(smoothingSamples / 20f)} s at 20 Hz)",
+                                fontSize = 14.sp
+                            )
+
+                            Slider(
+                                value = smoothingSamples.toFloat(),
+                                onValueChange = { newValue ->
+                                    val clamped = newValue.toInt().coerceIn(1, 30)
+                                    smoothingSamples = clamped
+                                    ma.setWindowSize(clamped)
+                                },
+                                valueRange = 1f..30f,
+                                steps = 30 - 2   // internal steps
+                            )
+
+
 
 // Simple GPS simulation controls for desk testing
                             if (t != null && firstCorner != null) {
@@ -1121,11 +1155,22 @@ fun DrawScope.drawGgRadialsAndLabels(
         )
     }
 
-    // Up axis = 270°, Down = 90°, Right = 0°, Left = 180° (Android canvas)
-    if (latNearZero && longG >  brakeThreshG) drawAxisWedge(270f, Color(0xFF06B6D4)) // Pure Accel (cyan)
-    if (latNearZero && longG < -brakeThreshG) drawAxisWedge( 90f, Color(0xFFEF4444)) // Pure Brake (red)
-    if (longNearZero && latG >  latThreshG)   drawAxisWedge(  0f, Color(0xFFF59E0B)) // Pure Right (orange)
-    if (longNearZero && latG < -latThreshG)   drawAxisWedge(180f, Color(0xFFA855F7)) // Pure Left (violet)
+
+
+// Fade strength - adjust this if needed
+    val wedgeAlpha = 0.15f
+
+    if (latNearZero && longG > brakeThreshG)
+        drawAxisWedge(270f, Color(0xFF06B6D4).copy(alpha = wedgeAlpha))  // Accel
+
+    if (latNearZero && longG < -brakeThreshG)
+        drawAxisWedge( 90f, Color(0xFFEF4444).copy(alpha = wedgeAlpha))  // Brake
+
+    if (longNearZero && latG > latThreshG)
+        drawAxisWedge( 0f, Color(0xFFF59E0B).copy(alpha = wedgeAlpha))   // Right
+
+    if (longNearZero && latG < -latThreshG)
+        drawAxisWedge(180f, Color(0xFFA855F7).copy(alpha = wedgeAlpha))  // Left
 
     // --- Radial guideline lines (20° / 70° from each axis)
     for (base in bases) {
@@ -1268,4 +1313,36 @@ private fun cross(a: FloatArray, b: FloatArray): FloatArray {
         a[0] * b[1] - a[1] * b[0]
     )
 }
+
+class MovingAverage2D(private var maxSamples: Int) {
+
+    private val buffer = ArrayDeque<Pair<Float, Float>>()
+    private var sumX = 0f
+    private var sumY = 0f
+
+    fun setWindowSize(newSize: Int) {
+        maxSamples = newSize.coerceAtLeast(1)
+        // Optionally trim if the window shrinks
+        while (buffer.size > maxSamples) {
+            val (ox, oy) = buffer.removeFirst()
+            sumX -= ox
+            sumY -= oy
+        }
+    }
+
+    fun add(x: Float, y: Float): Pair<Float, Float> {
+        if (buffer.size == maxSamples) {
+            val (ox, oy) = buffer.removeFirst()
+            sumX -= ox
+            sumY -= oy
+        }
+        buffer.addLast(x to y)
+        sumX += x
+        sumY += y
+
+        val size = buffer.size.coerceAtLeast(1)
+        return (sumX / size) to (sumY / size)
+    }
+}
+
 

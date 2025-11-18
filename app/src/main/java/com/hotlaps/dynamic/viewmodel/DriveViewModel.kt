@@ -14,7 +14,8 @@ import com.hotlaps.dynamic.model.CornerVisit
 import android.content.Context
 import android.util.Log
 
-
+import com.hotlaps.dynamic.util.MovingAverage2D
+import kotlin.math.abs
 
 
 
@@ -42,12 +43,24 @@ class DriveViewModel : ViewModel() {
         Capturing
     }
 
+    // Per-corner state for the corner detector
+    private data class CornerState(
+        var wasInsideRadius: Boolean = false,
+        var lastVisitEndUtcMs: Long = 0L
+    )
+
+
 
     companion object {
         // Corner trigger radius in meters.
         // Easy to tweak as we learn more from real-world testing.
         private const val CORNER_TRIGGER_RADIUS_M = 30.0
+
+        // Minimum gap between visits to the *same* corner in this Event.
+        // This prevents multiple “laps” being detected while still in the radius.
+        private const val MIN_CORNER_GAP_MS = 20_000L  // 20 seconds for now
     }
+
 
     // ------------------------
     // EVENT STATE
@@ -79,6 +92,9 @@ class DriveViewModel : ViewModel() {
     // Per-corner visit counters within this Event: cornerIndex -> visits so far
     private val cornerVisitCounts = mutableMapOf<Int, Int>()
 
+// Per-corner state machine (inside/outside + last visit end)
+private val perCornerState = mutableMapOf<Int, CornerState>()
+
     // List of all corner visits (metadata only; we’ll fill this later)
     private val cornerVisits = mutableListOf<CornerVisit>()
 
@@ -98,15 +114,22 @@ class DriveViewModel : ViewModel() {
         activeVisitNumber = 0
         cornerVisitCounts.clear()
         cornerVisits.clear()
+        perCornerState.clear()   // <-- add this
 
         Log.d("DriveViewModel", "Event started: id=${event.id}, trackId=${event.trackId}, name=${event.name}")
 
     }
 
 
-    fun stopEvent() {
-        _currentEvent.value = null
-    }
+fun stopEvent() {
+    _currentEvent.value = null
+    cornerCaptureState = CornerCaptureState.Idle
+    activeCornerIndex = null
+    activeVisitNumber = 0
+    activeVisitStartUtcMs = 0L
+    activeVisitEndUtcMs = 0L
+    perCornerState.clear()
+}
 
     // Placeholder for receiving new samples (later)
     fun addSample(sample: EventSample) {
@@ -334,104 +357,126 @@ class DriveViewModel : ViewModel() {
      *   - Idle  -> Capturing  when we enter a corner trigger radius
      *   - Capturing stays Capturing (we'll add exit logic later)
      */
-    fun updateCornerCaptureState(track: Track?) {
-        // Debug: prove this function is actually being called
-        Log.d(
-            "CornerFSM",
-            "tick: track=${track?.name}, eventId=${_currentEvent.value?.id}, gps=(${gpsLat.value}, ${gpsLon.value})"
-        )
+/**
+ * Update the corner capture state machine based on the current GPS position
+ * and the given track.
+ *
+ * New behavior:
+ *  - A visit starts only when we ENTER a corner's trigger radius
+ *    (outside -> inside transition for that corner).
+ *  - After a visit ends, we require MIN_CORNER_GAP_MS before that corner
+ *    can trigger again. This works even for tracks with a single corner.
+ */
+fun updateCornerCaptureState(track: Track?) {
+    // If there's no active event, we don't capture anything
+    val event = _currentEvent.value ?: return
+    val nowUtc = System.currentTimeMillis()
 
-        // If there's no active event, we don't capture anything
-        val event = _currentEvent.value ?: return
+    when (cornerCaptureState) {
 
-        when (cornerCaptureState) {
+        CornerCaptureState.Idle -> {
+            // Find nearest corner (index + distance)
+            val nearest = findNearestCornerIndex(track) ?: run {
+                // No valid GPS / no corners: mark all as "outside"
+                perCornerState.values.forEach { it.wasInsideRadius = false }
+                return
+            }
 
-            CornerCaptureState.Idle -> {
-                // Find the nearest corner by index + distance
-                val nearest = findNearestCornerIndex(track) ?: return
-                val (cornerIndex, distanceM) = nearest
+            val (cornerIndex, distanceM) = nearest
+            val insideNow = isWithinCornerTriggerRadius(distanceM)
 
-                // Only react if we're within the trigger radius
-                if (!isWithinCornerTriggerRadius(distanceM)) {
-                    return
+            // Update / create state for this corner
+            val state = perCornerState.getOrPut(cornerIndex) { CornerState() }
+
+            // True only on OUTSIDE -> INSIDE transition
+            val enteringNow = insideNow && !state.wasInsideRadius
+
+            // Enough time since the last visit to this corner?
+            val enoughGap =
+                (nowUtc - state.lastVisitEndUtcMs) >= MIN_CORNER_GAP_MS
+
+            // Remember current inside/outside state for next tick
+            state.wasInsideRadius = insideNow
+
+            if (!enteringNow || !enoughGap) {
+                // Either we're not entering, or it's too soon after the last visit
+                return
+            }
+
+            // --- We are ENTERING the radius for this corner, after a sufficient gap. ---
+            val visitsSoFar = cornerVisitCounts[cornerIndex] ?: 0
+            val newVisitNumber = visitsSoFar + 1
+            cornerVisitCounts[cornerIndex] = newVisitNumber
+
+            activeCornerIndex = cornerIndex
+            activeVisitNumber = newVisitNumber
+            cornerCaptureState = CornerCaptureState.Capturing
+
+            Log.d(
+                "CornerFSM",
+                "Started capturing corner=$cornerIndex visit=$newVisitNumber, " +
+                        "distanceM=${"%.1f".format(distanceM)}, nowUtc=$nowUtc"
+            )
+
+            // Use this corner's captureBefore / captureAfter to define the window
+            val corners = track?.corners ?: return
+            val corner = corners.firstOrNull { it.index == cornerIndex } ?: return
+
+            val beforeMs = corner.captureBeforeMs.toLong()
+            val afterMs = corner.captureAfterMs.toLong()
+
+            val startUtc = nowUtc - beforeMs
+            val endUtc = nowUtc + afterMs
+
+            activeVisitStartUtcMs = startUtc
+            activeVisitEndUtcMs = endUtc
+
+            val visit = CornerVisit(
+                eventId = event.id,
+                cornerIndex = cornerIndex,
+                visitNumber = newVisitNumber,
+                startUtcMs = startUtc,
+                apexUtcMs = nowUtc,
+                endUtcMs = endUtc
+            )
+            cornerVisits.add(visit)
+        }
+
+        CornerCaptureState.Capturing -> {
+            val activeCorner = activeCornerIndex ?: return
+            val activeVisit = activeVisitNumber
+
+            // Time-based stop: once we're past the end of this visit's window, stop capturing.
+            if (nowUtc > activeVisitEndUtcMs) {
+
+                val samplesForVisit = _samples.count { sample ->
+                    sample.eventId == event.id &&
+                            sample.cornerIndex == activeCorner &&
+                            sample.visitNumber == activeVisit
                 }
-
-                // We've just "hit" a corner: increment visit count
-                val visitsSoFar = cornerVisitCounts[cornerIndex] ?: 0
-                val newVisitNumber = visitsSoFar + 1
-                cornerVisitCounts[cornerIndex] = newVisitNumber
-
-                activeCornerIndex = cornerIndex
-                activeVisitNumber = newVisitNumber
-                cornerCaptureState = CornerCaptureState.Capturing
 
                 Log.d(
                     "CornerFSM",
-                    "Started capturing corner=$cornerIndex visit=$newVisitNumber, distanceM=${"%.1f".format(distanceM)}"
+                    "Stopped capturing corner=$activeCorner visit=$activeVisit at nowUtc=$nowUtc " +
+                            "(window end=$activeVisitEndUtcMs), samplesForVisit=$samplesForVisit"
                 )
 
-                // --- NEW: use the corner's captureBefore/captureAfter to define the window ---
-                val corners = track?.corners ?: return
-                val corner = corners.firstOrNull { it.index == cornerIndex } ?: return
+                // Mark the end time for this corner so we enforce the gap
+                val state = perCornerState.getOrPut(activeCorner) { CornerState() }
+                state.lastVisitEndUtcMs = nowUtc
+                state.wasInsideRadius = false
 
-                val nowUtc = System.currentTimeMillis()
-                val beforeMs = corner.captureBeforeMs.toLong()
-                val afterMs = corner.captureAfterMs.toLong()
-
-                val startUtc = nowUtc - beforeMs
-                val endUtc   = nowUtc + afterMs
-
-                activeVisitStartUtcMs = startUtc
-                activeVisitEndUtcMs   = endUtc
-
-                val visit = CornerVisit(
-                    eventId = event.id,
-                    cornerIndex = cornerIndex,
-                    visitNumber = newVisitNumber,
-                    startUtcMs = startUtc,
-                    apexUtcMs = nowUtc,
-                    endUtcMs = endUtc
-                )
-
-                cornerVisits.add(visit)
+                // Reset state back to Idle
+                cornerCaptureState = CornerCaptureState.Idle
+                activeCornerIndex = null
+                activeVisitNumber = 0
+                activeVisitStartUtcMs = 0L
+                activeVisitEndUtcMs = 0L
             }
-
-
-            CornerCaptureState.Capturing -> {
-                val event = _currentEvent.value ?: return
-                val activeCorner = activeCornerIndex ?: return
-                val activeVisit = activeVisitNumber
-                val nowUtc = System.currentTimeMillis()
-
-                // Time-based stop: once we're past the end of this visit's window, stop capturing.
-                if (nowUtc > activeVisitEndUtcMs) {
-
-                    // Count how many samples ended up tagged for this visit (for debug only)
-                    val samplesForVisit = _samples.count { sample ->
-                        sample.eventId == event.id &&
-                                sample.cornerIndex == activeCorner &&
-                                sample.visitNumber == activeVisit
-                    }
-
-                    Log.d(
-                        "CornerFSM",
-                        "Stopped capturing corner=$activeCorner " +
-                                "visit=$activeVisit at nowUtc=$nowUtc " +
-                                "(time window end=$activeVisitEndUtcMs), " +
-                                "samplesForVisit=$samplesForVisit"
-                    )
-
-                    // Reset state back to Idle
-                    cornerCaptureState = CornerCaptureState.Idle
-                    activeCornerIndex = null
-                    activeVisitNumber = 0
-                    activeVisitStartUtcMs = 0L
-                    activeVisitEndUtcMs = 0L
-                }
-            }
-
         }
     }
+}
+
 
 
 
