@@ -490,70 +490,108 @@ fun GGScreen(
                                 )
 
 // NEW: Manual recording controls
+                                // Manual recording controls – bigger, labeled buttons
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(vertical = 4.dp),
+                                        .padding(vertical = 8.dp),
                                     horizontalArrangement = Arrangement.SpaceEvenly,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     when (recordingState) {
                                         DriveViewModel.RecordingState.Idle -> {
-                                            // Show a big red Record button — always allowed, even with no track
-                                            IconButton(
+                                            // Big red "Record" button
+                                            Button(
                                                 onClick = {
                                                     val track = activeTrack   // may be null
                                                     driveViewModel.startManualEvent(context, track)
-                                                    Log.d("GGScreen", "Record pressed — startManualEvent, track=${track?.name ?: "(none)"}")
-                                                }
+                                                    Log.d(
+                                                        "GGScreen",
+                                                        "Record pressed — startManualEvent, track=${track?.name ?: "(none)"}"
+                                                    )
+                                                },
+                                                colors = ButtonDefaults.buttonColors(
+                                                    containerColor = Color(0xFFDC2626), // red
+                                                    contentColor = Color.White
+                                                )
                                             ) {
                                                 Icon(
                                                     imageVector = Icons.Filled.FiberManualRecord,
                                                     contentDescription = "Start recording",
-                                                    tint = Color.Red,
-                                                    modifier = Modifier.size(48.dp)
+                                                    modifier = Modifier.size(24.dp)
                                                 )
+                                                Spacer(Modifier.width(8.dp))
+                                                Text("Record")
                                             }
                                         }
 
-
                                         DriveViewModel.RecordingState.Recording -> {
-                                            // Show Pause + Stop
-                                            IconButton(onClick = { driveViewModel.pauseRecording() }) {
+                                            // Amber "Pause" + red "Stop"
+                                            Button(
+                                                onClick = { driveViewModel.pauseRecording() },
+                                                colors = ButtonDefaults.buttonColors(
+                                                    containerColor = Color(0xFFFFC107), // amber
+                                                    contentColor = Color.Black
+                                                )
+                                            ) {
                                                 Icon(
                                                     imageVector = Icons.Filled.Pause,
                                                     contentDescription = "Pause recording",
-                                                    tint = Color.Yellow,
-                                                    modifier = Modifier.size(40.dp)
+                                                    modifier = Modifier.size(20.dp)
                                                 )
+                                                Spacer(Modifier.width(6.dp))
+                                                Text("Pause")
                                             }
-                                            IconButton(onClick = { driveViewModel.stopEvent() }) {
+
+                                            Button(
+                                                onClick = { driveViewModel.stopEvent() },
+                                                colors = ButtonDefaults.buttonColors(
+                                                    containerColor = Color(0xFFDC2626), // red
+                                                    contentColor = Color.White
+                                                )
+                                            ) {
                                                 Icon(
                                                     imageVector = Icons.Filled.Stop,
                                                     contentDescription = "Stop recording",
-                                                    tint = Color.Red,
-                                                    modifier = Modifier.size(40.dp)
+                                                    modifier = Modifier.size(20.dp)
                                                 )
+                                                Spacer(Modifier.width(6.dp))
+                                                Text("Stop")
                                             }
                                         }
 
                                         DriveViewModel.RecordingState.Paused -> {
-                                            // Show Resume + Stop
-                                            IconButton(onClick = { driveViewModel.resumeRecording() }) {
+                                            // Green "Resume" + red "Stop"
+                                            Button(
+                                                onClick = { driveViewModel.resumeRecording() },
+                                                colors = ButtonDefaults.buttonColors(
+                                                    containerColor = Color(0xFF16A34A), // green
+                                                    contentColor = Color.White
+                                                )
+                                            ) {
                                                 Icon(
                                                     imageVector = Icons.Filled.PlayArrow,
                                                     contentDescription = "Resume recording",
-                                                    tint = Color.Green,
-                                                    modifier = Modifier.size(40.dp)
+                                                    modifier = Modifier.size(20.dp)
                                                 )
+                                                Spacer(Modifier.width(6.dp))
+                                                Text("Resume")
                                             }
-                                            IconButton(onClick = { driveViewModel.stopEvent() }) {
+
+                                            Button(
+                                                onClick = { driveViewModel.stopEvent() },
+                                                colors = ButtonDefaults.buttonColors(
+                                                    containerColor = Color(0xFFDC2626), // red
+                                                    contentColor = Color.White
+                                                )
+                                            ) {
                                                 Icon(
                                                     imageVector = Icons.Filled.Stop,
                                                     contentDescription = "Stop recording",
-                                                    tint = Color.Red,
-                                                    modifier = Modifier.size(40.dp)
+                                                    modifier = Modifier.size(20.dp)
                                                 )
+                                                Spacer(Modifier.width(6.dp))
+                                                Text("Stop")
                                             }
                                         }
                                     }
