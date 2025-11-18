@@ -1,5 +1,6 @@
 package com.hotlaps.dynamic.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -22,8 +23,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
+import com.hotlaps.dynamic.model.EventSample
 import java.io.File
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.Color // May or may not be used depending on theme
+import androidx.compose.ui.unit.dp
+import kotlin.math.abs
+import kotlin.math.max
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -145,8 +153,8 @@ fun EventViewerScreen(
                 )
 
                 Spacer(Modifier.height(8.dp))
-
-                SimpleGGPlot()
+// Pass all samples for this event into the plot
+                SimpleGGPlot(samplesForSelected)
             }
 
 
@@ -158,22 +166,107 @@ fun EventViewerScreen(
     }
 }
 
-
-// --- NEW: Very simple GG plot placeholder ---
-// For now this just draws a box and a label. We'll add real plotting logic next.
+// --- Very simple GG plot placeholder ---
+// Now takes a list of EventSample so we can use latG/longG soon.
+// --- Very simple GG plot with axes ---
+// Takes a list of EventSample so we can use their latG/longG later.
+// --- Very simple GG plot with axes ---
+// Takes a list of EventSample so we can use their latG/longG later.
 @Composable
-fun SimpleGGPlot() {
+fun SimpleGGPlot(samples: List<EventSample>) {
+
+    // --- FIX: read colors in composable scope (allowed here) ---
+    val axisColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+
+    // --- NEW: Auto-scale maxG based on data ---
+    // Find the largest absolute G in either axis across all samples.
+    // --- Auto-scale maxG based on data ---
+    // Find the largest absolute G in either axis across all samples.
+    val rawMaxG = samples.maxOfOrNull { sample ->
+        max(
+            abs(sample.latG),
+            abs(sample.longG)
+        )
+    } ?: 0f
+
+    // Avoid zero: if everything is truly flat, fall back to a small value.
+    val maxG = if (rawMaxG <= 0f) {
+        0.1f   // basically flat data
+    } else {
+        rawMaxG * 1.1f   // small margin beyond the max
+    }
+
+
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .aspectRatio(1f)           // square box, like a GG circle
+            .aspectRatio(1f)  // square box for G-G plot
             .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
             .padding(8.dp)
     ) {
-        Text(
-            text = "GG plot will go here",
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.align(Alignment.Center)
-        )
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val width = size.width
+            val height = size.height
+
+            val cx = width / 2f
+            val cy = height / 2f
+
+            // Horizontal axis
+            drawLine(
+                color = axisColor,
+                start = Offset(0f, cy),
+                end = Offset(width, cy),
+                strokeWidth = 1.dp.toPx()
+            )
+
+            // Vertical axis
+            drawLine(
+                color = axisColor,
+                start = Offset(cx, 0f),
+                end = Offset(cx, height),
+                strokeWidth = 1.dp.toPx()
+            )
+
+// --- Draw G-G points for each sample, using auto-scaled maxG ---
+            val halfWidth = width / 2f
+            val halfHeight = height / 2f
+            val marginFactor = 0.9f
+
+            var lastPoint: Offset? = null
+
+            samples.forEach { sample ->
+                val lat = sample.latG
+                val lon = sample.longG
+
+                // Map latG to X (right positive), longG to Y (up positive)
+                val x = cx + (lat / maxG) * halfWidth * marginFactor
+                val y = cy - (lon / maxG) * halfHeight * marginFactor
+                val current = Offset(x, y)
+
+                // --- NEW: connect consecutive points with a line ---
+                lastPoint?.let { prev ->
+                    drawLine(
+                        color = axisColor,
+                        start = prev,
+                        end = current,
+                        strokeWidth = 1.dp.toPx()
+                    )
+                }
+
+                // Draw the point itself
+                drawCircle(
+                    color = axisColor,
+                    radius = 2.dp.toPx(),
+                    center = current
+                )
+
+                // Update for next iteration
+                lastPoint = current
+            }
+
+
+
+        }
     }
 }
