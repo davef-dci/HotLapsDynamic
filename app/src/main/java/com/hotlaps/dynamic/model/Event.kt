@@ -39,7 +39,11 @@ data class EventSample(
     val longG: Float,           // longitudinal accel (+ accel / - braking)
     val latG: Float,            // lateral accel (+ right / - left)
     val zG: Float,              // vertical accel (optional for now)
-    val gSum: Float             // magnitude of combined G
+    val gSum: Float ,            // magnitude of combined G
+
+    // NEW: track name
+    val trackName: String = "",   // Event's track name; blank if no track
+
 )
 
 

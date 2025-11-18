@@ -55,7 +55,7 @@ object EventStorage {
             // If it's a brand-new file, write a header row first.
             if (isNewFile) {
                 file.appendText(
-                    "intervalMs,utcMs,cornerIndex,visitNumber,longG,latG,zG,gSum\n"
+                    "intervalMs,utcMs,trackName,cornerIndex,visitNumber,longG,latG,zG,gSum\n"
                 )
             }
 
@@ -64,6 +64,8 @@ object EventStorage {
                 append(sample.intervalMs)
                 append(',')
                 append(sample.utcMs)
+                append(',')
+                append(sample.trackName)   // NEW
                 append(',')
                 append(sample.cornerIndex)
                 append(',')

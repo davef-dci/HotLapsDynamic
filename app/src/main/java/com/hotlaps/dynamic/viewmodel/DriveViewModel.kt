@@ -275,6 +275,7 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
 
         val sample = EventSample(
             eventId = event.id,
+            trackName = event.trackName,   // NEW: propagate track name into each row
             cornerIndex = cornerIndex,
             visitNumber = visitNumber,
             intervalMs = intervalMs,
