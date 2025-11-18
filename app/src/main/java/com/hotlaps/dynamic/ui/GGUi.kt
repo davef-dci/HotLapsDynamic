@@ -434,33 +434,6 @@ fun GGScreen(
                 .padding(inner)
                 .fillMaxSize()
         ) {
-            // Small header to hint at swiping + allow tap navigation
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp, horizontal = 8.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                @Composable
-                fun tabText(label: String, page: Int) {
-                    val isSelected = pagerState.currentPage == page
-                    TextButton(
-                        onClick = {
-                            scope.launch {
-                                pagerState.animateScrollToPage(page)
-                            }
-                        }
-                    ) {
-                        Text(
-                            text = label,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                        )
-                    }
-                }
-
-                tabText("Drive", 0)
-                tabText("Debug", 1)
-            }
 
             HorizontalPager(
                 state = pagerState,
@@ -481,59 +454,6 @@ fun GGScreen(
                                 modifier = Modifier.padding(top = 8.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                // Longitudinal readout w/ color
-                                val accelColor =
-                                    when {
-                                        longG >  trailBrakeG -> Color(0xFF34D399) // accelerating (green)
-                                        longG < -trailBrakeG -> Color(0xFFEF4444) // braking (red)
-                                        else                 -> Color(0xFFE5E7EB) // neutral (light gray)
-                                    }
-
-                                val numberStyle = TextStyle(
-                                    fontSize = 44.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFeatureSettings = "tnum"
-                                )
-
-                                Row {
-                                    Text(
-                                        text = "Long Accel:",
-                                        fontSize = 44.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(end = 8.dp)
-                                    )
-                                    Box(Modifier.width(180.dp)) {
-                                        Text(
-                                            text = "${"%+.2f".format(longG)} g",
-                                            style = numberStyle,
-                                            color = accelColor,
-                                            maxLines = 1,
-                                            softWrap = false,
-                                            textAlign = TextAlign.End,
-                                            modifier = Modifier.fillMaxWidth()
-                                        )
-                                    }
-                                }
-
-                                Row {
-                                    Text(
-                                        text = "Lat Accel:",
-                                        fontSize = 44.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(end = 8.dp)
-                                    )
-                                    Box(Modifier.width(180.dp)) {
-                                        Text(
-                                            text = "${"%+.2f".format(latG)} g",
-                                            style = numberStyle,
-                                            color = Color(0xFF60A5FA),
-                                            maxLines = 1,
-                                            softWrap = false,
-                                            textAlign = TextAlign.End,
-                                            modifier = Modifier.fillMaxWidth()
-                                        )
-                                    }
-                                }
 
                                 // Track + Event
                                 val t = activeTrack
