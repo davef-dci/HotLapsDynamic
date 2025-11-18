@@ -207,5 +207,20 @@ object EventStorage {
     }
 
 
+    // listing files to see what events exist
+
+    fun listEventFiles(context: Context): List<File> {
+        val dir = eventsDir(context) ?: return emptyList()
+        val files = dir.listFiles() ?: return emptyList()
+
+        return files.filter { file ->
+            file.isFile &&
+                    file.name.startsWith("event_") &&
+                    file.name.endsWith(".csv")
+        }
+    }
+
+
+
 
 }

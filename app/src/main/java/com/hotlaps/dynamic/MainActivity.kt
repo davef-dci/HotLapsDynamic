@@ -28,11 +28,7 @@ import com.hotlaps.dynamic.viewmodel.DriveViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.LaunchedEffect
-
-
-
-
-
+import com.hotlaps.dynamic.ui.EventViewerScreen
 
 
 class MainActivity : ComponentActivity() {
@@ -143,8 +139,11 @@ class MainActivity : ComponentActivity() {
 
 
                         composable("eventViewer") {
-                            Text("Event Viewer (placeholder)")
+                            EventViewerScreen(
+                                onBack = { nav.popBackStack() }
+                            )
                         }
+
 
 
                         composable("calib") {
