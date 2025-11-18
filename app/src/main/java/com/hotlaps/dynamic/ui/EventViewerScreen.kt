@@ -40,6 +40,7 @@ import androidx.compose.material3.Checkbox
 
 
 
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EventViewerScreen(
@@ -101,6 +102,24 @@ fun EventViewerScreen(
                 mutableStateOf(cornerVisitGroups.toSet())
             }
 
+            // --- NEW: Assign a distinct color to each selected (corner, visit) group ---
+            // --- NEW: Assign a distinct color to each (corner, visit) group ---
+// Palette based on the current MaterialTheme – this is fine directly in a composable
+            val palette = listOf(
+                MaterialTheme.colorScheme.primary,
+                MaterialTheme.colorScheme.secondary,
+                MaterialTheme.colorScheme.tertiary,
+                MaterialTheme.colorScheme.error,
+                MaterialTheme.colorScheme.inversePrimary
+            )
+
+// Small map; cheap to recompute on recomposition
+            val cornerVisitColors = cornerVisitGroups
+                .mapIndexed { index, groupKey ->
+                    val baseColor = palette[index % palette.size]
+                    groupKey to baseColor.copy(alpha = 0.9f)
+                }
+                .toMap()
 
 
 
@@ -222,18 +241,32 @@ fun EventViewerScreen(
                 }
 
 
+// Neutral background color for non-corner samples
+            val neutralSampleColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
 
 
 // --- G-G PLOT FOR SELECTED EVENT ---
+            // --- G-G PLOT FOR SELECTED EVENT ---
             if (selectedFile != null && samplesForPlot.isNotEmpty()) {
                 Text(
-                    text = "G-G Plot (selected corner visits):",
+                    text = "G-G Plot (selected corner visits, color-coded):",
                     style = MaterialTheme.typography.titleSmall
                 )
                 Spacer(Modifier.height(8.dp))
 
-                SimpleGGPlot(samplesForPlot)
+                SimpleGGPlot(
+                    samples = samplesForPlot,
+                    colorForSample = { sample ->
+                        val key = sample.cornerIndex to sample.visitNumber
+
+                        // If this sample belongs to a corner visit group, use its color
+                        cornerVisitColors[key]
+                        // Otherwise, use a neutral faint color for "background"/non-corner samples
+                            ?: neutralSampleColor
+                    }
+                )
             }
+
 
 
 
@@ -250,16 +283,16 @@ fun EventViewerScreen(
 // Takes a list of EventSample so we can use their latG/longG later.
 // --- Very simple GG plot with axes ---
 // Takes a list of EventSample so we can use their latG/longG later.
+// --- UPDATED: SimpleGGPlot now supports per-sample colors via a callback ---
 @Composable
-fun SimpleGGPlot(samples: List<EventSample>) {
-
-    // --- FIX: read colors in composable scope (allowed here) ---
+fun SimpleGGPlot(
+    samples: List<EventSample>,
+    // NEW: function that decides the color for each sample
+    colorForSample: (EventSample) -> Color
+) {
     val axisColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
 
-    // --- NEW: Auto-scale maxG based on data ---
-    // Find the largest absolute G in either axis across all samples.
-    // --- Auto-scale maxG based on data ---
-    // Find the largest absolute G in either axis across all samples.
+    // Auto-scale based on max |G|
     val rawMaxG = samples.maxOfOrNull { sample ->
         max(
             abs(sample.latG),
@@ -267,19 +300,16 @@ fun SimpleGGPlot(samples: List<EventSample>) {
         )
     } ?: 0f
 
-    // Avoid zero: if everything is truly flat, fall back to a small value.
     val maxG = if (rawMaxG <= 0f) {
-        0.1f   // basically flat data
+        0.1f
     } else {
-        rawMaxG * 1.1f   // small margin beyond the max
+        rawMaxG * 1.1f
     }
-
-
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .aspectRatio(1f)  // square box for G-G plot
+            .aspectRatio(1f)
             .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
             .padding(8.dp)
     ) {
@@ -290,15 +320,13 @@ fun SimpleGGPlot(samples: List<EventSample>) {
             val cx = width / 2f
             val cy = height / 2f
 
-            // Horizontal axis
+            // Axes stay neutral
             drawLine(
                 color = axisColor,
                 start = Offset(0f, cy),
                 end = Offset(width, cy),
                 strokeWidth = 1.dp.toPx()
             )
-
-            // Vertical axis
             drawLine(
                 color = axisColor,
                 start = Offset(cx, 0f),
@@ -306,7 +334,6 @@ fun SimpleGGPlot(samples: List<EventSample>) {
                 strokeWidth = 1.dp.toPx()
             )
 
-// --- Draw G-G points for each sample, using auto-scaled maxG ---
             val halfWidth = width / 2f
             val halfHeight = height / 2f
             val marginFactor = 0.9f
@@ -317,34 +344,32 @@ fun SimpleGGPlot(samples: List<EventSample>) {
                 val lat = sample.latG
                 val lon = sample.longG
 
-                // Map latG to X (right positive), longG to Y (up positive)
                 val x = cx + (lat / maxG) * halfWidth * marginFactor
                 val y = cy - (lon / maxG) * halfHeight * marginFactor
                 val current = Offset(x, y)
 
-                // --- NEW: connect consecutive points with a line ---
+                // NEW: get color for this sample
+                val pointColor = colorForSample(sample)
+
+                // Connect consecutive points with a line in the same color
                 lastPoint?.let { prev ->
                     drawLine(
-                        color = axisColor,
+                        color = pointColor,
                         start = prev,
                         end = current,
                         strokeWidth = 1.dp.toPx()
                     )
                 }
 
-                // Draw the point itself
                 drawCircle(
-                    color = axisColor,
+                    color = pointColor,
                     radius = 2.dp.toPx(),
                     center = current
                 )
 
-                // Update for next iteration
                 lastPoint = current
             }
-
-
-
         }
     }
 }
+
