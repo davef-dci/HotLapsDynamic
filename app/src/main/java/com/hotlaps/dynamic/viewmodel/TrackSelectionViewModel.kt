@@ -1,9 +1,15 @@
 package com.hotlaps.dynamic.viewmodel
 
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import com.hotlaps.dynamic.model.Track
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+
 
 class TrackSelectionViewModel : ViewModel() {
 
@@ -22,4 +28,18 @@ class TrackSelectionViewModel : ViewModel() {
     fun clear() {
         _selectedTrack.value = null
     }
+
+
+    var trackBeingEdited: Track? by mutableStateOf(null)
+
+    fun startEditingTrack(track: Track) {
+        trackBeingEdited = track
+    }
+
+    fun clearEditingTrack() {
+        trackBeingEdited = null
+    }
+
+
+
 }

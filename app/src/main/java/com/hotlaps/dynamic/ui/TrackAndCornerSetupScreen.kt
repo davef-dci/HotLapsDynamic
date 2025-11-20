@@ -63,7 +63,7 @@ fun TrackAndCornerSetupScreen(
             BigButton(
                 text = "Edit Track",
                 onClick = {},
-                enabled = false
+                //enabled = false
             )
 
             Spacer(Modifier.height(12.dp))

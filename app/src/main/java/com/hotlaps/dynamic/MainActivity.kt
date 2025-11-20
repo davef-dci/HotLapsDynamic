@@ -30,6 +30,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.LaunchedEffect
 import com.hotlaps.dynamic.ui.EventViewerScreen
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import com.hotlaps.dynamic.ui.EditTrackScreen
+
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -162,9 +167,27 @@ class MainActivity : ComponentActivity() {
                                     nav.navigate("drive")
                                 },
                                 onEditTrack = { track: Track ->
-                                    // (future work)
+                                    trackSelectionViewModel.startEditingTrack(track)
+                                    nav.navigate("editTrack")
                                 }
                             )
+                        }
+
+                        composable("editTrack") {
+                            val trackToEdit = trackSelectionViewModel.trackBeingEdited
+
+                            if (trackToEdit == null) {
+                                // If somehow we got here without a track, just go back
+                                nav.popBackStack()
+                            } else {
+                                EditTrackScreen(
+                                    track = trackToEdit,
+                                    onBack = {
+                                        trackSelectionViewModel.clearEditingTrack()
+                                        nav.popBackStack()
+                                    }
+                                )
+                            }
                         }
 
 
