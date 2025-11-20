@@ -74,7 +74,7 @@ class DriveViewModel : ViewModel() {
 
         // Minimum gap between visits to the *same* corner in this Event.
         // This prevents multiple “laps” being detected while still in the radius.
-        private const val MIN_CORNER_GAP_MS = 20_000L  // 20 seconds for now
+        private const val MIN_CORNER_GAP_MS = 5_000L  // 5 seconds for now
     }
 
 
@@ -504,6 +504,30 @@ fun updateCornerCaptureState(track: Track?) {
                 endUtcMs = endUtc
             )
             cornerVisits.add(visit)
+
+            // Retroactively tag samples that occurred just before the apex
+            backfillPreApexSamples(
+                event = event,
+                cornerIndex = cornerIndex,
+                visitNumber = newVisitNumber,
+                startUtcMs = startUtc,
+                apexUtcMs = nowUtc
+            )
+
+            // Also prepare to backfill the CSV file for these pre-apex samples
+            if (::appContext.isInitialized) {
+                EventStorage.backfillCornerSamplesInCsv(
+                    context = appContext,
+                    eventId = event.id,
+                    cornerIndex = cornerIndex,
+                    visitNumber = newVisitNumber,
+                    startUtcMs = startUtc,
+                    apexUtcMs = nowUtc
+                )
+            }
+
+
+
         }
 
         CornerCaptureState.Capturing -> {
@@ -565,6 +589,54 @@ fun updateCornerCaptureState(track: Track?) {
     fun getCornerTriggerRadiusMeters(): Double {
         return CORNER_TRIGGER_RADIUS_M
     }
+
+    /**
+     * Later we'll use this to retroactively tag samples that happened
+     * just BEFORE we detected the apex, so they get cornerIndex/visitNumber
+     * assigned correctly.
+     */
+    private fun backfillPreApexSamples(
+        event: Event,
+        cornerIndex: Int,
+        visitNumber: Int,
+        startUtcMs: Long,
+        apexUtcMs: Long
+    ) {
+        var taggedCount = 0
+
+        // Walk backwards through _samples and tag any rows in [startUtcMs, apexUtcMs]
+        // for THIS event that don't already belong to a corner.
+        //
+        // We go backwards so we can bail out early once we pass the startUtcMs.
+        for (i in _samples.indices.reversed()) {
+            val s = _samples[i]
+
+            // Only touch samples from this event
+            if (s.eventId != event.id) continue
+
+            // If this sample is older than the start of the window, we can stop.
+            if (s.utcMs < startUtcMs) break
+
+            // Only interested in samples before (or at) apex
+            if (s.utcMs <= apexUtcMs) {
+                // Don't overwrite any sample that already has a corner tag
+                if (s.cornerIndex == 0 && s.visitNumber == 0) {
+                    _samples[i] = s.copy(
+                        cornerIndex = cornerIndex,
+                        visitNumber = visitNumber
+                    )
+                    taggedCount++
+                }
+            }
+        }
+
+        Log.d(
+            "CornerPreApex",
+            "Backfilled $taggedCount pre-apex samples for corner=$cornerIndex " +
+                    "visit=$visitNumber, window=[$startUtcMs .. $apexUtcMs]"
+        )
+    }
+
 
 
 

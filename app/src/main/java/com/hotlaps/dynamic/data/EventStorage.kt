@@ -227,7 +227,6 @@ object EventStorage {
     }
 
 
-    // --- NEW: Load all samples from a single event CSV file ---
     fun loadSamplesFromCsv(file: File): List<EventSample> {
         val result = mutableListOf<EventSample>()
 
@@ -241,38 +240,37 @@ object EventStorage {
                 if (line.isBlank()) continue
 
                 val parts = line.split(',')
-                if (parts.size < 10) {
-                    // Malformed row: skip it
-                    continue
-                }
+                // We expect at least 13 columns with the new format
+                if (parts.size < 13) continue
 
-                // Header is:
-                // intervalMs,utcMs,trackName,eventName,cornerIndex,visitNumber,latG,longG,zG,gSum
-                val intervalMs   = parts[0].toLongOrNull() ?: continue
-                val utcMs        = parts[1].toLongOrNull() ?: continue
-                val trackName    = parts[2]
-                val eventName    = parts[3]
-                val cornerIndex  = parts[4].toIntOrNull() ?: 0
-                val visitNumber  = parts[5].toIntOrNull() ?: 0
-                val latG         = parts[6].toFloatOrNull() ?: 0f
-                val longG        = parts[7].toFloatOrNull() ?: 0f
-                val zG           = parts[8].toFloatOrNull() ?: 0f
-                val gSum         = parts[9].toFloatOrNull() ?: 0f
+                val intervalMs = parts[0].toLongOrNull() ?: continue
+                val utcMs      = parts[1].toLongOrNull() ?: continue
+                // parts[2] = localTime (we can ignore or store separately if you like)
+                val trackName  = parts[3]
+                val eventName  = parts[4]
+                val cornerIdx  = parts[5].toIntOrNull() ?: 0
+                val visitNum   = parts[6].toIntOrNull() ?: 0
+                val latG       = parts[7].toFloatOrNull() ?: 0f
+                val longG      = parts[8].toFloatOrNull() ?: 0f
+                val zG         = parts[9].toFloatOrNull() ?: 0f
+                val gSum       = parts[10].toFloatOrNull() ?: 0f
+                val gpsLat     = parts[11].toDoubleOrNull() ?: 0.0
+                val gpsLon     = parts[12].toDoubleOrNull() ?: 0.0
 
-                // We don't know the eventId from the file name here,
-                // so set it to 0 for now. For plotting, we don't need it.
                 val sample = EventSample(
-                    eventId = 0L,
-                    cornerIndex = cornerIndex,
-                    visitNumber = visitNumber,
+                    eventId = 0L,   // <<< keep whatever you were using before here
+                    trackName = trackName,
+                    eventName = eventName,
+                    cornerIndex = cornerIdx,
+                    visitNumber = visitNum,
                     intervalMs = intervalMs,
                     utcMs = utcMs,
                     longG = longG,
                     latG = latG,
                     zG = zG,
                     gSum = gSum,
-                    trackName = trackName,
-                    eventName = eventName
+                    gpsLat = gpsLat,
+                    gpsLon = gpsLon
                 )
 
                 result.add(sample)
@@ -283,6 +281,145 @@ object EventStorage {
         }
 
         return result
+    }
+
+    /**
+     * Later we will use this to retroactively tag CSV rows for samples that
+     * occurred just BEFORE the apex, so they get cornerIndex/visitNumber set.
+     *
+     * For now this is just a stub so the call site can compile.
+     */
+    fun backfillCornerSamplesInCsv(
+        context: Context,
+        eventId: Long,
+        cornerIndex: Int,
+        visitNumber: Int,
+        startUtcMs: Long,
+        apexUtcMs: Long
+    ) {
+        val dir = eventsDir(context) ?: run {
+            Log.w(TAG, "backfillCornerSamplesInCsv: eventsDir is null")
+            return
+        }
+
+        val file = File(dir, "event_${eventId}.csv")
+        if (!file.exists()) {
+            Log.w(
+                TAG,
+                "backfillCornerSamplesInCsv: no CSV file found for eventId=$eventId " +
+                        "(corner=$cornerIndex visit=$visitNumber)"
+            )
+            return
+        }
+
+        Log.d(
+            TAG,
+            "backfillCornerSamplesInCsv: will backfill pre-apex rows for " +
+                    "eventId=$eventId corner=$cornerIndex visit=$visitNumber, " +
+                    "window=[$startUtcMs .. $apexUtcMs], file=${file.name}"
+        )
+
+        Log.d(
+            TAG,
+            "backfillCornerSamplesInCsv: will backfill pre-apex rows for " +
+                    "eventId=$eventId corner=$cornerIndex visit=$visitNumber, " +
+                    "window=[$startUtcMs .. $apexUtcMs], file=${file.name}"
+        )
+
+        val lines: MutableList<String> = try {
+            file.readLines().toMutableList()
+        } catch (e: Exception) {
+            Log.e(
+                TAG,
+                "backfillCornerSamplesInCsv: error reading CSV for eventId=$eventId",
+                e
+            )
+            return
+        }
+
+        if (lines.isEmpty()) {
+            Log.w(
+                TAG,
+                "backfillCornerSamplesInCsv: CSV for eventId=$eventId is empty"
+            )
+            return
+        }
+
+        Log.d(
+            TAG,
+            "backfillCornerSamplesInCsv: loaded ${lines.size} line(s) from ${file.name}"
+        )
+
+        Log.d(
+            TAG,
+            "backfillCornerSamplesInCsv: loaded ${lines.size} line(s) from ${file.name}"
+        )
+
+        // We know the header is:
+        // intervalMs,utcMs,localTime,trackName,eventName,
+        // cornerIndex,visitNumber,latG,longG,zG,gSum,gpsLat,gpsLon
+        val UTC_MS_INDEX = 1
+        val CORNER_INDEX_INDEX = 5
+        val VISIT_NUMBER_INDEX = 6
+
+        var candidateCount = 0
+        var updatedCount = 0
+
+        // Skip header at index 0; data rows start at 1
+        for (i in 1 until lines.size) {
+            val line = lines[i]
+            if (line.isBlank()) continue
+
+            val parts = line.split(',')
+            if (parts.size <= VISIT_NUMBER_INDEX) continue
+
+            val utcMs = parts[UTC_MS_INDEX].toLongOrNull() ?: continue
+            val cornerVal = parts[CORNER_INDEX_INDEX].toIntOrNull() ?: 0
+            val visitVal = parts[VISIT_NUMBER_INDEX].toIntOrNull() ?: 0
+
+            // Only consider rows in our window [startUtcMs, apexUtcMs]
+            if (utcMs < startUtcMs || utcMs > apexUtcMs) continue
+
+            // Only interested in rows that do NOT already belong to a corner
+            if (cornerVal == 0 && visitVal == 0) {
+                candidateCount++
+
+                // Make a mutable copy so we can edit fields
+                val cols = parts.toMutableList()
+                cols[CORNER_INDEX_INDEX] = cornerIndex.toString()
+                cols[VISIT_NUMBER_INDEX] = visitNumber.toString()
+
+                // Re-join into a CSV line and store back
+                lines[i] = cols.joinToString(",")
+
+                updatedCount++
+            }
+        }
+
+        Log.d(
+            TAG,
+            "backfillCornerSamplesInCsv: found $candidateCount CSV row(s) in pre-apex " +
+                    "window; updated $updatedCount row(s) for corner=$cornerIndex visit=$visitNumber"
+        )
+
+        // If we changed anything, write the updated lines back to the file
+        if (updatedCount > 0) {
+            try {
+                file.writeText(lines.joinToString("\n"))
+                Log.d(
+                    TAG,
+                    "backfillCornerSamplesInCsv: wrote updated CSV for eventId=$eventId"
+                )
+            } catch (e: Exception) {
+                Log.e(
+                    TAG,
+                    "backfillCornerSamplesInCsv: error writing updated CSV for eventId=$eventId",
+                    e
+                )
+            }
+        }
+
+
     }
 
 
