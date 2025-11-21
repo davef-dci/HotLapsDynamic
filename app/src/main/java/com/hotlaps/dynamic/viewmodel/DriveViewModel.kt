@@ -577,6 +577,9 @@ fun updateCornerCaptureState(track: Track?) {
 
         // Also update the CSV on disk
         EventStorage.updateEventNameInCsv(context, current.id, newName)
+
+        // NEW: rename the actual .csv file
+        EventStorage.renameEventFile(context, current.id, newName)
     }
 
 

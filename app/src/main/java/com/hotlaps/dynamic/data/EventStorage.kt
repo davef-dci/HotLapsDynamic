@@ -220,11 +220,11 @@ object EventStorage {
         val files = dir.listFiles() ?: return emptyList()
 
         return files.filter { file ->
-            file.isFile &&
-                    file.name.startsWith("event_") &&
-                    file.name.endsWith(".csv")
-        }
+            file.isFile && file.name.endsWith(".csv", ignoreCase = true)
+        }.sortedBy { it.name.lowercase(Locale.getDefault()) }
+
     }
+
 
 
     fun loadSamplesFromCsv(file: File): List<EventSample> {
@@ -421,6 +421,33 @@ object EventStorage {
 
 
     }
+
+
+    fun renameEventFile(context: Context, eventId: Long, newName: String) {
+        val dir = eventsDir(context) ?: return
+        val oldFile = File(dir, "event_${eventId}.csv")
+
+        if (!oldFile.exists()) {
+            Log.w(TAG, "renameEventFile: old file not found for eventId=$eventId")
+            return
+        }
+
+        // Turn the name into a filesystem-safe filename
+        val safe = newName
+            .replace("[^A-Za-z0-9 _-]".toRegex(), "_")
+            .replace(" +".toRegex(), " ")
+            .trim()
+
+        val newFile = File(dir, "${safe}_$eventId.csv")
+
+        try {
+            oldFile.renameTo(newFile)
+            Log.d(TAG, "renameEventFile: renamed to ${newFile.name}")
+        } catch (e: Exception) {
+            Log.e(TAG, "renameEventFile: error renaming file", e)
+        }
+    }
+
 
 
 
