@@ -101,7 +101,8 @@ class MainActivity : ComponentActivity() {
                         composable("drive") {
                             GGScreen(
                                 trackSelectionViewModel = trackSelectionViewModel,
-                                driveViewModel = driveViewModel
+                                driveViewModel = driveViewModel,
+                                onSelectTrack = { nav.navigate("trackManager") }
                             )
                         }
 

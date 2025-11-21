@@ -105,13 +105,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.ArrowDropDown
+
+
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun GGScreen(
     modifier: Modifier = Modifier,
     trackSelectionViewModel: TrackSelectionViewModel,
-    driveViewModel: DriveViewModel
+    driveViewModel: DriveViewModel,
+    onSelectTrack: () -> Unit          // <--- add this
 ) {
 
     // Keep screen on while this Composable is visible
@@ -478,23 +483,36 @@ fun GGScreen(
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
 
-                                // Track + Event
+                                // Track + Event (clickable to choose/change track)
                                 val t = activeTrack
-                                if (t != null) {
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 4.dp)
+                                        .clickable { onSelectTrack() },   // <--- new callback we’ll add
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                     Text(
-                                        text = "Track: ${t.name} (${t.corners.size} corners)",
+                                        text = if (t != null) {
+                                            "Track: ${t.name} (${t.corners.size} corners)"
+                                        } else {
+                                            "Track: (none selected – tap to choose)"
+                                        },
                                         fontSize = 20.sp,
                                         fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(top = 4.dp)
+                                        color = if (t != null) MaterialTheme.colorScheme.onSurface else Color.Red
                                     )
-                                } else {
-                                    Text(
-                                        text = "Track: (none selected)",
-                                        fontSize = 20.sp,
-                                        color = Color.Red,
-                                        modifier = Modifier.padding(top = 4.dp)
+
+                                    Spacer(Modifier.width(6.dp))
+
+                                    Icon(
+                                        imageVector = Icons.Default.ArrowDropDown,
+                                        contentDescription = "Change track"
                                     )
                                 }
+
 
                                 // NEW: show current recording state
                                 Text(
