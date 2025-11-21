@@ -448,6 +448,20 @@ object EventStorage {
         }
     }
 
+    fun deleteEvents(context: Context, filesToDelete: List<File>): Int {
+        val dir = eventsDir(context) ?: return 0
+        var deleted = 0
+
+        for (f in filesToDelete) {
+            // Safety: only delete files in our eventsDir
+            if (f.parentFile == dir && f.isFile && f.delete()) {
+                deleted++
+            }
+        }
+
+        Log.d(TAG, "deleteEvents: deleted $deleted of ${filesToDelete.size} requested")
+        return deleted
+    }
 
 
 

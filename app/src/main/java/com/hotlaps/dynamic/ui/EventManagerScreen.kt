@@ -14,6 +14,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import java.io.File
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -25,6 +27,14 @@ fun EventManagerScreen(
 
     val context = LocalContext.current
     var statusMessage by remember { mutableStateOf<String?>(null) }
+
+    var eventFiles by remember {
+        mutableStateOf(EventStorage.listEventFiles(context))
+    }
+
+    var showDeletePanel by remember { mutableStateOf(false) }
+    var selectedFiles by remember { mutableStateOf(setOf<File>()) }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -77,11 +87,98 @@ fun EventManagerScreen(
             BigButton(
                 text = "Delete Events",
                 onClick = {
-                    val deleted = EventStorage.deleteAllEvents(context)
-                    statusMessage = "Deleted $deleted event file(s)"
+                    // Toggle the delete panel and refresh file list
+                    showDeletePanel = !showDeletePanel
+                    eventFiles = EventStorage.listEventFiles(context)
+                    selectedFiles = emptySet()
+                    statusMessage = null
                 },
                 enabled = true
             )
+
+            if (showDeletePanel) {
+                Spacer(Modifier.height(16.dp))
+
+                Text(
+                    text = "Select events to delete:",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                if (eventFiles.isEmpty()) {
+                    Text(
+                        text = "No event files found.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                } else {
+                    // Simple list of checkboxes for each event file
+                    Column {
+                        eventFiles.forEach { file ->
+                            val isChecked = selectedFiles.contains(file)
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 2.dp)
+                            ) {
+                                Checkbox(
+                                    checked = isChecked,
+                                    onCheckedChange = { checked ->
+                                        selectedFiles =
+                                            if (checked) {
+                                                selectedFiles + file
+                                            } else {
+                                                selectedFiles - file
+                                            }
+                                    }
+                                )
+                                Text(
+                                    text = file.name,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Delete Selected
+                        Button(
+                            onClick = {
+                                val toDelete = selectedFiles.toList()
+                                val deleted = EventStorage.deleteEvents(context, toDelete)
+                                eventFiles = EventStorage.listEventFiles(context)
+                                selectedFiles = emptySet()
+                                statusMessage = "Deleted $deleted selected event file(s)"
+                            },
+                            enabled = selectedFiles.isNotEmpty()
+                        ) {
+                            Text("Delete Selected")
+                        }
+
+                        // Delete All
+                        OutlinedButton(
+                            onClick = {
+                                val deleted = EventStorage.deleteAllEvents(context)
+                                eventFiles = emptyList()
+                                selectedFiles = emptySet()
+                                statusMessage = "Deleted $deleted event file(s)"
+                            },
+                            enabled = eventFiles.isNotEmpty()
+                        ) {
+                            Text("Delete All")
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+            }
 
 
             Spacer(Modifier.height(12.dp))

@@ -112,10 +112,10 @@ class MainActivity : ComponentActivity() {
                             TrackAndCornerSetupScreen(
                                 onBack = { nav.popBackStack() },
                                 onAddNewTrack = { nav.navigate("addTrack") },
-                                onSelectExistingTrack = { nav.navigate("trackManager") },
-                                onDeleteTrack = { nav.navigate("trackManager") }
+                                onManageTracks = { nav.navigate("trackManager") }  // <- was onSelectExistingTrack / onDeleteTrack
                             )
                         }
+
 
 
                         composable("addTrack") {

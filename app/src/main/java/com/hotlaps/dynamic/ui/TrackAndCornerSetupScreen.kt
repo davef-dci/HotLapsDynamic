@@ -14,8 +14,7 @@ import androidx.compose.ui.unit.dp
 fun TrackAndCornerSetupScreen(
     onBack: () -> Unit,
     onAddNewTrack: () -> Unit,
-    onSelectExistingTrack: () -> Unit,  // NEW
-    onDeleteTrack: () -> Unit,   // NEW
+    onManageTracks: () -> Unit,   // <- rename / consolidate
 ) {
     Scaffold(
         topBar = {
@@ -47,8 +46,8 @@ fun TrackAndCornerSetupScreen(
             Spacer(Modifier.height(16.dp))
 
             BigButton(
-                text = "Select Existing Track",
-                onClick = onSelectExistingTrack
+                text = "Manage Tracks (Select / Edit / Delete)",
+                onClick = onManageTracks
             )
 
             Spacer(Modifier.height(12.dp))
@@ -57,21 +56,7 @@ fun TrackAndCornerSetupScreen(
                 text = "Add New Track",
                 onClick = onAddNewTrack
             )
-
-            Spacer(Modifier.height(12.dp))
-
-            BigButton(
-                text = "Edit Track",
-                onClick = {},
-                //enabled = false
-            )
-
-            Spacer(Modifier.height(12.dp))
-
-            BigButton(
-                text = "Delete Track",
-                onClick = onDeleteTrack
-            )
         }
     }
 }
+
