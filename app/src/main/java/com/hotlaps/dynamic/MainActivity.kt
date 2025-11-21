@@ -177,8 +177,8 @@ class MainActivity : ComponentActivity() {
                             val trackToEdit = trackSelectionViewModel.trackBeingEdited
 
                             if (trackToEdit == null) {
-                                // If somehow we got here without a track, just go back
-                                nav.popBackStack()
+                                // Failsafe: shouldn’t normally happen, but don’t pop again
+                                androidx.compose.material3.Text("No track selected for editing.")
                             } else {
                                 EditTrackScreen(
                                     track = trackToEdit,
@@ -189,6 +189,8 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
                         }
+
+
 
 
 
