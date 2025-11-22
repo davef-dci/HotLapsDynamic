@@ -51,6 +51,13 @@ import kotlin.math.max
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.nativeCanvas
+
+import android.graphics.Paint as AndroidPaint
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.sp
+
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -358,6 +365,22 @@ fun SimpleGGPlot(
 ) {
     val axisColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
 
+    val density = LocalDensity.current
+    val labelTextSizePx = with(density) { 10.sp.toPx() }
+    val labelGapPx = with(density) { 4.dp.toPx() }
+    val androidAxisColor = axisColor.toArgb()
+
+    // Paint used to draw numeric labels for the G rings
+    val labelPaint = remember(labelTextSizePx, androidAxisColor) {
+        AndroidPaint().apply {
+            isAntiAlias = true
+            textSize = labelTextSizePx
+            color = androidAxisColor
+            textAlign = android.graphics.Paint.Align.LEFT
+        }
+    }
+
+
     // --- Auto-scale based on max |G| across both axes ---
     val rawMaxG = samples.maxOfOrNull { sample ->
         max(abs(sample.latG), abs(sample.longG))
@@ -444,19 +467,34 @@ fun SimpleGGPlot(
                     strokeWidth = 1.dp.toPx()
                 )
 
-                // Tick rings every 0.5 G up to maxG
-                val tickStep = 0.5f
+                // Tick rings every 0.5 G up to maxG, with labels like "0.5G", "1.0G", etc.
+                val tickStep = 0.25f
                 var tick = tickStep
-                while (tick < maxG) {
+                val nativeCanvas = drawContext.canvas.nativeCanvas
+
+                while (tick < maxG + 1e-3f) {
                     val r = radius * (tick / maxG)
+
+                    // Draw the ring
                     drawCircle(
                         color = axisColor.copy(alpha = 0.25f),
                         radius = r,
                         center = center,
                         style = Stroke(width = 1.dp.toPx())
                     )
+
+                    // Draw the numeric label just outside the ring on the +X axis
+                    val label = String.format("%.2fG", tick)
+                    nativeCanvas.drawText(
+                        label,
+                        cx + r + labelGapPx,   // a little to the right of the ring
+                        cy - labelGapPx,       // slightly above centerline
+                        labelPaint
+                    )
+
                     tick += tickStep
                 }
+
 
                 // --- Plot samples as connected path + dots ---
                 if (samples.isNotEmpty()) {
