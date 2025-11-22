@@ -24,6 +24,8 @@ import com.hotlaps.dynamic.viewmodel.TrackSelectionViewModel
 import androidx.core.app.ActivityCompat
 import android.content.pm.PackageManager
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Text
 import com.hotlaps.dynamic.viewmodel.DriveViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -37,6 +39,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.hotlaps.dynamic.ui.EditTrackScreen
 import com.hotlaps.dynamic.HotLapsDynamicTheme
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 
 
 
@@ -45,7 +52,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
 // Ask for GPS permission if not granted
-        if (ActivityCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION)
+        if (ActivityCompat.checkSelfPermission(
+                this,
+                android.Manifest.permission.ACCESS_FINE_LOCATION
+            )
             != PackageManager.PERMISSION_GRANTED
         ) {
             ActivityCompat.requestPermissions(
@@ -62,148 +72,161 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    val nav = rememberNavController()
 
-                    // Create ONE shared ViewModel for the whole app
-                    val trackSelectionViewModel: TrackSelectionViewModel = viewModel()
+                    // STEP 1: simple drawer state (we won't open it yet)
+                    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+                    val scope = rememberCoroutineScope()
 
-                    // ViewModel that manages event recording & GPS/corner logic (later)
-                    val driveViewModel: DriveViewModel = viewModel()
-
-                    val context = LocalContext.current
-
-                    LaunchedEffect(Unit) {
-                        driveViewModel.setAppContext(context)
-                    }
-
-
-                    NavHost(navController = nav, startDestination = "splash") {
-
-                        composable("splash") {
-                            SplashDynamics(
-                                onFinished = {
-                                    nav.navigate("menu") {
-                                        popUpTo("splash") { inclusive = true }
-                                    }
-                                }
-                            )
+                    ModalNavigationDrawer(
+                        drawerState = drawerState,
+                        drawerContent = {
+                            // For now, empty drawer — later we'll add menu items
+                            Text("Drawer placeholder", modifier = Modifier.padding(24.dp))
                         }
+                    ) {
+                        val nav = rememberNavController()
 
-                        composable("menu") {
+                        // Create ONE shared ViewModel for the whole app
+                        val trackSelectionViewModel: TrackSelectionViewModel = viewModel()
 
-                            val context = LocalContext.current
+                        // ViewModel that manages event recording & GPS/corner logic (later)
+                        val driveViewModel: DriveViewModel = viewModel()
 
-                            MainMenuDynamics(
-                                onDrive = {
-                                    nav.navigate("drive")
-                                },
-                                onTrackManager = { nav.navigate("trackSetup") },
-                                onEventManager = { nav.navigate("eventManager") },
-                                onCalibrate = { nav.navigate("calib") },
-                                onSettings = { nav.navigate("settings") }
-                            )
+                        val context = LocalContext.current
+
+                        LaunchedEffect(Unit) {
+                            driveViewModel.setAppContext(context)
                         }
 
 
-                        composable("drive") {
-                            GGScreen(
-                                trackSelectionViewModel = trackSelectionViewModel,
-                                driveViewModel = driveViewModel,
-                                onSelectTrack = { nav.navigate("trackManager") }
-                            )
-                        }
+                        NavHost(navController = nav, startDestination = "splash") {
 
-
-
-// Track menu
-                        composable("trackSetup") {
-                            TrackAndCornerSetupScreen(
-                                onBack = { nav.popBackStack() },
-                                onAddNewTrack = { nav.navigate("addTrack") },
-                                onManageTracks = { nav.navigate("trackManager") }  // <- was onSelectExistingTrack / onDeleteTrack
-                            )
-                        }
-
-
-
-                        composable("addTrack") {
-                            AddNewTrackScreen(
-                                onBack = { nav.popBackStack() },
-                                onCreateFromCoordinates = {
-                                    // Navigate to our new screen where we’ll actually enter coords
-                                    nav.navigate("createTrackFromCoordinates")
-                                }
-                            )
-                        }
-
-                        composable("createTrackFromCoordinates") {
-                            CreateTrackFromCoordinatesScreen(
-                                onBack = { nav.popBackStack() }
-                            )
-                        }
-
-
-                        composable("eventManager") {
-                            EventManagerScreen(
-                                onBack = { nav.popBackStack() },
-                                onViewEvents = { nav.navigate("eventViewer") }
-                            )
-                        }
-
-
-                        composable("eventViewer") {
-                            EventViewerScreen(
-                                onBack = { nav.popBackStack() }
-                            )
-                        }
-
-
-
-                        composable("calib") {
-                            CalibrateScreen(onBack = { nav.popBackStack() })
-                        }
-
-                        composable("settings") {
-                            SettingsScreen(onBack = { nav.popBackStack() })
-                        }
-
-                        composable("trackManager") {
-                            TrackManagerScreen(
-                                trackSelectionViewModel = trackSelectionViewModel,   // ← NEW
-                                onBack = { nav.popBackStack() },
-                                onUseTrack = { track: Track ->
-                                    nav.navigate("drive")
-                                },
-                                onEditTrack = { track: Track ->
-                                    trackSelectionViewModel.startEditingTrack(track)
-                                    nav.navigate("editTrack")
-                                }
-                            )
-                        }
-
-                        composable("editTrack") {
-                            val trackToEdit = trackSelectionViewModel.trackBeingEdited
-
-                            if (trackToEdit == null) {
-                                // Failsafe: shouldn’t normally happen, but don’t pop again
-                                androidx.compose.material3.Text("No track selected for editing.")
-                            } else {
-                                EditTrackScreen(
-                                    track = trackToEdit,
-                                    onBack = {
-                                        trackSelectionViewModel.clearEditingTrack()
-                                        nav.popBackStack()
+                            composable("splash") {
+                                SplashDynamics(
+                                    onFinished = {
+                                        nav.navigate("menu") {
+                                            popUpTo("splash") { inclusive = true }
+                                        }
                                     }
                                 )
                             }
+
+                            composable("menu") {
+
+                                val context = LocalContext.current
+
+                                MainMenuDynamics(
+                                    onOpenDrawer = {
+                                        scope.launch {
+                                            drawerState.open()
+                                        }
+                                    },
+                                    onDrive = {
+                                        nav.navigate("drive")
+                                    },
+                                    onTrackManager = { nav.navigate("trackSetup") },
+                                    onEventManager = { nav.navigate("eventManager") },
+                                    onCalibrate = { nav.navigate("calib") },
+                                    onSettings = { nav.navigate("settings") }
+                                )
+                            }
+
+
+
+                            composable("drive") {
+                                GGScreen(
+                                    trackSelectionViewModel = trackSelectionViewModel,
+                                    driveViewModel = driveViewModel,
+                                    onSelectTrack = { nav.navigate("trackManager") }
+                                )
+                            }
+
+
+// Track menu
+                            composable("trackSetup") {
+                                TrackAndCornerSetupScreen(
+                                    onBack = { nav.popBackStack() },
+                                    onAddNewTrack = { nav.navigate("addTrack") },
+                                    onManageTracks = { nav.navigate("trackManager") }  // <- was onSelectExistingTrack / onDeleteTrack
+                                )
+                            }
+
+
+
+                            composable("addTrack") {
+                                AddNewTrackScreen(
+                                    onBack = { nav.popBackStack() },
+                                    onCreateFromCoordinates = {
+                                        // Navigate to our new screen where we’ll actually enter coords
+                                        nav.navigate("createTrackFromCoordinates")
+                                    }
+                                )
+                            }
+
+                            composable("createTrackFromCoordinates") {
+                                CreateTrackFromCoordinatesScreen(
+                                    onBack = { nav.popBackStack() }
+                                )
+                            }
+
+
+                            composable("eventManager") {
+                                EventManagerScreen(
+                                    onBack = { nav.popBackStack() },
+                                    onViewEvents = { nav.navigate("eventViewer") }
+                                )
+                            }
+
+
+                            composable("eventViewer") {
+                                EventViewerScreen(
+                                    onBack = { nav.popBackStack() }
+                                )
+                            }
+
+
+
+                            composable("calib") {
+                                CalibrateScreen(onBack = { nav.popBackStack() })
+                            }
+
+                            composable("settings") {
+                                SettingsScreen(onBack = { nav.popBackStack() })
+                            }
+
+                            composable("trackManager") {
+                                TrackManagerScreen(
+                                    trackSelectionViewModel = trackSelectionViewModel,   // ← NEW
+                                    onBack = { nav.popBackStack() },
+                                    onUseTrack = { track: Track ->
+                                        nav.navigate("drive")
+                                    },
+                                    onEditTrack = { track: Track ->
+                                        trackSelectionViewModel.startEditingTrack(track)
+                                        nav.navigate("editTrack")
+                                    }
+                                )
+                            }
+
+                            composable("editTrack") {
+                                val trackToEdit = trackSelectionViewModel.trackBeingEdited
+
+                                if (trackToEdit == null) {
+                                    // Failsafe: shouldn’t normally happen, but don’t pop again
+                                    androidx.compose.material3.Text("No track selected for editing.")
+                                } else {
+                                    EditTrackScreen(
+                                        track = trackToEdit,
+                                        onBack = {
+                                            trackSelectionViewModel.clearEditingTrack()
+                                            nav.popBackStack()
+                                        }
+                                    )
+                                }
+                            }
+
+
                         }
-
-
-
-
-
-
-
                     }
                 }
             }

@@ -17,6 +17,8 @@ import com.hotlaps.dynamic.BuildConfig
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Menu
+
 
 @Composable
 fun BigButton(
@@ -47,6 +49,7 @@ fun BigButton(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainMenuDynamics(
+    onOpenDrawer: () -> Unit,
     onDrive: () -> Unit,
     onTrackManager: () -> Unit,
     onEventManager: () -> Unit,
@@ -65,6 +68,14 @@ fun MainMenuDynamics(
         topBar = {
             TopAppBar(
                 title = { Text("Hotlaps Dynamic") },
+                navigationIcon = {
+                    IconButton(onClick = onOpenDrawer) {
+                        Icon(
+                            imageVector = Icons.Default.Menu,
+                            contentDescription = "Open menu"
+                        )
+                    }
+                },
                 actions = {
                     IconButton(onClick = onSettings) {
                         Icon(
@@ -76,6 +87,7 @@ fun MainMenuDynamics(
             )
         }
     ) { innerPadding ->
+
 
         Column(
             modifier = Modifier
