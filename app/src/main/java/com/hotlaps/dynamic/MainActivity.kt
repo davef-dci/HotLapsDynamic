@@ -49,6 +49,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.clickable
 
 
 
@@ -83,6 +84,8 @@ class MainActivity : ComponentActivity() {
                     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
                     val scope = rememberCoroutineScope()
 
+                    val nav = rememberNavController()
+
                     ModalNavigationDrawer(
                         drawerState = drawerState,
                         drawerContent = {
@@ -104,38 +107,70 @@ class MainActivity : ComponentActivity() {
                                     text = "Drive",
                                     style = MaterialTheme.typography.bodyLarge,
                                     modifier = Modifier
-                                        .clickable { /* we will fill in the action next */ }
+                                        .clickable {
+                                            scope.launch {
+                                                drawerState.close()
+                                                nav.navigate("drive") {
+                                                    launchSingleTop = true
+                                                }
+                                            }
+                                        }
                                         .padding(vertical = 8.dp)
+
                                 )
 
                                 Text(
                                     text = "Track Manager",
                                     style = MaterialTheme.typography.bodyLarge,
                                     modifier = Modifier
-                                        .clickable { /* we will fill in the action next */ }
+                                        .clickable {
+                                            scope.launch {
+                                                drawerState.close()
+                                                nav.navigate("trackManager") {
+                                                    launchSingleTop = true
+                                                }
+                                            }
+                                        }
                                         .padding(vertical = 8.dp)
+
                                 )
 
                                 Text(
                                     text = "Event Manager",
                                     style = MaterialTheme.typography.bodyLarge,
                                     modifier = Modifier
-                                        .clickable { /* we will fill in the action next */ }
+                                        .clickable {
+                                            scope.launch {
+                                                drawerState.close()
+                                                nav.navigate("eventManager") {
+                                                    launchSingleTop = true
+                                                }
+                                            }
+                                        }
                                         .padding(vertical = 8.dp)
+
                                 )
 
                                 Text(
                                     text = "Settings",
                                     style = MaterialTheme.typography.bodyLarge,
                                     modifier = Modifier
-                                        .clickable { /* we will fill in the action next */ }
+                                        .clickable {
+                                            scope.launch {
+                                                drawerState.close()
+                                                nav.navigate("settings") {
+                                                    launchSingleTop = true
+                                                }
+                                            }
+                                        }
                                         .padding(vertical = 8.dp)
+
                                 )
                             }
                         }
 
                     ) {
-                        val nav = rememberNavController()
+
 
                         // Create ONE shared ViewModel for the whole app
                         val trackSelectionViewModel: TrackSelectionViewModel = viewModel()
@@ -155,7 +190,7 @@ class MainActivity : ComponentActivity() {
                             composable("splash") {
                                 SplashDynamics(
                                     onFinished = {
-                                        nav.navigate("menu") {
+                                        nav.navigate("drive") {
                                             popUpTo("splash") { inclusive = true }
                                         }
                                     }
@@ -188,9 +223,23 @@ class MainActivity : ComponentActivity() {
                                 GGScreen(
                                     trackSelectionViewModel = trackSelectionViewModel,
                                     driveViewModel = driveViewModel,
-                                    onSelectTrack = { nav.navigate("trackManager") }
+                                    onSelectTrack = { nav.navigate("trackManager") },
+                                    onOpenDrawer = {
+                                        scope.launch {
+                                            drawerState.open()
+                                        }
+                                    },
+                                    onOpenSettings = {
+                                        scope.launch {
+                                            drawerState.close()
+                                            nav.navigate("settings") {
+                                                launchSingleTop = true
+                                            }
+                                        }
+                                    }
                                 )
                             }
+
 
 
 // Track menu

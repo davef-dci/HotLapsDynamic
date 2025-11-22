@@ -108,6 +108,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.filled.ArrowDropDown
 
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Settings
+
 
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -116,7 +119,9 @@ fun GGScreen(
     modifier: Modifier = Modifier,
     trackSelectionViewModel: TrackSelectionViewModel,
     driveViewModel: DriveViewModel,
-    onSelectTrack: () -> Unit          // <--- add this
+    onSelectTrack: () -> Unit,
+    onOpenDrawer: () -> Unit,
+    onOpenSettings: () -> Unit
 ) {
 
     // Keep screen on while this Composable is visible
@@ -448,15 +453,30 @@ fun GGScreen(
                 title = {
                     Text(
                         text = "Dynamic G-Force Map",
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.fillMaxWidth(),
-                        textAlign = TextAlign.Center
+                        fontWeight = FontWeight.Bold
                     )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onOpenDrawer) {
+                        Icon(
+                            imageVector = Icons.Default.Menu,
+                            contentDescription = "Open menu"
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Settings"
+                        )
+                    }
                 }
             )
         }
 
     ) { inner ->
+
         Column(
             modifier = modifier
                 .padding(inner)
