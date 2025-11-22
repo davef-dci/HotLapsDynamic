@@ -23,6 +23,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hotlaps.dynamic.viewmodel.TrackSelectionViewModel
 import androidx.core.app.ActivityCompat
 import android.content.pm.PackageManager
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.DrawerValue
@@ -44,6 +45,11 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.statusBarsPadding
+
 
 
 
@@ -80,9 +86,54 @@ class MainActivity : ComponentActivity() {
                     ModalNavigationDrawer(
                         drawerState = drawerState,
                         drawerContent = {
-                            // For now, empty drawer — later we'll add menu items
-                            Text("Drawer placeholder", modifier = Modifier.padding(24.dp))
+                            Column(
+                                modifier = Modifier
+                                    .statusBarsPadding()
+                                    .padding(24.dp)
+                            ) {
+
+                                Text(
+                                    text = "Navigate",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    modifier = Modifier
+                                        .clickable { /* we will fill in the action next */ }
+                                        .padding(vertical = 8.dp)
+                                )
+
+                                Text(
+                                    text = "Drive",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    modifier = Modifier
+                                        .clickable { /* we will fill in the action next */ }
+                                        .padding(vertical = 8.dp)
+                                )
+
+                                Text(
+                                    text = "Track Manager",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    modifier = Modifier
+                                        .clickable { /* we will fill in the action next */ }
+                                        .padding(vertical = 8.dp)
+                                )
+
+                                Text(
+                                    text = "Event Manager",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    modifier = Modifier
+                                        .clickable { /* we will fill in the action next */ }
+                                        .padding(vertical = 8.dp)
+                                )
+
+                                Text(
+                                    text = "Settings",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    modifier = Modifier
+                                        .clickable { /* we will fill in the action next */ }
+                                        .padding(vertical = 8.dp)
+                                )
+                            }
                         }
+
                     ) {
                         val nav = rememberNavController()
 
