@@ -110,6 +110,8 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.foundation.background
+
 
 
 
@@ -121,7 +123,8 @@ fun GGScreen(
     driveViewModel: DriveViewModel,
     onSelectTrack: () -> Unit,
     onOpenDrawer: () -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    onOpenCalibrate: () -> Unit
 ) {
 
     // Keep screen on while this Composable is visible
@@ -173,6 +176,10 @@ fun GGScreen(
     val calibRepo = remember(context) { CalibRepo(context) }
     val calibState by calibRepo.state
         .collectAsStateWithLifecycle(initialValue = CalibState(vec = null, savedAtEpochMs = null))
+
+    // TRUE if we have a saved forward vector, FALSE if not calibrated yet
+    val isCalibrated = calibState.vec != null
+
 
     // Latest sensor readings
     var latestAccelX by remember { mutableStateOf(0f) }
@@ -477,383 +484,406 @@ fun GGScreen(
 
     ) { inner ->
 
-        Column(
+        Box(
             modifier = modifier
                 .padding(inner)
                 .fillMaxSize()
         ) {
 
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier.fillMaxSize()
-            ) { page ->
-                when (page) {
-                    // === Page 0: Main driving HUD + G-G plot ===
-                    0 -> {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 12.dp),
-                            verticalArrangement = Arrangement.Top,
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            // --- Top HUD (trimmed to essentials) ---
+            // 1) Main Drive / Debug content
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+            ) {
+
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize()
+                ) { page ->
+                    when (page) {
+                        // === Page 0: Main driving HUD + G-G plot ===
+                        0 -> {
                             Column(
-                                modifier = Modifier.padding(top = 8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 12.dp),
+                                verticalArrangement = Arrangement.Top,
+                                horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-
-                                // Track + Event (clickable to choose/change track)
-                                val t = activeTrack
-
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 4.dp)
-                                        .clickable { onSelectTrack() },   // <--- new callback we’ll add
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
+                                // --- Top HUD (trimmed to essentials) ---
+                                Column(
+                                    modifier = Modifier.padding(top = 8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
+
+                                    // Track + Event (clickable to choose/change track)
+                                    val t = activeTrack
+
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 4.dp)
+                                            .clickable { onSelectTrack() },
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = if (t != null) {
+                                                "Track: ${t.name} (${t.corners.size} corners)"
+                                            } else {
+                                                "Track: (none selected – tap to choose)"
+                                            },
+                                            fontSize = 20.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (t != null) MaterialTheme.colorScheme.onSurface else Color.Red
+                                        )
+
+                                        Spacer(Modifier.width(6.dp))
+
+                                        Icon(
+                                            imageVector = Icons.Default.ArrowDropDown,
+                                            contentDescription = "Change track"
+                                        )
+                                    }
+
+                                    // Recording state
                                     Text(
-                                        text = if (t != null) {
-                                            "Track: ${t.name} (${t.corners.size} corners)"
-                                        } else {
-                                            "Track: (none selected – tap to choose)"
+                                        text = when (recordingState) {
+                                            DriveViewModel.RecordingState.Idle -> "Recording: Idle"
+                                            DriveViewModel.RecordingState.Recording -> "Recording: LIVE"
+                                            DriveViewModel.RecordingState.Paused -> "Recording: Paused"
                                         },
-                                        fontSize = 20.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (t != null) MaterialTheme.colorScheme.onSurface else Color.Red
+                                        fontSize = 16.sp,
+                                        color = when (recordingState) {
+                                            DriveViewModel.RecordingState.Idle -> Color.Gray
+                                            DriveViewModel.RecordingState.Recording -> Color.Red
+                                            DriveViewModel.RecordingState.Paused -> Color(0xFFFFC107)
+                                        },
+                                        modifier = Modifier.padding(top = 4.dp)
                                     )
 
-                                    Spacer(Modifier.width(6.dp))
-
-                                    Icon(
-                                        imageVector = Icons.Default.ArrowDropDown,
-                                        contentDescription = "Change track"
-                                    )
-                                }
-
-
-                                // NEW: show current recording state
-                                Text(
-                                    text = when (recordingState) {
-                                        DriveViewModel.RecordingState.Idle -> "Recording: Idle"
-                                        DriveViewModel.RecordingState.Recording -> "Recording: LIVE"
-                                        DriveViewModel.RecordingState.Paused -> "Recording: Paused"
-                                    },
-                                    fontSize = 16.sp,
-                                    color = when (recordingState) {
-                                        DriveViewModel.RecordingState.Idle -> Color.Gray
-                                        DriveViewModel.RecordingState.Recording -> Color.Red
-                                        DriveViewModel.RecordingState.Paused -> Color(0xFFFFC107) // amber-ish
-                                    },
-                                    modifier = Modifier.padding(top = 4.dp)
-                                )
-
-// NEW: Manual recording controls
-                                // Manual recording controls – bigger, labeled buttons
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 8.dp),
-                                    horizontalArrangement = Arrangement.SpaceEvenly,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    when (recordingState) {
-                                        DriveViewModel.RecordingState.Idle -> {
-                                            // Big red "Record" button
-                                            Button(
-                                                onClick = {
-                                                    val track = activeTrack   // may be null
-                                                    driveViewModel.startManualEvent(context, track)
-                                                    Log.d(
-                                                        "GGScreen",
-                                                        "Record pressed — startManualEvent, track=${track?.name ?: "(none)"}"
+                                    // Manual recording controls
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 8.dp),
+                                        horizontalArrangement = Arrangement.SpaceEvenly,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        when (recordingState) {
+                                            DriveViewModel.RecordingState.Idle -> {
+                                                Button(
+                                                    onClick = {
+                                                        val track = activeTrack
+                                                        driveViewModel.startManualEvent(context, track)
+                                                        Log.d(
+                                                            "GGScreen",
+                                                            "Record pressed — startManualEvent, track=${track?.name ?: "(none)"}"
+                                                        )
+                                                    },
+                                                    colors = ButtonDefaults.buttonColors(
+                                                        containerColor = Color(0xFFDC2626),
+                                                        contentColor = Color.White
                                                     )
-                                                },
-                                                colors = ButtonDefaults.buttonColors(
-                                                    containerColor = Color(0xFFDC2626), // red
-                                                    contentColor = Color.White
-                                                )
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Filled.FiberManualRecord,
-                                                    contentDescription = "Start recording",
-                                                    modifier = Modifier.size(24.dp)
-                                                )
-                                                Spacer(Modifier.width(8.dp))
-                                                Text("Record")
-                                            }
-                                        }
-
-                                        DriveViewModel.RecordingState.Recording -> {
-                                            // Amber "Pause" + red "Stop"
-                                            Button(
-                                                onClick = { driveViewModel.pauseRecording() },
-                                                colors = ButtonDefaults.buttonColors(
-                                                    containerColor = Color(0xFFFFC107), // amber
-                                                    contentColor = Color.Black
-                                                )
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Filled.Pause,
-                                                    contentDescription = "Pause recording",
-                                                    modifier = Modifier.size(20.dp)
-                                                )
-                                                Spacer(Modifier.width(6.dp))
-                                                Text("Pause")
-                                            }
-
-                                            Button(
-                                                onClick = {
-                                                    val evt = currentEvent
-                                                    if (evt != null) {
-                                                        // Pre-fill with the current displayName or fallback to name
-                                                        pendingEventName = evt.displayName.ifBlank { evt.name }
-                                                        showRenameDialog = true
-                                                    } else {
-                                                        // No current event; just stop to be safe
-                                                        driveViewModel.stopEvent()
-                                                    }
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Filled.FiberManualRecord,
+                                                        contentDescription = "Start recording",
+                                                        modifier = Modifier.size(24.dp)
+                                                    )
+                                                    Spacer(Modifier.width(8.dp))
+                                                    Text("Record")
                                                 }
-                                                ,
-                                                colors = ButtonDefaults.buttonColors(
-                                                    containerColor = Color(0xFFDC2626), // red
-                                                    contentColor = Color.White
-                                                )
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Filled.Stop,
-                                                    contentDescription = "Stop recording",
-                                                    modifier = Modifier.size(20.dp)
-                                                )
-                                                Spacer(Modifier.width(6.dp))
-                                                Text("Stop")
-                                            }
-                                        }
-
-                                        DriveViewModel.RecordingState.Paused -> {
-                                            // Green "Resume" + red "Stop"
-                                            Button(
-                                                onClick = { driveViewModel.resumeRecording() },
-                                                colors = ButtonDefaults.buttonColors(
-                                                    containerColor = Color(0xFF16A34A), // green
-                                                    contentColor = Color.White
-                                                )
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Filled.PlayArrow,
-                                                    contentDescription = "Resume recording",
-                                                    modifier = Modifier.size(20.dp)
-                                                )
-                                                Spacer(Modifier.width(6.dp))
-                                                Text("Resume")
                                             }
 
-                                            Button(
-                                                onClick = {
-                                                    val evt = currentEvent
-                                                    if (evt != null) {
-                                                        // Pre-fill with the current displayName or fallback to name
-                                                        pendingEventName = evt.displayName.ifBlank { evt.name }
-                                                        showRenameDialog = true
-                                                    } else {
-                                                        // No current event; just stop to be safe
-                                                        driveViewModel.stopEvent()
-                                                    }
+                                            DriveViewModel.RecordingState.Recording -> {
+                                                Button(
+                                                    onClick = { driveViewModel.pauseRecording() },
+                                                    colors = ButtonDefaults.buttonColors(
+                                                        containerColor = Color(0xFFFFC107),
+                                                        contentColor = Color.Black
+                                                    )
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Filled.Pause,
+                                                        contentDescription = "Pause recording",
+                                                        modifier = Modifier.size(20.dp)
+                                                    )
+                                                    Spacer(Modifier.width(6.dp))
+                                                    Text("Pause")
                                                 }
-                                                ,
-                                                colors = ButtonDefaults.buttonColors(
-                                                    containerColor = Color(0xFFDC2626), // red
-                                                    contentColor = Color.White
-                                                )
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Filled.Stop,
-                                                    contentDescription = "Stop recording",
-                                                    modifier = Modifier.size(20.dp)
-                                                )
-                                                Spacer(Modifier.width(6.dp))
-                                                Text("Stop")
+
+                                                Button(
+                                                    onClick = {
+                                                        val evt = currentEvent
+                                                        if (evt != null) {
+                                                            pendingEventName = evt.displayName.ifBlank { evt.name }
+                                                            showRenameDialog = true
+                                                        } else {
+                                                            driveViewModel.stopEvent()
+                                                        }
+                                                    },
+                                                    colors = ButtonDefaults.buttonColors(
+                                                        containerColor = Color(0xFFDC2626),
+                                                        contentColor = Color.White
+                                                    )
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Filled.Stop,
+                                                        contentDescription = "Stop recording",
+                                                        modifier = Modifier.size(20.dp)
+                                                    )
+                                                    Spacer(Modifier.width(6.dp))
+                                                    Text("Stop")
+                                                }
+                                            }
+
+                                            DriveViewModel.RecordingState.Paused -> {
+                                                Button(
+                                                    onClick = { driveViewModel.resumeRecording() },
+                                                    colors = ButtonDefaults.buttonColors(
+                                                        containerColor = Color(0xFF16A34A),
+                                                        contentColor = Color.White
+                                                    )
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Filled.PlayArrow,
+                                                        contentDescription = "Resume recording",
+                                                        modifier = Modifier.size(20.dp)
+                                                    )
+                                                    Spacer(Modifier.width(6.dp))
+                                                    Text("Resume")
+                                                }
+
+                                                Button(
+                                                    onClick = {
+                                                        val evt = currentEvent
+                                                        if (evt != null) {
+                                                            pendingEventName = evt.displayName.ifBlank { evt.name }
+                                                            showRenameDialog = true
+                                                        } else {
+                                                            driveViewModel.stopEvent()
+                                                        }
+                                                    },
+                                                    colors = ButtonDefaults.buttonColors(
+                                                        containerColor = Color(0xFFDC2626),
+                                                        contentColor = Color.White
+                                                    )
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Filled.Stop,
+                                                        contentDescription = "Stop recording",
+                                                        modifier = Modifier.size(20.dp)
+                                                    )
+                                                    Spacer(Modifier.width(6.dp))
+                                                    Text("Stop")
+                                                }
                                             }
                                         }
                                     }
-                                }
 
-
-                                Text(
-                                    text = "Event: ${currentEvent?.name ?: "(none)"}",
-                                    fontSize = 16.sp
-                                )
-
-                                // Nearest corner summary (headline for Drive page)
-                                nearestCornerInfo?.let { (label, distM) ->
                                     Text(
-                                        text = "Nearest corner: #$label (${String.format("%.1f", distM)} m)",
-                                        fontSize = 18.sp,
-                                        modifier = Modifier.padding(top = 4.dp)
+                                        text = "Event: ${currentEvent?.name ?: "(none)"}",
+                                        fontSize = 16.sp
                                     )
+
+                                    nearestCornerInfo?.let { (label, distM) ->
+                                        Text(
+                                            text = "Nearest corner: #$label (${String.format("%.1f", distM)} m)",
+                                            fontSize = 18.sp,
+                                            modifier = Modifier.padding(top = 4.dp)
+                                        )
+                                    }
                                 }
-                            }
-
-                            Spacer(Modifier.height(8.dp))
-
-                            // --- Plot + peak summary ---
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .verticalScroll(rememberScrollState())
-                                    .padding(horizontal = 4.dp)
-                            ) {
-                                GGPlot(
-                                    maxAbsG = ggMaxG,
-                                    latG = latG,
-                                    longG = longG,
-                                    trailSeconds = ggTrailWindow,
-                                    ticks = ticks,
-                                    brakeThreshG = trailBrakeG,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .aspectRatio(1f),
-                                )
 
                                 Spacer(Modifier.height(8.dp))
 
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .verticalScroll(rememberScrollState())
+                                        .padding(horizontal = 4.dp)
+                                ) {
+                                    GGPlot(
+                                        maxAbsG = ggMaxG,
+                                        latG = latG,
+                                        longG = longG,
+                                        trailSeconds = ggTrailWindow,
+                                        ticks = ticks,
+                                        brakeThreshG = trailBrakeG,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .aspectRatio(1f),
+                                    )
 
+                                    Spacer(Modifier.height(8.dp))
+                                }
+                            }
+                        }
 
+                        // === Page 1: Debug panel ===
+                        1 -> {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(12.dp),
+                                verticalArrangement = Arrangement.Top,
+                                horizontalAlignment = Alignment.Start
+                            ) {
+                                Text(
+                                    text = "Debug Panel",
+                                    fontSize = 22.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(bottom = 8.dp)
+                                )
 
+                                val t = activeTrack
 
+                                Text("Track: ${t?.name ?: "(none)"}")
+                                if (t != null) {
+                                    Text("Corners: ${t.corners.size}")
+                                }
+
+                                Spacer(Modifier.height(8.dp))
+
+                                Text("Raw GPS (screen): ${"%.6f".format(gpsLat)}, ${"%.6f".format(gpsLon)}")
+                                Text("VM GPS: ${"%.6f".format(vmGpsLat)}, ${"%.6f".format(vmGpsLon)}")
+                                Text("VM G: lat=${"%.2f".format(vmLatG)}, long=${"%.2f".format(vmLongG)}")
+
+                                Spacer(Modifier.height(8.dp))
+
+                                if (t != null && firstCorner != null && distanceToFirstCorner != null) {
+                                    Text(
+                                        "Corner 1 distance: ${"%.1f".format(distanceToFirstCorner)} m"
+                                    )
+                                } else {
+                                    Text("Corner 1 distance: (n/a)")
+                                }
+
+                                nearestCornerInfo?.let { (_, distM) ->
+                                    val inside = driveViewModel.isWithinCornerTriggerRadius(distM)
+                                    Text("Inside trigger radius: $inside")
+                                } ?: run {
+                                    Text("Inside trigger radius: (n/a)")
+                                }
+
+                                Text(
+                                    text = "Corner trigger radius: ${
+                                        "%.1f".format(
+                                            driveViewModel.getCornerTriggerRadiusMeters()
+                                        )
+                                    } m",
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+
+                                nearestCornerInfo?.let { (label, distM) ->
+                                    Text(
+                                        text = "Nearest corner (all): #$label (${String.format("%.1f", distM)} m)",
+                                        modifier = Modifier.padding(top = 4.dp)
+                                    )
+                                } ?: run {
+                                    Text(
+                                        text = "Nearest corner (all): (n/a)",
+                                        modifier = Modifier.padding(top = 4.dp)
+                                    )
+                                }
+
+                                Spacer(Modifier.height(12.dp))
+
+                                Text("Event ID: ${currentEvent?.id ?: 0L}")
+                                Text("Event name: ${currentEvent?.name ?: "(none)"}")
+                                Text("TrackId on Event: ${currentEvent?.trackId ?: 0L}")
+
+                                Spacer(Modifier.height(16.dp))
+
+                                Text(
+                                    text = "G-G Smoothing",
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Samples: $smoothingSamples (~${
+                                        "%.2f".format(
+                                            smoothingSamples / 20f
+                                        )
+                                    } s at 20 Hz)",
+                                    fontSize = 14.sp
+                                )
+
+                                Slider(
+                                    value = smoothingSamples.toFloat(),
+                                    onValueChange = { newValue ->
+                                        val clamped = newValue.toInt().coerceIn(1, 30)
+                                        smoothingSamples = clamped
+                                        ma.setWindowSize(clamped)
+                                    },
+                                    valueRange = 1f..30f,
+                                    steps = 30 - 2
+                                )
+
+                                if (t != null && firstCorner != null) {
+                                    Text(
+                                        text = "GPS Simulation (Debug only)",
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(bottom = 4.dp)
+                                    )
+
+                                    Button(
+                                        onClick = {
+                                            driveViewModel.updateGps(firstCorner.lat, firstCorner.lon)
+                                        },
+                                        modifier = Modifier.padding(bottom = 4.dp)
+                                    ) {
+                                        Text("Teleport INSIDE corner 1")
+                                    }
+                                } else {
+                                    Text("GPS Simulation: (needs a track with at least one corner)")
+                                }
                             }
                         }
                     }
+                }
+            }
 
-                    // === Page 1: Debug panel ===
-                    1 -> {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(12.dp),
-                            verticalArrangement = Arrangement.Top,
-                            horizontalAlignment = Alignment.Start
+            // 2) Calibration overlay (only when NOT calibrated)
+            if (!isCalibrated) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
+                        .padding(24.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.align(Alignment.Center),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "Calibration required",
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                        Text(
+                            text = "Before using the G-Force map, please calibrate the accelerometers so braking and acceleration are oriented correctly.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center
+                        )
+                        Button(
+                            onClick = { onOpenCalibrate() }
                         ) {
-                            Text(
-                                text = "Debug Panel",
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(bottom = 8.dp)
-                            )
-
-                            val t = activeTrack
-
-                            Text("Track: ${t?.name ?: "(none)"}")
-                            if (t != null) {
-                                Text("Corners: ${t.corners.size}")
-                            }
-
-                            Spacer(Modifier.height(8.dp))
-
-                            Text("Raw GPS (screen): ${"%.6f".format(gpsLat)}, ${"%.6f".format(gpsLon)}")
-                            Text("VM GPS: ${"%.6f".format(vmGpsLat)}, ${"%.6f".format(vmGpsLon)}")
-                            Text("VM G: lat=${"%.2f".format(vmLatG)}, long=${"%.2f".format(vmLongG)}")
-
-                            Spacer(Modifier.height(8.dp))
-
-                            if (t != null && firstCorner != null && distanceToFirstCorner != null) {
-                                Text(
-                                    "Corner 1 distance: ${"%.1f".format(distanceToFirstCorner)} m"
-                                )
-                            } else {
-                                Text("Corner 1 distance: (n/a)")
-                            }
-
-                            // Show whether we are inside the trigger radius
-                            nearestCornerInfo?.let { (_, distM) ->
-                                val inside = driveViewModel.isWithinCornerTriggerRadius(distM)
-                                Text("Inside trigger radius: $inside")
-                            } ?: run {
-                                Text("Inside trigger radius: (n/a)")
-                            }
-
-                            Text(
-                                text = "Corner trigger radius: ${"%.1f".format(driveViewModel.getCornerTriggerRadiusMeters())} m",
-                                modifier = Modifier.padding(top = 4.dp)
-                            )
-
-                            nearestCornerInfo?.let { (label, distM) ->
-                                Text(
-                                    text = "Nearest corner (all): #$label (${String.format("%.1f", distM)} m)",
-                                    modifier = Modifier.padding(top = 4.dp)
-                                )
-                            } ?: run {
-                                Text(
-                                    text = "Nearest corner (all): (n/a)",
-                                    modifier = Modifier.padding(top = 4.dp)
-                                )
-                            }
-
-                            Spacer(Modifier.height(12.dp))
-
-                            Text("Event ID: ${currentEvent?.id ?: 0L}")
-                            Text("Event name: ${currentEvent?.name ?: "(none)"}")
-                            Text("TrackId on Event: ${currentEvent?.trackId ?: 0L}")
-
-                            Spacer(Modifier.height(12.dp))
-
-                            Spacer(Modifier.height(16.dp))
-
-                            Text(
-                                text = "G-G Smoothing",
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = "Samples: $smoothingSamples (~${"%.2f".format(smoothingSamples / 20f)} s at 20 Hz)",
-                                fontSize = 14.sp
-                            )
-
-                            Slider(
-                                value = smoothingSamples.toFloat(),
-                                onValueChange = { newValue ->
-                                    val clamped = newValue.toInt().coerceIn(1, 30)
-                                    smoothingSamples = clamped
-                                    ma.setWindowSize(clamped)
-                                },
-                                valueRange = 1f..30f,
-                                steps = 30 - 2   // internal steps
-                            )
-
-
-
-// Simple GPS simulation controls for desk testing
-                            if (t != null && firstCorner != null) {
-                                Text(
-                                    text = "GPS Simulation (Debug only)",
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(bottom = 4.dp)
-                                )
-
-                                // Teleport directly to corner 1 apex (inside trigger radius)
-                                Button(
-                                    onClick = {
-                                        driveViewModel.updateGps(firstCorner.lat, firstCorner.lon)
-                                    },
-                                    modifier = Modifier.padding(bottom = 4.dp)
-                                ) {
-                                    Text("Teleport INSIDE corner 1")
-                                }
-
-
-                            } else {
-                                Text("GPS Simulation: (needs a track with at least one corner)")
-                            }
-
+                            Text("Go to Calibration")
                         }
+                        Text(
+                            text = "Tip: park on a level surface, point the car straight ahead, then follow the on-screen steps.",
+                            style = MaterialTheme.typography.bodySmall,
+                            textAlign = TextAlign.Center
+                        )
                     }
                 }
             }
         }
     }
 }
+
 
 
 @Composable

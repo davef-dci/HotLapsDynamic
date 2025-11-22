@@ -242,7 +242,17 @@ class MainActivity : ComponentActivity() {
                                                 launchSingleTop = true
                                             }
                                         }
+                                    },
+
+                                    onOpenCalibrate = {
+                                        scope.launch {
+                                            drawerState.close()
+                                            nav.navigate("calib") {
+                                                launchSingleTop = true
+                                            }
+                                        }
                                     }
+
                                 )
                             }
 
