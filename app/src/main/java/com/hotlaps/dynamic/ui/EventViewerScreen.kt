@@ -277,6 +277,60 @@ fun EventViewerScreen(
                             ?: neutralSampleColor
                     }
                 )
+
+
+                // --- MAX G SUMMARY SECTION ---
+                Spacer(Modifier.height(24.dp))
+
+                if (samplesForSelected.isNotEmpty()) {
+
+                    Text(
+                        text = "Max G summary",
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    Spacer(Modifier.height(8.dp))
+
+                    // If there are NO corner-tagged samples, show a single overall row
+                    if (cornerVisitGroups.isEmpty()) {
+                        val overallSummary = remember(samplesForSelected) {
+                            computeMaxGSummary(samplesForSelected)
+                        }
+
+                        MaxGSummaryHeaderRow()
+                        Spacer(Modifier.height(4.dp))
+                        MaxGSummaryRow(label = "Event", summary = overallSummary)
+                    } else {
+                        // If we DO have corner-tagged samples, show one row per visit
+                        Text(
+                            text = "Per visit (across all corners):",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Spacer(Modifier.height(8.dp))
+
+                        MaxGSummaryHeaderRow()
+                        Spacer(Modifier.height(4.dp))
+
+                        // Group tagged samples by visit number
+                        val samplesByVisit = remember(samplesForSelected) {
+                            samplesForSelected
+                                .filter { it.cornerIndex > 0 && it.visitNumber > 0 }
+                                .groupBy { it.visitNumber }
+                                .toSortedMap()
+                        }
+
+                        samplesByVisit.forEach { (visitNum, visitSamples) ->
+                            val summary = computeMaxGSummary(visitSamples)
+                            MaxGSummaryRow(
+                                label = "Visit $visitNum",
+                                summary = summary
+                            )
+                            Spacer(Modifier.height(2.dp))
+                        }
+                    }
+                }
+
+
+
             }
 
 
@@ -470,6 +524,122 @@ fun SimpleGGPlot(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .padding(end = 2.dp)
+        )
+    }
+}
+
+private data class MaxGSummary(
+    val braking: Float,
+    val accel: Float,
+    val left: Float,
+    val right: Float
+)
+
+/**
+ * Compute max braking/accel/left/right for a set of samples.
+ * - Braking  = max(-longG, 0)
+ * - Accel    = max(longG, 0)
+ * - Left     = max(latG, 0)
+ * - Right    = max(-latG, 0)
+ */
+private fun computeMaxGSummary(samples: List<EventSample>): MaxGSummary {
+    var maxBrake = 0f
+    var maxAccel = 0f
+    var maxLeft = 0f
+    var maxRight = 0f
+
+    for (s in samples) {
+        // Longitudinal
+        if (s.longG < 0f) {
+            val brake = -s.longG
+            if (brake > maxBrake) maxBrake = brake
+        } else {
+            if (s.longG > maxAccel) maxAccel = s.longG
+        }
+
+        // Lateral
+        if (s.latG < 0f) {
+            val right = -s.latG
+            if (right > maxRight) maxRight = right
+        } else {
+            if (s.latG > maxLeft) maxLeft = s.latG
+        }
+    }
+
+    return MaxGSummary(
+        braking = maxBrake,
+        accel = maxAccel,
+        left = maxLeft,
+        right = maxRight
+    )
+}
+
+
+@Composable
+private fun MaxGSummaryHeaderRow() {
+    Row(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "",
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.weight(1.2f)
+        )
+        Text(
+            text = "Braking",
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            text = "Accel",
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            text = "Left",
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            text = "Right",
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+@Composable
+private fun MaxGSummaryRow(
+    label: String,
+    summary: MaxGSummary
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.weight(1.2f)
+        )
+        Text(
+            text = String.format("%.1fG", summary.braking),
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            text = String.format("%.1fG", summary.accel),
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            text = String.format("%.1fG", summary.left),
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            text = String.format("%.1fG", summary.right),
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.weight(1f)
         )
     }
 }
