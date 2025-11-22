@@ -126,13 +126,13 @@ class MainActivity : ComponentActivity() {
                                 )
 
                                 Text(
-                                    text = "Track Manager",
+                                    text = "Tracks",
                                     style = MaterialTheme.typography.bodyLarge,
                                     modifier = Modifier
                                         .clickable {
                                             scope.launch {
                                                 drawerState.close()
-                                                nav.navigate("trackManager") {
+                                                nav.navigate("trackSetup") {
                                                     launchSingleTop = true
                                                 }
                                             }
@@ -142,7 +142,7 @@ class MainActivity : ComponentActivity() {
                                 )
 
                                 Text(
-                                    text = "Event Manager",
+                                    text = "Events",
                                     style = MaterialTheme.typography.bodyLarge,
                                     modifier = Modifier
                                         .clickable {
@@ -251,11 +251,25 @@ class MainActivity : ComponentActivity() {
 // Track menu
                             composable("trackSetup") {
                                 TrackAndCornerSetupScreen(
-                                    onBack = { nav.popBackStack() },
+                                    onBack = { nav.popBackStack() },   // still here, even though we’re not using it now
                                     onAddNewTrack = { nav.navigate("addTrack") },
-                                    onManageTracks = { nav.navigate("trackManager") }  // <- was onSelectExistingTrack / onDeleteTrack
+                                    onManageTracks = { nav.navigate("trackManager") },
+                                    onOpenDrawer = {
+                                        scope.launch {
+                                            drawerState.open()
+                                        }
+                                    },
+                                    onOpenSettings = {
+                                        scope.launch {
+                                            drawerState.close()
+                                            nav.navigate("settings") {
+                                                launchSingleTop = true
+                                            }
+                                        }
+                                    }
                                 )
                             }
+
 
 
 

@@ -127,7 +127,7 @@ fun MainMenuDynamics(
 
             // Track Manager
             BigButton(
-                text = "Track Manager",
+                text = "Tracks",
                 onClick = onTrackManager
             )
 
@@ -135,7 +135,7 @@ fun MainMenuDynamics(
 
             // Event Manager
             BigButton(
-                text = "Event Manager",
+                text = "Events",
                 onClick = onEventManager
             )
 

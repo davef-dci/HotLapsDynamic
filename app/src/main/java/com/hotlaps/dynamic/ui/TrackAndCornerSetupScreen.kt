@@ -8,6 +8,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Settings
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -15,16 +18,26 @@ fun TrackAndCornerSetupScreen(
     onBack: () -> Unit,
     onAddNewTrack: () -> Unit,
     onManageTracks: () -> Unit,   // <- rename / consolidate
+    onOpenDrawer: () -> Unit,
+    onOpenSettings: () -> Unit
 ) {
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Track Manager") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = onOpenDrawer) {
                         Icon(
-                            imageVector = Icons.Default.ArrowBack,
-                            contentDescription = "Back"
+                            imageVector = Icons.Default.Menu,
+                            contentDescription = "Open menu"
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Settings"
                         )
                     }
                 }
