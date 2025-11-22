@@ -112,7 +112,8 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.foundation.background
 
-
+import androidx.compose.ui.graphics.toArgb
+import com.hotlaps.dynamic.AccentLime
 
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -1351,11 +1352,11 @@ fun DrawScope.drawGgRadialsAndLabels(
     // ---- Diagonal labels along 45°/135°/−45°/−135°
     val diagPaint = Paint().apply {
         isAntiAlias = true
-        color = android.graphics.Color.DKGRAY   // visible on white bg
+        color = android.graphics.Color.WHITE
         textAlign = Paint.Align.CENTER
         typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-        textSize = 18.dp.toPx()
-        alpha = (255 * 0.70f).toInt()  // test
+        textSize = 16.sp.toPx()
+        alpha = (255 * 0.85f).toInt()   // brighter → more legible
     }
 
     fun drawDiagLabel(text: String, angleDeg: Float, rFrac: Float) {
@@ -1386,24 +1387,28 @@ fun DrawScope.drawGgLabels() {
     val cx = w / 2f
     val cy = h / 2f
 
+    val axisColorArgb = AccentLime.toArgb()
+    val quadColorArgb = android.graphics.Color.WHITE
+
     val paint = Paint().apply {
         isAntiAlias = true
-        color = android.graphics.Color.BLUE   // same as HotLapMobile for now
+        color = axisColorArgb
         textAlign = Paint.Align.CENTER
         typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
     }
 
     val axisSizePx = 18.sp.toPx()
     val quadSizePx = 14.sp.toPx()
-    val faint = 0.40f
-    val strong = 0.80f
+    val faint = 0.45f
+    val strong = 0.90f
 
     drawIntoCanvas { canvas ->
         // Axis labels (Y: Accelerating/Braking; X: Left/Right)
         paint.textSize = axisSizePx
+        paint.color = axisColorArgb
+        paint.alpha = (255 * strong).roundToInt()
 
         // Y axis
-        paint.alpha = (255 * strong).roundToInt()
         canvas.nativeCanvas.drawText("Pure Acceleration", cx, 16.sp.toPx() + 8f, paint)
         canvas.nativeCanvas.drawText("Pure Braking",      cx, h - 8f,                 paint)
 
@@ -1419,18 +1424,13 @@ fun DrawScope.drawGgLabels() {
         canvas.nativeCanvas.drawText("Pure Right", w - (16.sp.toPx() + 8f), cy, paint)
         canvas.nativeCanvas.restore()
 
-        // Quadrant labels (kept commented, same as your source)
+        // Quadrant labels (if you ever re-enable the non-rotated ones)
         paint.textSize = quadSizePx
+        paint.color = quadColorArgb
         paint.alpha = (255 * faint).roundToInt()
-        /*
-        canvas.nativeCanvas.drawText("Throttle Steering", cx - w*0.35f, cy - h*0.25f, paint)
-        canvas.nativeCanvas.drawText("Throttle Steering", cx + w*0.35f, cy - h*0.25f, paint)
-        canvas.nativeCanvas.drawText("Trail Braking",     cx - w*0.35f, cy + h*0.25f, paint)
-        canvas.nativeCanvas.drawText("Trail Braking",     cx + w*0.35f, cy + h*0.25f, paint)
-        */
+        // (currently still commented out)
     }
 }
-
 
 
 
@@ -1452,6 +1452,9 @@ private fun cross(a: FloatArray, b: FloatArray): FloatArray {
         a[0] * b[1] - a[1] * b[0]
     )
 }
+
+
+
 
 class MovingAverage2D(private var maxSamples: Int) {
 
