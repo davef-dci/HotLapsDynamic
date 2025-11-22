@@ -53,6 +53,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Divider
+import androidx.compose.foundation.background
+
 
 
 class MainActivity : ComponentActivity() {
@@ -92,6 +94,7 @@ class MainActivity : ComponentActivity() {
                         drawerContent = {
                             Column(
                                 modifier = Modifier
+                                    .background(MaterialTheme.colorScheme.surface)
                                     .statusBarsPadding()
                                     .padding(24.dp)
                             ) {
