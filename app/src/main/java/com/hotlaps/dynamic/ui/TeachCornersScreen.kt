@@ -1,6 +1,8 @@
 package com.hotlaps.dynamic.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
@@ -10,13 +12,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import android.widget.Toast
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.content.Context
+import androidx.core.app.ActivityCompat
+import android.content.pm.PackageManager
 import com.hotlaps.dynamic.data.TrackStorage
 import com.hotlaps.dynamic.model.Corner
 import com.hotlaps.dynamic.model.Track
 import com.hotlaps.dynamic.viewmodel.DriveViewModel
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -26,7 +31,7 @@ fun TeachCornersScreen(
 ) {
     val context = LocalContext.current
 
-    // Track name entered by the user
+    // --- Track-level state ---
     var trackName by remember { mutableStateOf("") }
 
     // Capture window settings (ms) – editable by the user
@@ -36,27 +41,53 @@ fun TeachCornersScreen(
     // List of corners recorded so far in this session
     val corners = remember { mutableStateListOf<Corner>() }
 
-    // --- LIVE GPS FROM DRIVE VIEWMODEL (IF PRESENT) ---
-    // We read the flows *once* here at the top-level Composable.
-    // No collectAsState() calls inside helper functions.
-    val gpsLat: Double?
-    val gpsLon: Double?
+    // --- Local GPS state for this screen ---
+    var gpsLat by remember { mutableStateOf<Double?>(null) }
+    var gpsLon by remember { mutableStateOf<Double?>(null) }
 
-    if (driveViewModel != null) {
-        val latState by driveViewModel.gpsLat.collectAsState()
-        val lonState by driveViewModel.gpsLon.collectAsState()
-        gpsLat = latState
-        gpsLon = lonState
-    } else {
-        gpsLat = null
-        gpsLon = null
+    // Listen for GPS updates while this screen is visible
+    DisposableEffect(Unit) {
+        val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+
+        val listener = LocationListener { loc: Location ->
+            val lat = loc.latitude
+            val lon = loc.longitude
+
+            gpsLat = lat
+            gpsLon = lon
+
+            // Also push into the shared DriveViewModel if present
+            driveViewModel?.updateGps(lat, lon)
+        }
+
+        try {
+            if (
+                ActivityCompat.checkSelfPermission(
+                    context,
+                    android.Manifest.permission.ACCESS_FINE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+            ) {
+                lm.requestLocationUpdates(
+                    LocationManager.GPS_PROVIDER,
+                    200L,      // minTime (ms)
+                    0f,        // minDistance (m)
+                    listener
+                )
+            }
+        } catch (e: SecurityException) {
+            e.printStackTrace()
+        }
+
+        onDispose {
+            lm.removeUpdates(listener)
+        }
     }
 
     // Nicely formatted display strings
     val latDisplay = gpsLat?.let { String.format("%.6f", it) } ?: "--"
     val lonDisplay = gpsLon?.let { String.format("%.6f", it) } ?: "--"
 
-    // --- Local helper: record the current GPS as a new corner ---
+    // --- Helper: record the current GPS as a new corner ---
     fun recordApex() {
         val lat = gpsLat
         val lon = gpsLon
@@ -86,7 +117,7 @@ fun TeachCornersScreen(
         Toast.makeText(context, "Recorded Corner $nextIndex", Toast.LENGTH_SHORT).show()
     }
 
-    // --- Local helper: save the Track to JSON and exit ---
+    // --- Helper: save the Track to JSON and exit ---
     fun saveTrackAndExit() {
         if (trackName.isBlank()) {
             Toast.makeText(context, "Please enter a track name", Toast.LENGTH_SHORT).show()
@@ -134,7 +165,7 @@ fun TeachCornersScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(24.dp)
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(rememberScrollState()),   // <-- scrollable
             verticalArrangement = Arrangement.Top,
             horizontalAlignment = Alignment.Start
         ) {
