@@ -110,7 +110,7 @@ class MainActivity : ComponentActivity() {
 
 
                                 Text(
-                                    text = "Drive",
+                                    text = "G-Force Map",
                                     style = MaterialTheme.typography.bodyLarge,
                                     modifier = Modifier
                                         .clickable {
@@ -156,22 +156,22 @@ class MainActivity : ComponentActivity() {
                                         .padding(vertical = 8.dp)
 
                                 )
-
                                 Text(
-                                    text = "Settings",
+                                    text = "Calibrate accelerometers",
                                     style = MaterialTheme.typography.bodyLarge,
                                     modifier = Modifier
                                         .clickable {
                                             scope.launch {
                                                 drawerState.close()
-                                                nav.navigate("settings") {
+                                                nav.navigate("calib") {
                                                     launchSingleTop = true
                                                 }
                                             }
                                         }
                                         .padding(vertical = 8.dp)
-
                                 )
+
+
                             }
                         }
 

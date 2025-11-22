@@ -197,6 +197,7 @@ fun EventManagerScreen(
 
             Spacer(Modifier.height(12.dp))
 
+            /*
             BigButton(
                 text = "Compare Events",
                 onClick = {},
@@ -211,6 +212,8 @@ fun EventManagerScreen(
                     style = MaterialTheme.typography.bodySmall
                 )
             }
+
+             */
 
         }
     }

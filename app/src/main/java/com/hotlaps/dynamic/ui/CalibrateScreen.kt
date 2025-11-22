@@ -223,6 +223,19 @@ fun CalibrateScreen(onBack: () -> Unit) {
                     }
                 }
             ) { Text("Use Calibration") }
+
+
+            OutlinedButton(
+                onClick = {
+                    scope.launch {
+                        calibRepo.clear()
+                        status = "Calibration deleted (debug)."
+                    }
+                }
+            ) {
+                Text("Delete Calibration (Debug)")
+            }
+
         }
     }
 }
