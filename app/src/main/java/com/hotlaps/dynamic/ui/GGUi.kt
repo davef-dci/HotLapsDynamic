@@ -566,6 +566,12 @@ fun GGScreen(
                                                 )
                                             }
 
+                                            Divider(
+                                                modifier = Modifier
+                                                    .padding(vertical = 6.dp),
+                                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+                                            )
+
                                             // Event row
                                             Row(
                                                 modifier = Modifier.fillMaxWidth(),
