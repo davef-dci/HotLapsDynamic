@@ -39,6 +39,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Checkbox
 
 
+import androidx.compose.ui.graphics.drawscope.Stroke
+import kotlin.math.abs
+import kotlin.math.max
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -287,89 +290,155 @@ fun EventViewerScreen(
 @Composable
 fun SimpleGGPlot(
     samples: List<EventSample>,
-    // NEW: function that decides the color for each sample
+    // function that decides the color for each sample (already used by caller)
     colorForSample: (EventSample) -> Color
 ) {
-    val axisColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+    val axisColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
 
-    // Auto-scale based on max |G|
+    // --- Auto-scale based on max |G| across both axes ---
     val rawMaxG = samples.maxOfOrNull { sample ->
-        max(
-            abs(sample.latG),
-            abs(sample.longG)
-        )
+        max(abs(sample.latG), abs(sample.longG))
     } ?: 0f
 
-    val maxG = if (rawMaxG <= 0f) {
-        0.1f
-    } else {
-        rawMaxG * 1.1f
+    val maxG = when {
+        rawMaxG <= 0f -> 0.5f          // default scale if everything is zero
+        rawMaxG < 0.5f -> 0.5f         // snap tiny values to at least ±0.5 G
+        else -> rawMaxG * 1.1f         // small headroom
     }
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .aspectRatio(1f)
-            .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
             .padding(8.dp)
     ) {
+        // --- Background circular G-G grid + samples ---
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val width = size.width
-            val height = size.height
+            val w = size.width
+            val h = size.height
+            val cx = w / 2f
+            val cy = h / 2f
+            val radius = size.minDimension * 0.48f
 
-            val cx = width / 2f
-            val cy = height / 2f
-
-            // Axes stay neutral
-            drawLine(
-                color = axisColor,
-                start = Offset(0f, cy),
-                end = Offset(width, cy),
-                strokeWidth = 1.dp.toPx()
-            )
-            drawLine(
-                color = axisColor,
-                start = Offset(cx, 0f),
-                end = Offset(cx, height),
-                strokeWidth = 1.dp.toPx()
-            )
-
-            val halfWidth = width / 2f
-            val halfHeight = height / 2f
-            val marginFactor = 0.9f
-
-            var lastPoint: Offset? = null
-
-            samples.forEach { sample ->
-                val lat = sample.latG
-                val lon = sample.longG
-
-                val x = cx + (lat / maxG) * halfWidth * marginFactor
-                val y = cy - (lon / maxG) * halfHeight * marginFactor
-                val current = Offset(x, y)
-
-                // NEW: get color for this sample
-                val pointColor = colorForSample(sample)
-
-                // Connect consecutive points with a line in the same color
-                lastPoint?.let { prev ->
-                    drawLine(
-                        color = pointColor,
-                        start = prev,
-                        end = current,
-                        strokeWidth = 1.dp.toPx()
-                    )
+            // Helper: clamp a point to the circle rim if needed
+            fun clampToCircle(xIn: Float, yIn: Float): Offset {
+                var x = xIn
+                var y = yIn
+                val dx = x - cx
+                val dy = y - cy
+                val dist = kotlin.math.sqrt(dx * dx + dy * dy)
+                if (dist > radius && dist > 0f) {
+                    val s = radius / dist
+                    x = cx + dx * s
+                    y = cy + dy * s
                 }
+                return Offset(x, y)
+            }
 
+            // --- Base circular grid (similar feel to GGUi) ---
+            // Outer circle
+            drawCircle(
+                color = axisColor,
+                radius = radius,
+                center = Offset(cx, cy),
+                style = Stroke(width = 2.dp.toPx())
+            )
+
+            // Crosshair axes
+            drawLine(
+                color = axisColor,
+                start = Offset(cx - radius, cy),
+                end = Offset(cx + radius, cy),
+                strokeWidth = 1.dp.toPx()
+            )
+            drawLine(
+                color = axisColor,
+                start = Offset(cx, cy - radius),
+                end = Offset(cx, cy + radius),
+                strokeWidth = 1.dp.toPx()
+            )
+
+            // Tick rings every 0.5 G up to maxG
+            val tickStep = 0.5f
+            var tick = tickStep
+            while (tick < maxG) {
+                val r = radius * (tick / maxG)
                 drawCircle(
-                    color = pointColor,
-                    radius = 2.dp.toPx(),
-                    center = current
+                    color = axisColor.copy(alpha = 0.25f),
+                    radius = r,
+                    center = Offset(cx, cy),
+                    style = Stroke(width = 1.dp.toPx())
                 )
+                tick += tickStep
+            }
 
-                lastPoint = current
+            // --- Plot samples as connected path + dots ---
+            if (samples.isNotEmpty()) {
+                val scale = (radius * 0.95f) / maxG
+                var last: Offset? = null
+
+                samples.forEach { sample ->
+                    val lat = sample.latG
+                    val lon = sample.longG
+
+                    val px = cx + lat * scale
+                    val py = cy - lon * scale
+                    val clamped = clampToCircle(px, py)
+
+                    val color = colorForSample(sample)
+
+                    // Line from previous sample
+                    last?.let { prev ->
+                        drawLine(
+                            color = color,
+                            start = prev,
+                            end = clamped,
+                            strokeWidth = 1.dp.toPx()
+                        )
+                    }
+
+                    // Dot
+                    drawCircle(
+                        color = color,
+                        radius = 3.dp.toPx(),
+                        center = clamped
+                    )
+
+                    last = clamped
+                }
             }
         }
+
+        // --- Simple axis labels around the plot (Compose text over the Canvas) ---
+        Text(
+            text = "Accel",
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 2.dp)
+        )
+        Text(
+            text = "Brake",
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 2.dp)
+        )
+        Text(
+            text = "Left",
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .padding(start = 2.dp)
+        )
+        Text(
+            text = "Right",
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = 2.dp)
+        )
     }
 }
+
 
