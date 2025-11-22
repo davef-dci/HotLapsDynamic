@@ -23,6 +23,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hotlaps.dynamic.viewmodel.TrackSelectionViewModel
 import androidx.core.app.ActivityCompat
 import android.content.pm.PackageManager
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Text
 import com.hotlaps.dynamic.viewmodel.DriveViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -33,7 +34,10 @@ import com.hotlaps.dynamic.ui.EventViewerScreen
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import com.hotlaps.dynamic.ui.EditTrackScreen
+import com.hotlaps.dynamic.HotLapsDynamicTheme
+
 
 
 class MainActivity : ComponentActivity() {
@@ -53,8 +57,11 @@ class MainActivity : ComponentActivity() {
 
 
         setContent {
-            MaterialTheme {
-                Surface {
+            HotLapsDynamicTheme {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
                     val nav = rememberNavController()
 
                     // Create ONE shared ViewModel for the whole app

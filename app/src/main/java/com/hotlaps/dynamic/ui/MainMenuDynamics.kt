@@ -1,6 +1,6 @@
-// ui/MainMenuDynamics.kt
 package com.hotlaps.dynamic.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -15,6 +15,8 @@ import com.hotlaps.dynamic.data.PrefsRepo
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hotlaps.dynamic.BuildConfig
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 
 @Composable
 fun BigButton(
@@ -42,6 +44,7 @@ fun BigButton(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainMenuDynamics(
     onDrive: () -> Unit,
@@ -50,7 +53,6 @@ fun MainMenuDynamics(
     onCalibrate: () -> Unit,
     onSettings: () -> Unit
 ) {
-
     val context = LocalContext.current
     val calibRepo = remember(context) { CalibRepo(context) }
     val prefsRepo = remember { PrefsRepo() }
@@ -58,80 +60,92 @@ fun MainMenuDynamics(
     val calibState = calibRepo.state.collectAsStateWithLifecycle(initialValue = null).value
     val isCalibrated = calibState?.vec != null
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            text = "Hotlaps Dynamics",
-            style = MaterialTheme.typography.headlineLarge,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
-        )
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            TopAppBar(
+                title = { Text("Hotlaps Dynamic") },
+                actions = {
+                    IconButton(onClick = onSettings) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Settings"
+                        )
+                    }
+                }
+            )
+        }
+    ) { innerPadding ->
 
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = if (isCalibrated) "Calibration: Saved ✓" else "Calibration: Not set",
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (isCalibrated) MaterialTheme.colorScheme.primary
-            else MaterialTheme.colorScheme.error
-        )
-
-        Spacer(Modifier.height(24.dp))
-
-        // Primary action: Drive
-        BigButton(
-            text = if (isCalibrated) "Drive" else "Drive (needs calibration)",
-            enabled = isCalibrated,
-            onClick = onDrive
-        )
-
-        Spacer(Modifier.height(16.dp))
-
-        // Track Manager
-        BigButton(
-            text = "Track Manager",
-            onClick = onTrackManager
-        )
-
-        Spacer(Modifier.height(16.dp))
-
-        // Event Manager
-        BigButton(
-            text = "Event Manager",
-            onClick = onEventManager,
-            enabled = true
-        )
-
-
-        Spacer(Modifier.height(16.dp))
-
-        // Calibrate + Settings at the bottom of the stack
-        BigButton(
-            text = "Calibrate Accelerometers",
-            onClick = onCalibrate
-        )
-
-        Spacer(Modifier.height(16.dp))
-
-        BigButton(
-            text = "Settings",
-            onClick = onSettings
-        )
-
-        Spacer(Modifier.weight(1f))
-
-        Text(
-            text = "Rev ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) • ${BuildConfig.GIT_SHA} • ${BuildConfig.BUILD_TIME}",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 8.dp),
-            textAlign = TextAlign.Center
-        )
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .padding(innerPadding)
+                .padding(24.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+
+            Text(
+                text = "Hotlaps Dynamic",
+                style = MaterialTheme.typography.headlineLarge,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = if (isCalibrated) "Calibration: Saved ✓" else "Calibration: Not set",
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (isCalibrated) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.error
+            )
+
+            Spacer(Modifier.height(24.dp))
+
+            // Primary action: Drive
+            BigButton(
+                text = if (isCalibrated) "Drive" else "Drive (needs calibration)",
+                enabled = isCalibrated,
+                onClick = onDrive
+            )
+
+            Spacer(Modifier.height(16.dp))
+
+            // Track Manager
+            BigButton(
+                text = "Track Manager",
+                onClick = onTrackManager
+            )
+
+            Spacer(Modifier.height(16.dp))
+
+            // Event Manager
+            BigButton(
+                text = "Event Manager",
+                onClick = onEventManager
+            )
+
+            Spacer(Modifier.height(16.dp))
+
+            // Calibrate
+            BigButton(
+                text = "Calibrate Accelerometers",
+                onClick = onCalibrate
+            )
+
+            Spacer(Modifier.weight(1f))
+
+            Text(
+                text = "Rev ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) • ${BuildConfig.GIT_SHA} • ${BuildConfig.BUILD_TIME}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                textAlign = TextAlign.Center
+            )
+        }
     }
 }
