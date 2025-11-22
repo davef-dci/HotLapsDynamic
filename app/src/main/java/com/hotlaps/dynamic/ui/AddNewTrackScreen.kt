@@ -13,7 +13,8 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun AddNewTrackScreen(
     onBack: () -> Unit,
-    onCreateFromCoordinates: () -> Unit
+    onCreateFromCoordinates: () -> Unit,
+    onTeachCorners: () -> Unit
 ) {
 
     Scaffold(
@@ -63,8 +64,8 @@ fun AddNewTrackScreen(
 
             BigButton(
                 text = "Teach Corners While Driving",
-                onClick = {},
-                enabled = false
+                onClick = onTeachCorners,
+                enabled = true
             )
         }
     }

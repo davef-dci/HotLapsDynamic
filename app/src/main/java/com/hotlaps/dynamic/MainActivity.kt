@@ -54,7 +54,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Divider
 import androidx.compose.foundation.background
-
+import com.hotlaps.dynamic.ui.TeachCornersScreen
 
 
 class MainActivity : ComponentActivity() {
@@ -287,14 +287,24 @@ class MainActivity : ComponentActivity() {
                                 AddNewTrackScreen(
                                     onBack = { nav.popBackStack() },
                                     onCreateFromCoordinates = {
-                                        // Navigate to our new screen where we’ll actually enter coords
+                                        // Navigate to our screen where we enter coords manually
                                         nav.navigate("createTrackFromCoordinates")
+                                    },
+                                    onTeachCorners = {
+                                        // 🚗 New: navigate to our Teach Corners screen (to be created next)
+                                        nav.navigate("teachCorners")
                                     }
                                 )
                             }
 
                             composable("createTrackFromCoordinates") {
                                 CreateTrackFromCoordinatesScreen(
+                                    onBack = { nav.popBackStack() }
+                                )
+                            }
+
+                            composable("teachCorners") {
+                                TeachCornersScreen(
                                     onBack = { nav.popBackStack() }
                                 )
                             }

@@ -203,7 +203,7 @@ fun EventManagerScreen(
                 onClick = {},
                 enabled = false
             )
-
+         */
             Spacer(Modifier.height(24.dp))
 
             if (statusMessage != null) {
@@ -213,7 +213,7 @@ fun EventManagerScreen(
                 )
             }
 
-             */
+
 
         }
     }
