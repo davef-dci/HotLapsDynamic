@@ -43,6 +43,15 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import kotlin.math.abs
 import kotlin.math.max
 
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlin.math.abs
+import kotlin.math.max
+
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.drawscope.scale
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -290,7 +299,7 @@ fun EventViewerScreen(
 @Composable
 fun SimpleGGPlot(
     samples: List<EventSample>,
-    // function that decides the color for each sample (already used by caller)
+    // function that decides the color for each sample
     colorForSample: (EventSample) -> Color
 ) {
     val axisColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
@@ -301,23 +310,38 @@ fun SimpleGGPlot(
     } ?: 0f
 
     val maxG = when {
-        rawMaxG <= 0f -> 0.5f          // default scale if everything is zero
-        rawMaxG < 0.5f -> 0.5f         // snap tiny values to at least ±0.5 G
-        else -> rawMaxG * 1.1f         // small headroom
+        rawMaxG <= 0f -> 0.5f           // default if everything is zero
+        rawMaxG < 0.5f -> 0.5f          // snap tiny values to at least ±0.5 G
+        else -> rawMaxG * 1.1f          // small headroom
     }
+
+    // --- Gesture state: zoom + pan ---
+    var userScale by remember { mutableStateOf(1f) }
+    var userOffset by remember { mutableStateOf(Offset.Zero) }
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .aspectRatio(1f)
             .padding(8.dp)
+            .pointerInput(Unit) {
+                // Pinch to zoom + drag to pan
+                detectTransformGestures { _, pan, zoom, _ ->
+                    // Update scale
+                    val newScale = (userScale * zoom).coerceIn(0.5f, 3f)
+                    userScale = newScale
+
+                    // Update pan
+                    userOffset = userOffset + pan
+                }
+            }
     ) {
-        // --- Background circular G-G grid + samples ---
         Canvas(modifier = Modifier.fillMaxSize()) {
             val w = size.width
             val h = size.height
             val cx = w / 2f
             val cy = h / 2f
+            val center = Offset(cx, cy)
             val radius = size.minDimension * 0.48f
 
             // Helper: clamp a point to the circle rim if needed
@@ -335,81 +359,90 @@ fun SimpleGGPlot(
                 return Offset(x, y)
             }
 
-            // --- Base circular grid (similar feel to GGUi) ---
-            // Outer circle
-            drawCircle(
-                color = axisColor,
-                radius = radius,
-                center = Offset(cx, cy),
-                style = Stroke(width = 2.dp.toPx())
-            )
+            // Apply pan + zoom to everything we draw
+            withTransform({
+                // pan in screen space
+                translate(userOffset.x, userOffset.y)
+                // zoom around the center of the plot
+                scale(userScale, userScale, pivot = center)
+            }) {
+                // --- Base circular grid (similar feel to GGUi) ---
 
-            // Crosshair axes
-            drawLine(
-                color = axisColor,
-                start = Offset(cx - radius, cy),
-                end = Offset(cx + radius, cy),
-                strokeWidth = 1.dp.toPx()
-            )
-            drawLine(
-                color = axisColor,
-                start = Offset(cx, cy - radius),
-                end = Offset(cx, cy + radius),
-                strokeWidth = 1.dp.toPx()
-            )
-
-            // Tick rings every 0.5 G up to maxG
-            val tickStep = 0.5f
-            var tick = tickStep
-            while (tick < maxG) {
-                val r = radius * (tick / maxG)
+                // Outer circle
                 drawCircle(
-                    color = axisColor.copy(alpha = 0.25f),
-                    radius = r,
-                    center = Offset(cx, cy),
-                    style = Stroke(width = 1.dp.toPx())
+                    color = axisColor,
+                    radius = radius,
+                    center = center,
+                    style = Stroke(width = 2.dp.toPx())
                 )
-                tick += tickStep
-            }
 
-            // --- Plot samples as connected path + dots ---
-            if (samples.isNotEmpty()) {
-                val scale = (radius * 0.95f) / maxG
-                var last: Offset? = null
+                // Crosshair axes
+                drawLine(
+                    color = axisColor,
+                    start = Offset(cx - radius, cy),
+                    end = Offset(cx + radius, cy),
+                    strokeWidth = 1.dp.toPx()
+                )
+                drawLine(
+                    color = axisColor,
+                    start = Offset(cx, cy - radius),
+                    end = Offset(cx, cy + radius),
+                    strokeWidth = 1.dp.toPx()
+                )
 
-                samples.forEach { sample ->
-                    val lat = sample.latG
-                    val lon = sample.longG
-
-                    val px = cx + lat * scale
-                    val py = cy - lon * scale
-                    val clamped = clampToCircle(px, py)
-
-                    val color = colorForSample(sample)
-
-                    // Line from previous sample
-                    last?.let { prev ->
-                        drawLine(
-                            color = color,
-                            start = prev,
-                            end = clamped,
-                            strokeWidth = 1.dp.toPx()
-                        )
-                    }
-
-                    // Dot
+                // Tick rings every 0.5 G up to maxG
+                val tickStep = 0.5f
+                var tick = tickStep
+                while (tick < maxG) {
+                    val r = radius * (tick / maxG)
                     drawCircle(
-                        color = color,
-                        radius = 3.dp.toPx(),
-                        center = clamped
+                        color = axisColor.copy(alpha = 0.25f),
+                        radius = r,
+                        center = center,
+                        style = Stroke(width = 1.dp.toPx())
                     )
+                    tick += tickStep
+                }
 
-                    last = clamped
+                // --- Plot samples as connected path + dots ---
+                if (samples.isNotEmpty()) {
+                    val scalePerG = (radius * 0.95f) / maxG
+                    var last: Offset? = null
+
+                    samples.forEach { sample ->
+                        val lat = sample.latG
+                        val lon = sample.longG
+
+                        val px = cx + lat * scalePerG
+                        val py = cy - lon * scalePerG
+                        val clamped = clampToCircle(px, py)
+
+                        val color = colorForSample(sample)
+
+                        // Line from previous sample
+                        last?.let { prev ->
+                            drawLine(
+                                color = color,
+                                start = prev,
+                                end = clamped,
+                                strokeWidth = 1.dp.toPx()
+                            )
+                        }
+
+                        // Dot
+                        drawCircle(
+                            color = color,
+                            radius = 3.dp.toPx(),
+                            center = clamped
+                        )
+
+                        last = clamped
+                    }
                 }
             }
         }
 
-        // --- Simple axis labels around the plot (Compose text over the Canvas) ---
+        // --- Axis labels (do NOT zoom/pan; stay anchored to edges) ---
         Text(
             text = "Accel",
             style = MaterialTheme.typography.labelSmall,
@@ -440,5 +473,4 @@ fun SimpleGGPlot(
         )
     }
 }
-
 
