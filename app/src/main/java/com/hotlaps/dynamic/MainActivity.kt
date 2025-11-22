@@ -305,9 +305,12 @@ class MainActivity : ComponentActivity() {
 
                             composable("teachCorners") {
                                 TeachCornersScreen(
-                                    onBack = { nav.popBackStack() }
+                                    onBack = { nav.popBackStack() },
+                                    driveViewModel = driveViewModel
                                 )
                             }
+
+
 
 
                             composable("eventManager") {
