@@ -15,13 +15,18 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import java.io.File
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Settings
+
 
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EventManagerScreen(
     onBack: () -> Unit,
-    onViewEvents: () -> Unit
+    onViewEvents: () -> Unit,
+    onOpenDrawer: () -> Unit,
+    onOpenSettings: () -> Unit
 ) {
 
 
@@ -40,16 +45,25 @@ fun EventManagerScreen(
             TopAppBar(
                 title = { Text("Event Manager") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = onOpenDrawer) {
                         Icon(
-                            imageVector = Icons.Default.ArrowBack,
-                            contentDescription = "Back"
+                            imageVector = Icons.Default.Menu,
+                            contentDescription = "Open menu"
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Settings"
                         )
                     }
                 }
             )
         }
     ) { innerPadding ->
+
         Column(
             modifier = Modifier
                 .fillMaxSize()

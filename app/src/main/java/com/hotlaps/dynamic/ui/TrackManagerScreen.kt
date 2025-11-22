@@ -16,6 +16,8 @@ import com.hotlaps.dynamic.data.TrackStorage
 import com.hotlaps.dynamic.data.TrackStorage.TrackWithFile
 import com.hotlaps.dynamic.model.Track
 import com.hotlaps.dynamic.viewmodel.TrackSelectionViewModel
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Settings
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -26,6 +28,8 @@ fun TrackManagerScreen(
     onBack: () -> Unit,
     onUseTrack: (Track) -> Unit,
     onEditTrack: (Track) -> Unit,
+    onOpenDrawer: () -> Unit,
+    onOpenSettings: () -> Unit
 ) {
     val context = LocalContext.current
 
@@ -53,14 +57,23 @@ fun TrackManagerScreen(
             TopAppBar(
                 title = { Text("Track Manager") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = onOpenDrawer) {
                         Icon(
-                            imageVector = Icons.Default.ArrowBack,
-                            contentDescription = "Back"
+                            imageVector = Icons.Default.Menu,
+                            contentDescription = "Open menu"
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Settings"
                         )
                     }
                 }
             )
+
         }
     ) { innerPadding ->
         Box(

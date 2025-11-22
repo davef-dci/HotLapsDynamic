@@ -50,8 +50,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.clickable
-
-
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.Divider
 
 
 class MainActivity : ComponentActivity() {
@@ -96,12 +97,14 @@ class MainActivity : ComponentActivity() {
                             ) {
 
                                 Text(
-                                    text = "Navigate",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    modifier = Modifier
-                                        .clickable { /* we will fill in the action next */ }
-                                        .padding(vertical = 8.dp)
+                                    text = "NAVIGATE",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(bottom = 8.dp, top = 4.dp)
                                 )
+                                Divider()
+                                Spacer(modifier = Modifier.height(12.dp))
+
 
                                 Text(
                                     text = "Drive",
@@ -272,10 +275,24 @@ class MainActivity : ComponentActivity() {
 
                             composable("eventManager") {
                                 EventManagerScreen(
-                                    onBack = { nav.popBackStack() },
-                                    onViewEvents = { nav.navigate("eventViewer") }
+                                    onBack = { nav.popBackStack() },  // still here if we decide to use it later
+                                    onViewEvents = { nav.navigate("eventViewer") },
+                                    onOpenDrawer = {
+                                        scope.launch {
+                                            drawerState.open()
+                                        }
+                                    },
+                                    onOpenSettings = {
+                                        scope.launch {
+                                            drawerState.close()
+                                            nav.navigate("settings") {
+                                                launchSingleTop = true
+                                            }
+                                        }
+                                    }
                                 )
                             }
+
 
 
                             composable("eventViewer") {
@@ -296,7 +313,7 @@ class MainActivity : ComponentActivity() {
 
                             composable("trackManager") {
                                 TrackManagerScreen(
-                                    trackSelectionViewModel = trackSelectionViewModel,   // ← NEW
+                                    trackSelectionViewModel = trackSelectionViewModel,
                                     onBack = { nav.popBackStack() },
                                     onUseTrack = { track: Track ->
                                         nav.navigate("drive")
@@ -304,9 +321,23 @@ class MainActivity : ComponentActivity() {
                                     onEditTrack = { track: Track ->
                                         trackSelectionViewModel.startEditingTrack(track)
                                         nav.navigate("editTrack")
+                                    },
+                                    onOpenDrawer = {
+                                        scope.launch {
+                                            drawerState.open()
+                                        }
+                                    },
+                                    onOpenSettings = {
+                                        scope.launch {
+                                            drawerState.close()
+                                            nav.navigate("settings") {
+                                                launchSingleTop = true
+                                            }
+                                        }
                                     }
                                 )
                             }
+
 
                             composable("editTrack") {
                                 val trackToEdit = trackSelectionViewModel.trackBeingEdited
