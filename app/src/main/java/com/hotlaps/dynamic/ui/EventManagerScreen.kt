@@ -40,6 +40,10 @@ fun EventManagerScreen(
     var showDeletePanel by remember { mutableStateOf(false) }
     var selectedFiles by remember { mutableStateOf(setOf<File>()) }
 
+    var showSharePanel by remember { mutableStateOf(false) }
+    var selectedShareFile by remember { mutableStateOf<File?>(null) }
+
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -90,18 +94,16 @@ fun EventManagerScreen(
             BigButton(
                 text = "Share Event CSV",
                 onClick = {
-                    val files = EventStorage.listEventFiles(context)
-                    if (files.isNotEmpty()) {
-                        val newest = files.maxByOrNull { it.lastModified() }
-                        EventStorage.shareEventCsv(context, newest!!)
-                        statusMessage = null
-                    } else {
-                        statusMessage = "No event files found to share."
-                    }
-                }
-,
+                    showDeletePanel = false
+                    showSharePanel = !showSharePanel
+
+                    eventFiles = EventStorage.listEventFiles(context)
+                    selectedShareFile = null
+                    statusMessage = null
+                },
                 enabled = true
             )
+
 
             Spacer(Modifier.height(12.dp))
 
@@ -200,6 +202,86 @@ fun EventManagerScreen(
 
                 Spacer(Modifier.height(12.dp))
             }
+
+
+            if (showSharePanel) {
+                Spacer(Modifier.height(16.dp))
+
+                Text(
+                    text = "Select an event to share:",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                if (eventFiles.isEmpty()) {
+                    Text(
+                        text = "No event files found.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                } else {
+                    // Single-selection list (like radio buttons, but using checkboxes)
+                    Column {
+                        eventFiles.forEach { file ->
+                            val isSelected = (selectedShareFile == file)
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 2.dp)
+                            ) {
+                                Checkbox(
+                                    checked = isSelected,
+                                    onCheckedChange = { checked ->
+                                        selectedShareFile =
+                                            if (checked) file else null
+                                    }
+                                )
+                                Text(
+                                    text = file.name,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Share Selected
+                        Button(
+                            onClick = {
+                                selectedShareFile?.let { file ->
+                                    EventStorage.shareEventCsv(context, file)
+                                    statusMessage = "Sharing: ${file.name}"
+                                    showSharePanel = false
+                                }
+                            },
+                            enabled = selectedShareFile != null
+                        ) {
+                            Text("Share Selected")
+                        }
+
+                        // Cancel
+                        OutlinedButton(
+                            onClick = {
+                                selectedShareFile = null
+                                showSharePanel = false
+                            }
+                        ) {
+                            Text("Cancel")
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+            }
+
+
 
 
             Spacer(Modifier.height(12.dp))
