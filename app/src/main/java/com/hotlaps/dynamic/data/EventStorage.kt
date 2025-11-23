@@ -9,6 +9,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import androidx.core.content.FileProvider
+import android.content.Intent
+
 
 /**
  * Responsible for saving and loading Event sessions.
@@ -463,6 +466,24 @@ object EventStorage {
         return deleted
     }
 
+    fun shareEventCsv(context: Context, file: File) {
+        val uri = FileProvider.getUriForFile(
+            context,
+            context.packageName + ".fileprovider",
+            file
+        )
+
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/csv"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+
+        context.startActivity(
+            Intent.createChooser(intent, "Share CSV")
+        )
+
+    }
 
 
 

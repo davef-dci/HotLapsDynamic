@@ -88,11 +88,18 @@ fun EventManagerScreen(
             Spacer(Modifier.height(12.dp))
 
             BigButton(
-                text = "Export Events to Download",
+                text = "Share Event CSV",
                 onClick = {
-                    val copied = EventStorage.exportAllEventsToPublicDownloads(context)
-                    statusMessage = "Exported $copied event file(s) to Download/HotLapsDynamic/events"
-                },
+                    val files = EventStorage.listEventFiles(context)
+                    if (files.isNotEmpty()) {
+                        val newest = files.maxByOrNull { it.lastModified() }
+                        EventStorage.shareEventCsv(context, newest!!)
+                        statusMessage = null
+                    } else {
+                        statusMessage = "No event files found to share."
+                    }
+                }
+,
                 enabled = true
             )
 

@@ -524,7 +524,7 @@ fun SimpleGGPlot(
                         // Dot
                         drawCircle(
                             color = color,
-                            radius = 3.dp.toPx(),
+                            radius = 1.dp.toPx(),
                             center = clamped
                         )
 

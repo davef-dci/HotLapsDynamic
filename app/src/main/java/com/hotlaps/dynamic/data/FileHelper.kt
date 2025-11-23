@@ -25,16 +25,22 @@ object FileHelper {
         return base
     }
 
-    /** App-private events directory. */
+    /** Events directory – now in PUBLIC Downloads so users & email can see it easily. */
     fun eventsDir(context: Context): File? {
-        val base = appPrivateRoot(context) ?: return null
-        val dir = File(base, "events")
+        // Public Downloads root: /storage/emulated/0/Download
+        val downloads = Environment.getExternalStoragePublicDirectory(
+            Environment.DIRECTORY_DOWNLOADS
+        )
+
+        // Our subfolder: /Download/HotLapsDynamic/events
+        val dir = File(downloads, "HotLapsDynamic/events")
         if (!dir.exists() && !dir.mkdirs()) {
             Log.e(TAG, "eventsDir: failed to create ${dir.absolutePath}")
             return null
         }
         return dir
     }
+
 
     /**
      * Public export location visible to normal file managers:
