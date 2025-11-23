@@ -55,6 +55,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Divider
 import androidx.compose.foundation.background
 import com.hotlaps.dynamic.ui.TeachCornersScreen
+import com.hotlaps.dynamic.ui.HelpAboutScreen
+
 
 
 class MainActivity : ComponentActivity() {
@@ -170,6 +172,29 @@ class MainActivity : ComponentActivity() {
                                         }
                                         .padding(vertical = 8.dp)
                                 )
+
+                                // --- NEW DIVIDER ---
+                                Divider(
+                                    modifier = Modifier
+                                        .padding(vertical = 8.dp),
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
+                                )
+
+                                Text(
+                                    text = "Help & About",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    modifier = Modifier
+                                        .clickable {
+                                            scope.launch {
+                                                drawerState.close()
+                                                nav.navigate("helpAbout") {
+                                                    launchSingleTop = true
+                                                }
+                                            }
+                                        }
+                                        .padding(vertical = 8.dp)
+                                )
+
 
 
                             }
@@ -395,6 +420,14 @@ class MainActivity : ComponentActivity() {
                                     )
                                 }
                             }
+
+                            composable("helpAbout") {
+                                HelpAboutScreen()
+                            }
+
+
+
+
 
 
                         }

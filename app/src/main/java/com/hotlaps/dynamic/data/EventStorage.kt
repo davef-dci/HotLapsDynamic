@@ -485,6 +485,30 @@ object EventStorage {
 
     }
 
+    fun shareMultipleEventCsv(context: Context, files: List<File>) {
+        if (files.isEmpty()) return
+
+        // Turn files into URIs using the same FileProvider config
+        val uris = ArrayList<android.net.Uri>()
+        files.forEach { file ->
+            val uri = FileProvider.getUriForFile(
+                context,
+                context.packageName + ".fileprovider",
+                file
+            )
+            uris.add(uri)
+        }
+
+        val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+            type = "text/csv"
+            putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+
+        context.startActivity(
+            Intent.createChooser(intent, "Share CSV files")
+        )
+    }
 
 
 }

@@ -41,7 +41,8 @@ fun EventManagerScreen(
     var selectedFiles by remember { mutableStateOf(setOf<File>()) }
 
     var showSharePanel by remember { mutableStateOf(false) }
-    var selectedShareFile by remember { mutableStateOf<File?>(null) }
+    var selectedShareFiles by remember { mutableStateOf(setOf<File>()) }
+
 
 
     Scaffold(
@@ -98,7 +99,7 @@ fun EventManagerScreen(
                     showSharePanel = !showSharePanel
 
                     eventFiles = EventStorage.listEventFiles(context)
-                    selectedShareFile = null
+                    selectedShareFiles = emptySet()
                     statusMessage = null
                 },
                 enabled = true
@@ -223,7 +224,7 @@ fun EventManagerScreen(
                     // Single-selection list (like radio buttons, but using checkboxes)
                     Column {
                         eventFiles.forEach { file ->
-                            val isSelected = (selectedShareFile == file)
+                            val isSelected = selectedShareFiles.contains(file)
 
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -234,8 +235,12 @@ fun EventManagerScreen(
                                 Checkbox(
                                     checked = isSelected,
                                     onCheckedChange = { checked ->
-                                        selectedShareFile =
-                                            if (checked) file else null
+                                        selectedShareFiles =
+                                            if (checked) {
+                                                selectedShareFiles + file
+                                            } else {
+                                                selectedShareFiles - file
+                                            }
                                     }
                                 )
                                 Text(
@@ -255,21 +260,22 @@ fun EventManagerScreen(
                         // Share Selected
                         Button(
                             onClick = {
-                                selectedShareFile?.let { file ->
-                                    EventStorage.shareEventCsv(context, file)
-                                    statusMessage = "Sharing: ${file.name}"
+                                if (selectedShareFiles.isNotEmpty()) {
+                                    EventStorage.shareMultipleEventCsv(context, selectedShareFiles.toList())
+                                    statusMessage = "Sharing ${selectedShareFiles.size} event file(s)"
                                     showSharePanel = false
                                 }
                             },
-                            enabled = selectedShareFile != null
+                            enabled = selectedShareFiles.isNotEmpty()
                         ) {
                             Text("Share Selected")
                         }
 
+
                         // Cancel
                         OutlinedButton(
                             onClick = {
-                                selectedShareFile = null
+                                selectedShareFiles = emptySet()
                                 showSharePanel = false
                             }
                         ) {
