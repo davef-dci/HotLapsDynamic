@@ -514,9 +514,11 @@ fun SimpleGGPlot(
 
 
                 // --- Plot samples as connected path + dots ---
+// Now we only connect points that belong to the SAME (cornerIndex, visitNumber)
                 if (samples.isNotEmpty()) {
                     val scalePerG = (radius * 0.95f) / maxG
-                    var last: Offset? = null
+                    var lastPoint: Offset? = null
+                    var lastKey: Pair<Int, Int>? = null   // (cornerIndex, visitNumber)
 
                     samples.forEach { sample ->
                         val lat = sample.latG
@@ -527,27 +529,30 @@ fun SimpleGGPlot(
                         val clamped = clampToCircle(px, py)
 
                         val color = colorForSample(sample)
+                        val key = sample.cornerIndex to sample.visitNumber
 
-                        // Line from previous sample
-                        last?.let { prev ->
+                        // Only draw a connecting line if we're still in the same visit
+                        if (lastPoint != null && lastKey == key) {
                             drawLine(
                                 color = color,
-                                start = prev,
+                                start = lastPoint!!,
                                 end = clamped,
                                 strokeWidth = 1.dp.toPx()
                             )
                         }
 
-                        // Dot
+                        // Dot at this sample
                         drawCircle(
                             color = color,
                             radius = 1.dp.toPx(),
                             center = clamped
                         )
 
-                        last = clamped
+                        lastPoint = clamped
+                        lastKey = key
                     }
                 }
+
             }
         }
 
