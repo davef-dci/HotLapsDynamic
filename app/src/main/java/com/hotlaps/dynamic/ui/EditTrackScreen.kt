@@ -43,6 +43,11 @@ fun EditTrackScreen(
         mutableStateMapOf<Int, Pair<Double, Double>>()
     }
 
+    val nameOverrides = remember {
+        mutableStateMapOf<Int, String>()
+    }
+
+
 
     Scaffold(
         topBar = {
@@ -62,15 +67,33 @@ fun EditTrackScreen(
                             // Build new list of corners using overrides where present
                             val updatedCorners = track.corners.map { corner ->
                                 val override = cornerOverrides[corner.index]
+                                val latLonOverride = latLonOverrides[corner.index]
+                                val nameOverride = nameOverrides[corner.index]
+
+                                var updated = corner
+
                                 if (override != null) {
-                                    corner.copy(
+                                    updated = updated.copy(
                                         captureBeforeMs = override.first,
                                         captureAfterMs = override.second
                                     )
-                                } else {
-                                    corner
                                 }
+
+                                if (latLonOverride != null) {
+                                    updated = updated.copy(
+                                        lat = latLonOverride.first,
+                                        lon = latLonOverride.second
+                                    )
+                                }
+
+                                if (nameOverride != null) {
+                                    val finalName = nameOverride.trim().ifBlank { null }
+                                    updated = updated.copy(name = finalName)
+                                }
+
+                                updated
                             }
+
 
                             // New track with updated corners
                             val updatedTrack = track.copy(corners = updatedCorners)
@@ -84,6 +107,7 @@ fun EditTrackScreen(
                     ) {
                         Text("Save")
                     }
+
                 }
             )
 
@@ -110,6 +134,7 @@ fun EditTrackScreen(
                 items(track.corners) { corner ->
                     val override = cornerOverrides[corner.index]
                     val latLonOverride = latLonOverrides[corner.index]
+                    val nameOverride = nameOverrides[corner.index]
 
                     CornerSummaryCard(
                         corner = corner,
@@ -117,14 +142,19 @@ fun EditTrackScreen(
                         overrideAfterMs = override?.second,
                         overrideLat = latLonOverride?.first,
                         overrideLon = latLonOverride?.second,
+                        overrideName = nameOverride,
                         onValuesChange = { beforeMs, afterMs ->
                             cornerOverrides[corner.index] = beforeMs to afterMs
                         },
                         onLatLonChange = { lat, lon ->
                             latLonOverrides[corner.index] = lat to lon
+                        },
+                        onNameChange = { newName ->
+                            nameOverrides[corner.index] = newName
                         }
                     )
                 }
+
 
             }
 
@@ -140,8 +170,10 @@ private fun CornerSummaryCard(
     overrideAfterMs: Int?,
     overrideLat: Double?,
     overrideLon: Double?,
+    overrideName: String?,                // ← ADD THIS LINE
     onValuesChange: (beforeMs: Int, afterMs: Int) -> Unit,
-    onLatLonChange: (lat: Double, lon: Double) -> Unit
+    onLatLonChange: (lat: Double, lon: Double) -> Unit,
+    onNameChange: (name: String) -> Unit
 )
 
 
@@ -192,6 +224,17 @@ private fun CornerSummaryCard(
     val latValue: Double = latText.toDoubleOrNull() ?: corner.lat
     val lonValue: Double = lonText.toDoubleOrNull() ?: corner.lon
 
+    var nameText by remember(
+        corner.index,
+        overrideName
+    ) {
+        mutableStateOf(
+            overrideName ?: (corner.name ?: "")
+        )
+    }
+
+
+
     Card(
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -207,6 +250,21 @@ private fun CornerSummaryCard(
             )
 
             Spacer(Modifier.height(4.dp))
+
+
+            OutlinedTextField(
+                value = nameText,
+                onValueChange = { newText ->
+                    nameText = newText
+                    onNameChange(newText)
+                },
+                label = { Text("Corner Name (optional)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(Modifier.height(8.dp))
+
 
             OutlinedTextField(
                 value = latText,
