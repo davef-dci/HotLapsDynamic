@@ -39,6 +39,11 @@ fun EditTrackScreen(
     val cornerOverrides = remember {
         mutableStateMapOf<Int, Pair<Int, Int>>()}
 
+    val latLonOverrides = remember {
+        mutableStateMapOf<Int, Pair<Double, Double>>()
+    }
+
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -104,29 +109,41 @@ fun EditTrackScreen(
             ) {
                 items(track.corners) { corner ->
                     val override = cornerOverrides[corner.index]
+                    val latLonOverride = latLonOverrides[corner.index]
 
                     CornerSummaryCard(
                         corner = corner,
                         overrideBeforeMs = override?.first,
                         overrideAfterMs = override?.second,
+                        overrideLat = latLonOverride?.first,
+                        overrideLon = latLonOverride?.second,
                         onValuesChange = { beforeMs, afterMs ->
                             cornerOverrides[corner.index] = beforeMs to afterMs
+                        },
+                        onLatLonChange = { lat, lon ->
+                            latLonOverrides[corner.index] = lat to lon
                         }
                     )
                 }
+
             }
 
         }
     }
 }
 
+
 @Composable
 private fun CornerSummaryCard(
     corner: Corner,
     overrideBeforeMs: Int?,
     overrideAfterMs: Int?,
-    onValuesChange: (beforeMs: Int, afterMs: Int) -> Unit
+    overrideLat: Double?,
+    overrideLon: Double?,
+    onValuesChange: (beforeMs: Int, afterMs: Int) -> Unit,
+    onLatLonChange: (lat: Double, lon: Double) -> Unit
 )
+
 
 {
     var beforeText by remember(
@@ -147,10 +164,33 @@ private fun CornerSummaryCard(
         )
     }
 
+    var latText by remember(
+        corner.index,
+        overrideLat
+    ) {
+        mutableStateOf(
+            (overrideLat ?: corner.lat).toString()
+        )
+    }
+
+    var lonText by remember(
+        corner.index,
+        overrideLon
+    ) {
+        mutableStateOf(
+            (overrideLon ?: corner.lon).toString()
+        )
+    }
+
+
+
 
     // Safely parse the text into Ints (or fall back to the original values)
     val beforeMs: Int = beforeText.toIntOrNull() ?: corner.captureBeforeMs
     val afterMs: Int = afterText.toIntOrNull() ?: corner.captureAfterMs
+
+    val latValue: Double = latText.toDoubleOrNull() ?: corner.lat
+    val lonValue: Double = lonText.toDoubleOrNull() ?: corner.lon
 
     Card(
         modifier = Modifier.fillMaxWidth()
@@ -168,12 +208,40 @@ private fun CornerSummaryCard(
 
             Spacer(Modifier.height(4.dp))
 
-            Text(
-                text = "Lat/Lon: ${corner.lat}, ${corner.lon}",
-                style = MaterialTheme.typography.bodySmall
+            OutlinedTextField(
+                value = latText,
+                onValueChange = { newText ->
+                    latText = newText
+                    val lat = newText.toDoubleOrNull()
+                    val lon = lonText.toDoubleOrNull()
+                    if (lat != null && lon != null) {
+                        onLatLonChange(lat, lon)
+                    }
+                },
+                label = { Text("Corner Latitude") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
             )
 
             Spacer(Modifier.height(8.dp))
+
+            OutlinedTextField(
+                value = lonText,
+                onValueChange = { newText ->
+                    lonText = newText
+                    val lat = latText.toDoubleOrNull()
+                    val lon = newText.toDoubleOrNull()
+                    if (lat != null && lon != null) {
+                        onLatLonChange(lat, lon)
+                    }
+                },
+                label = { Text("Corner Longitude") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(Modifier.height(8.dp))
+
 
             OutlinedTextField(
                 value = beforeText,
