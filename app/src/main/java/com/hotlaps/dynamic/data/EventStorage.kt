@@ -76,6 +76,10 @@ object EventStorage {
                 .apply { timeZone = TimeZone.getDefault() }
                 .format(Date(sample.utcMs))
 
+            // "Yes" if this sample is inside a corner window (cornerIndex > 0)
+            val insideCornerTriggerForCsv = if (sample.cornerIndex > 0) "Yes" else "No"
+
+
 
             // Write one CSV line for this sample
             val line = buildString {
@@ -84,16 +88,38 @@ object EventStorage {
                 append(localTime); append(',')
                 append(sample.trackName); append(',')
                 append(sample.eventName); append(',')
+
+                // cornerIndex
                 append(sample.cornerIndex); append(',')
+
+                // cornerName
+                append(sample.cornerName); append(',')
+
+                // visitNumber
                 append(sample.visitNumber); append(',')
+
+                // G forces
                 append(sample.latG); append(',')
                 append(sample.longG); append(',')
                 append(sample.zG); append(',')
                 append(sample.gSum); append(',')
+
+                // GPS
                 append(sample.gpsLat); append(',')
-                append(sample.gpsLon)
+                append(sample.gpsLon); append(',')
+
+                // insideCornerTrigger
+                append(insideCornerTriggerForCsv); append(',')
+
+                // closestCornerIndex
+                append(sample.closestCornerIndex); append(',')
+
+                // distanceToClosestCornerM
+                append(sample.distanceToClosestCornerM)
+
                 append('\n')
             }
+
 
 
 
@@ -244,38 +270,80 @@ object EventStorage {
                 if (line.isBlank()) continue
 
                 val parts = line.split(',')
-                // We expect at least 13 columns with the new format
-                if (parts.size < 13) continue
+                if (parts.size < 13) continue  // too short to be valid
 
                 val intervalMs = parts[0].toLongOrNull() ?: continue
                 val utcMs      = parts[1].toLongOrNull() ?: continue
-                // parts[2] = localTime (we can ignore or store separately if you like)
-                val trackName  = parts[3]
-                val eventName  = parts[4]
-                val cornerIdx  = parts[5].toIntOrNull() ?: 0
-                val visitNum   = parts[6].toIntOrNull() ?: 0
-                val latG       = parts[7].toFloatOrNull() ?: 0f
-                val longG      = parts[8].toFloatOrNull() ?: 0f
-                val zG         = parts[9].toFloatOrNull() ?: 0f
-                val gSum       = parts[10].toFloatOrNull() ?: 0f
-                val gpsLat     = parts[11].toDoubleOrNull() ?: 0.0
-                val gpsLon     = parts[12].toDoubleOrNull() ?: 0.0
+// parts[2] = localTime (ignored for now)
+
+                val trackName: String
+                val eventName: String
+                val cornerIdx: Int
+                val visitNum: Int
+                val cornerName: String
+                val latG: Float
+                val longG: Float
+                val zG: Float
+                val gSum: Float
+                val gpsLat: Double
+                val gpsLon: Double
+                val closestCornerIndex: Int
+                val distanceToClosestCornerM: Double
+
+                if (parts.size >= 17) {
+                    // NEW format (with cornerName and the 3 extra columns)
+                    trackName  = parts[3]
+                    eventName  = parts[4]
+                    cornerIdx  = parts[5].toIntOrNull() ?: 0
+                    cornerName = parts[6]
+                    visitNum   = parts[7].toIntOrNull() ?: 0
+                    latG       = parts[8].toFloatOrNull() ?: 0f
+                    longG      = parts[9].toFloatOrNull() ?: 0f
+                    zG         = parts[10].toFloatOrNull() ?: 0f
+                    gSum       = parts[11].toFloatOrNull() ?: 0f
+                    gpsLat     = parts[12].toDoubleOrNull() ?: 0.0
+                    gpsLon     = parts[13].toDoubleOrNull() ?: 0.0
+                    // parts[14] = insideCornerTrigger (ignored – derived from cornerIndex)
+                    closestCornerIndex = parts[15].toIntOrNull() ?: 0
+                    distanceToClosestCornerM = parts[16].toDoubleOrNull() ?: 0.0
+                } else {
+                    // OLD format (no cornerName, no extra distance/closest fields)
+                    trackName  = parts[3]
+                    eventName  = parts[4]
+                    cornerIdx  = parts[5].toIntOrNull() ?: 0
+                    cornerName = ""  // wasn't present in old files
+                    visitNum   = parts[6].toIntOrNull() ?: 0
+                    latG       = parts[7].toFloatOrNull() ?: 0f
+                    longG      = parts[8].toFloatOrNull() ?: 0f
+                    zG         = parts[9].toFloatOrNull() ?: 0f
+                    gSum       = parts[10].toFloatOrNull() ?: 0f
+                    gpsLat     = parts[11].toDoubleOrNull() ?: 0.0
+                    gpsLon     = parts[12].toDoubleOrNull() ?: 0.0
+                    closestCornerIndex = 0
+                    distanceToClosestCornerM = 0.0
+                }
+
 
                 val sample = EventSample(
-                    eventId = 0L,   // <<< keep whatever you were using before here
-                    trackName = trackName,
-                    eventName = eventName,
+                    eventId = 0L,   // or whatever you eventually decide
                     cornerIndex = cornerIdx,
                     visitNumber = visitNum,
+                    cornerName = cornerName,
                     intervalMs = intervalMs,
                     utcMs = utcMs,
                     longG = longG,
                     latG = latG,
                     zG = zG,
                     gSum = gSum,
+                    trackName = trackName,
+                    eventName = eventName,
                     gpsLat = gpsLat,
-                    gpsLon = gpsLon
+                    gpsLon = gpsLon,
+                    closestCornerIndex = closestCornerIndex,
+                    distanceToClosestCornerM = distanceToClosestCornerM
                 )
+
+
 
                 result.add(sample)
             }
@@ -359,12 +427,16 @@ object EventStorage {
             "backfillCornerSamplesInCsv: loaded ${lines.size} line(s) from ${file.name}"
         )
 
-        // We know the header is:
-        // intervalMs,utcMs,localTime,trackName,eventName,
-        // cornerIndex,visitNumber,latG,longG,zG,gSum,gpsLat,gpsLon
+
+// We know the header is:
+// intervalMs,utcMs,localTime,trackName,eventName,
+// cornerIndex,cornerName,visitNumber,latG,longG,zG,gSum,gpsLat,gpsLon,
+// insideCornerTrigger,closestCornerIndex,distanceToClosestCornerM
         val UTC_MS_INDEX = 1
         val CORNER_INDEX_INDEX = 5
-        val VISIT_NUMBER_INDEX = 6
+        val CORNER_NAME_INDEX = 6          // <-- for clarity; we won't modify this
+        val VISIT_NUMBER_INDEX = 7         // <-- the IMPORTANT change
+
 
         var candidateCount = 0
         var updatedCount = 0

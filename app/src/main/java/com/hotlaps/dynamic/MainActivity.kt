@@ -68,6 +68,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Icon
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.hotlaps.dynamic.R
 
 
@@ -149,6 +150,7 @@ class MainActivity : ComponentActivity() {
 
                                     Text(
                                         text = "G-Force Map",
+                                        fontSize = 20.sp,
                                         style = MaterialTheme.typography.bodyLarge,
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
@@ -179,6 +181,7 @@ class MainActivity : ComponentActivity() {
 
                                     Text(
                                         text = "Tracks",
+                                        fontSize = 20.sp,
                                         style = MaterialTheme.typography.bodyLarge,
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
@@ -209,6 +212,7 @@ class MainActivity : ComponentActivity() {
 
                                     Text(
                                         text = "Events",
+                                        fontSize = 20.sp,
                                         style = MaterialTheme.typography.bodyLarge,
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
@@ -216,6 +220,7 @@ class MainActivity : ComponentActivity() {
 
                                 Text(
                                     text = "Calibrate accelerometers",
+                                    fontSize = 20.sp,
                                     style = MaterialTheme.typography.bodyLarge,
                                     modifier = Modifier
                                         .clickable {
@@ -238,6 +243,7 @@ class MainActivity : ComponentActivity() {
 
                                 Text(
                                     text = "Help & About",
+                                    fontSize = 20.sp,
                                     style = MaterialTheme.typography.bodyLarge,
                                     modifier = Modifier
                                         .clickable {

@@ -27,31 +27,40 @@ data class Event(
  *       visitNumber = 1,2,3,... Nth time through that corner within this Event
  */
 data class EventSample(
-    val eventId: Long,          // links to Event.id
+    val eventId: Long,
 
     // Corner annotation (0 means "not in a corner window")
-    val cornerIndex: Int = 0,   // 1,2,3... index of corner on the track, 0 = none
-    val visitNumber: Int = 0,   // 1,2,3... Nth visit to that corner this Event, 0 = none
+    val cornerIndex: Int = 0,
+    val visitNumber: Int = 0,
+
+    // NEW: optional human-friendly name for this corner
+    val cornerName: String = "",
 
     // Time
-    val intervalMs: Long,       // milliseconds since event start
-    val utcMs: Long,            // absolute timestamp for this sample
+    val intervalMs: Long,
+    val utcMs: Long,
 
     // Accelerations
-    val longG: Float,           // longitudinal accel (+ accel / - braking)
-    val latG: Float,            // lateral accel (+ right / - left)
-    val zG: Float,              // vertical accel (optional for now)
-    val gSum: Float ,            // magnitude of combined G
+    val longG: Float,
+    val latG: Float,
+    val zG: Float,
+    val gSum: Float,
 
     // NEW: track name
-    val trackName: String = "",   // Event's track name; blank if no track
-    val eventName: String = "",   // Human-friendly event name
+    val trackName: String = "",
+    val eventName: String = "",
 
     // NEW: where we were when this sample was taken
     val gpsLat: Double = 0.0,
-    val gpsLon: Double = 0.0
+    val gpsLon: Double = 0.0,
+
+    // Nearest corner at this instant (by index and distance)
+    val closestCornerIndex: Int = 0,
+    val distanceToClosestCornerM: Double = 0.0
+
 
 )
+
 
 
 // ... Event and EventSample stay as you have them ...

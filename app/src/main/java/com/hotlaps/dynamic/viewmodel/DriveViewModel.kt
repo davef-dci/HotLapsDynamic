@@ -45,6 +45,8 @@ class DriveViewModel : ViewModel() {
     private lateinit var appContext: Context
     private var settingsRepo: SettingsRepo? = null
 
+
+
     fun setAppContext(context: Context) {
         appContext = context.applicationContext
 
@@ -145,9 +147,14 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
 
 
 
+    // Track associated with the current event (if any)
+    private var currentTrack: Track? = null
 
     // NEW: start an event even if no track is selected
     fun startManualEvent(context: Context, track: Track?) {
+
+        // Remember which track this event is associated with
+        currentTrack = track
 
         val baseName = track?.name ?: "Untitled"
 
@@ -192,7 +199,9 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
     activeVisitStartUtcMs = 0L
     activeVisitEndUtcMs = 0L
     perCornerState.clear()
-}
+        currentTrack = null
+
+    }
 
     fun pauseRecording() {
         if (_recordingState.value == RecordingState.Recording) {
@@ -267,6 +276,9 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
         var cornerIndex = 0
         var visitNumber = 0
 
+
+
+
         // If we're currently capturing a corner, tag this sample with that info
         if (cornerCaptureState == CornerCaptureState.Capturing &&
             activeCornerIndex != null &&
@@ -275,6 +287,32 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
             cornerIndex = activeCornerIndex!!
             visitNumber = activeVisitNumber
         }
+
+// Decide corner name for this sample:
+//  - If we're in a corner (cornerIndex > 0), try to use the track's corner name.
+//  - Fall back to "Corner X" if the track's name is blank or missing.
+//  - If we're not in a corner (cornerIndex == 0), leave it empty.
+        // Determine the correct corner name for this sample
+        val cornerNameForSample: String = if (cornerIndex > 0) {
+            // Look up the matching corner from the currentTrack
+            val trackCorner = currentTrack
+                ?.corners
+                ?.firstOrNull { it.index == cornerIndex }
+
+            // Use the track's optional human-friendly name if present
+            val nameFromTrack: String? = trackCorner?.name
+
+            if (!nameFromTrack.isNullOrBlank()) {
+                nameFromTrack
+            } else {
+                // Fallback if no name was provided
+                "Corner $cornerIndex"
+            }
+        } else {
+            ""
+        }
+
+
 
         val long = _longG.value
         val lat = _latG.value
@@ -288,20 +326,29 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
 
         val eventNameForSample = event.displayName.ifBlank { event.name }
 
+        // Nearest corner at this instant (using existing helper and currentTrack)
+        val nearest = findNearestCornerIndex(currentTrack)
+        val closestCornerIndex = nearest?.first ?: 0
+        val distanceToClosestCornerM = nearest?.second ?: 0.0
+
+
         val sample = EventSample(
             eventId = event.id,
-            trackName = event.trackName,   // NEW: propagate track name into each row
-            eventName = eventNameForSample,   // NEW: event name
             cornerIndex = cornerIndex,
             visitNumber = visitNumber,
+            cornerName = cornerNameForSample,
             intervalMs = intervalMs,
             utcMs = nowUtc,
             longG = long,
             latG = lat,
             zG = z,
             gSum = gSum,
-            gpsLat = gpsLat.value,   // NEW
-            gpsLon = gpsLon.value    // NEW
+            trackName = event.trackName,
+            eventName = eventNameForSample,
+            gpsLat = gpsLat.value,
+            gpsLon = gpsLon.value,
+            closestCornerIndex = closestCornerIndex,
+            distanceToClosestCornerM = distanceToClosestCornerM
         )
 
         if (::appContext.isInitialized) {
@@ -309,6 +356,8 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
         } else {
             Log.w("DriveViewModel", "appendSample: appContext not initialized yet")
         }
+
+
 
         addSample(sample)
     }
