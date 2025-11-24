@@ -25,6 +25,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+import androidx.lifecycle.viewModelScope
+import com.hotlaps.dynamic.data.SettingsRepo
+import kotlinx.coroutines.launch
 
 
 
@@ -40,10 +43,25 @@ import java.util.Locale
 class DriveViewModel : ViewModel() {
 
     private lateinit var appContext: Context
+    private var settingsRepo: SettingsRepo? = null
 
     fun setAppContext(context: Context) {
         appContext = context.applicationContext
+
+        // Lazily create SettingsRepo the first time we get a Context
+        if (settingsRepo == null) {
+            settingsRepo = SettingsRepo(appContext)
+
+            // Collect corner trigger radius from DataStore
+            viewModelScope.launch {
+                settingsRepo!!.cornerTriggerRadiusM.collect { radius ->
+                    // Convert Float from settings to Double for our StateFlow
+                    _cornerTriggerRadiusM.value = radius.toDouble()
+                }
+            }
+        }
     }
+
 
 
     private enum class CornerCaptureState {
@@ -70,7 +88,7 @@ class DriveViewModel : ViewModel() {
     companion object {
         // Corner trigger radius in meters.
         // Easy to tweak as we learn more from real-world testing.
-        private const val CORNER_TRIGGER_RADIUS_M = 30.0
+        private const val DEFAULT_CORNER_TRIGGER_RADIUS_M = 30.0
 
         // Minimum gap between visits to the *same* corner in this Event.
         // This prevents multiple “laps” being detected while still in the radius.
@@ -119,6 +137,11 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
     private val cornerVisits = mutableListOf<CornerVisit>()
 
 
+    // Corner trigger radius in meters, loaded from Settings.
+// Backed by a StateFlow so UI and logic can see changes.
+    private val _cornerTriggerRadiusM =
+        MutableStateFlow(DEFAULT_CORNER_TRIGGER_RADIUS_M)
+    val cornerTriggerRadiusM: StateFlow<Double> get() = _cornerTriggerRadiusM
 
 
 
@@ -320,8 +343,9 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
      */
     fun isWithinCornerTriggerRadius(distanceM: Double?): Boolean {
         if (distanceM == null) return false
-        return distanceM <= CORNER_TRIGGER_RADIUS_M
+        return distanceM <= cornerTriggerRadiusM.value
     }
+
 
     /**
      * Given a track and the current GPS position, find the nearest corner.
@@ -590,9 +614,8 @@ fun updateCornerCaptureState(track: Track?) {
      * can display it for debugging / tuning.
      */
     fun getCornerTriggerRadiusMeters(): Double {
-        return CORNER_TRIGGER_RADIUS_M
+        return cornerTriggerRadiusM.value
     }
-
     /**
      * Later we'll use this to retroactively tag samples that happened
      * just BEFORE we detected the apex, so they get cornerIndex/visitNumber

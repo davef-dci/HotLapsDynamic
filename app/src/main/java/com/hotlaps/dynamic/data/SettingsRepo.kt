@@ -26,14 +26,21 @@ class SettingsRepo(private val context: Context) {
 
         // 4) G-G update rate (Hz)
         val GG_UPDATE_RATE_HZ = intPreferencesKey("gg_update_rate_hz")
+
+        // 5) Corner capture trigger radius (meters)
+        val CORNER_TRIGGER_RADIUS_M = floatPreferencesKey("corner_trigger_radius_m")
+
+
     }
 
     // --- Defaults (tweak as you like)
     private object D {
-        const val TRAIL_BRAKE_G = 0.30f   // typical light brake threshold
+        const val TRAIL_BRAKE_G = 0.10f   // typical light brake threshold
         const val GG_MAX_G = 1.25f        // race car default; street ~0.625
         const val GG_TRAIL_WINDOW_S = 3.0f
         const val GG_UPDATE_RATE_HZ = 10  // 2–50 Hz supported
+        const val CORNER_TRIGGER_RADIUS_M = 30f
+
     }
 
     // --- Flows
@@ -48,6 +55,11 @@ class SettingsRepo(private val context: Context) {
 
     val ggUpdateRateHz: Flow<Int> =
         context.settingsDataStore.data.map { it[K.GG_UPDATE_RATE_HZ] ?: D.GG_UPDATE_RATE_HZ }
+
+    val cornerTriggerRadiusM: Flow<Float> =
+        context.settingsDataStore.data.map {
+            it[K.CORNER_TRIGGER_RADIUS_M] ?: D.CORNER_TRIGGER_RADIUS_M
+        }
 
     // --- Updaters
     suspend fun updateTrailBrakeG(v: Float) {
@@ -65,4 +77,11 @@ class SettingsRepo(private val context: Context) {
     suspend fun updateGgUpdateRateHz(v: Int) {
         context.settingsDataStore.edit { it[K.GG_UPDATE_RATE_HZ] = v.coerceIn(2, 50) }
     }
+
+    suspend fun updateCornerTriggerRadiusM(v: Float) {
+        context.settingsDataStore.edit { prefs ->
+            prefs[K.CORNER_TRIGGER_RADIUS_M] = v.coerceIn(5f, 100f)
+        }
+    }
+
 }

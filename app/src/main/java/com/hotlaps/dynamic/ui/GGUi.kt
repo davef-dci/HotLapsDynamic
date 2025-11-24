@@ -708,7 +708,7 @@ fun GGScreen(
                                     }
 // === END SESSION HEADER SECTIONS =====================================
 
-
+                                    Spacer(modifier = Modifier.height(24.dp))
 
 
                                     nearestCornerInfo?.let { (label, distM) ->

@@ -66,7 +66,8 @@ object EventStorage {
             if (isNewFile) {
                 file.appendText(
                     "intervalMs,utcMs,localTime,trackName,eventName," +
-                            "cornerIndex,visitNumber,latG,longG,zG,gSum,gpsLat,gpsLon\n"
+                            "cornerIndex,cornerName,visitNumber,latG,longG,zG,gSum,gpsLat,gpsLon," +
+                            "insideCornerTrigger,closestCornerIndex,distanceToClosestCornerM\n"
                 )
             }
 

@@ -5,6 +5,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.platform.LocalContext
@@ -16,12 +18,7 @@ import androidx.compose.material3.Button
 import com.hotlaps.dynamic.data.SettingsRepo
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-//import androidx.compose.ui.text.input.KeyboardOptions
 import androidx.compose.foundation.text.KeyboardOptions
-
-
-
-
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,16 +34,17 @@ fun SettingsScreen(onBack: () -> Unit) {
     var trailText by remember(trailBrakeG) { mutableStateOf(trailBrakeG.toString()) }
     var status by remember { mutableStateOf(" ") }
 
-// G-G Max scale (G)
+    // G-G Max scale (G)
     val ggMaxG by repo.ggMaxG.collectAsState(initial = 1.25f)
     var ggMaxText by remember(ggMaxG) { mutableStateOf("%.1f".format(ggMaxG)) }
-
 
     // G-G trail window (seconds)
     val ggTrailWindowS by repo.ggTrailWindowS.collectAsState(initial = 3.0f)
     var ggTrailText by remember(ggTrailWindowS) { mutableStateOf("%.1f".format(ggTrailWindowS)) }
 
-
+    // Corner capture trigger radius (meters)
+    val cornerRadiusM by repo.cornerTriggerRadiusM.collectAsState(initial = 30f)
+    var cornerRadiusText by remember(cornerRadiusM) { mutableStateOf("%.0f".format(cornerRadiusM)) }
 
     Scaffold(
         topBar = {
@@ -66,8 +64,9 @@ fun SettingsScreen(onBack: () -> Unit) {
         Column(
             modifier = Modifier
                 .padding(pad)
-                .padding(16.dp)
-                .fillMaxSize(),
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // --- Control 1: Trail Brake Threshold (G)
@@ -101,8 +100,6 @@ fun SettingsScreen(onBack: () -> Unit) {
                 }) { Text("Revert") }
             }
 
-
-
             Divider()
 
             Text("G-G Max scale (G)")
@@ -135,7 +132,6 @@ fun SettingsScreen(onBack: () -> Unit) {
                     status = "Reverted to saved value"
                 }) { Text("Revert") }
             }
-
 
             Divider()
 
@@ -172,10 +168,42 @@ fun SettingsScreen(onBack: () -> Unit) {
                 }) { Text("Revert") }
             }
 
+            Divider()
 
-            if (status.isNotBlank()) Text(status, color = MaterialTheme.colorScheme.primary)
+            Text("Corner capture trigger radius (m)")
+            OutlinedTextField(
+                value = cornerRadiusText,
+                onValueChange = { cornerRadiusText = it },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth(),
+                supportingText = { Text("Enter 5 to 100 meters (e.g., 30)") }
+            )
 
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(onClick = {
+                    val v = cornerRadiusText.toFloatOrNull()
+                    if (v == null) {
+                        status = "Please enter a valid number"
+                    } else {
+                        val clamped = v.coerceIn(5f, 100f)
+                        cornerRadiusText = "%.0f".format(clamped)
+                        scope.launch {
+                            repo.updateCornerTriggerRadiusM(clamped)
+                            status = "Saved ✓  (Corner radius = ${"%.0f".format(clamped)} m)"
+                        }
+                    }
+                }) { Text("Save") }
 
+                OutlinedButton(onClick = {
+                    cornerRadiusText = "%.0f".format(cornerRadiusM)
+                    status = "Reverted to saved value"
+                }) { Text("Revert") }
+            }
+
+            if (status.isNotBlank()) {
+                Text(status, color = MaterialTheme.colorScheme.primary)
+            }
         }
     }
 }
