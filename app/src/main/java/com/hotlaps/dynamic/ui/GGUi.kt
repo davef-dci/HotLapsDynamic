@@ -522,7 +522,11 @@ fun GGScreen(
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
 
-                                    // === SESSION CARD ====================================================
+
+// === SESSION HEADER SECTIONS =========================================
+                                    val t = activeTrack
+
+// --- Track section ---
                                     Surface(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -531,183 +535,181 @@ fun GGScreen(
                                         tonalElevation = 4.dp,
                                         shape = MaterialTheme.shapes.medium
                                     ) {
-                                        Column(
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable { onSelectTrack() }
+                                                .padding(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "Track:",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Spacer(Modifier.width(6.dp))
+                                            Text(
+                                                text = t?.name ?: "(none selected – tap to choose)",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                color = if (t != null)
+                                                    MaterialTheme.colorScheme.onSurface
+                                                else
+                                                    Color.Red
+                                            )
+                                        }
+                                    }
+
+// --- Event section ---
+                                    Surface(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 8.dp),
+                                        color = MaterialTheme.colorScheme.surface,
+                                        tonalElevation = 4.dp,
+                                        shape = MaterialTheme.shapes.medium
+                                    ) {
+                                        Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .padding(12.dp),
-                                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                                            verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            val t = activeTrack
-
-                                            // Track row (tap to change)
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clickable { onSelectTrack() },
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    text = "Track:",
-                                                    style = MaterialTheme.typography.labelMedium,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                                Spacer(Modifier.width(6.dp))
-                                                Text(
-                                                    text = t?.name
-                                                        ?: "(none selected – tap to choose)",
-                                                    style = MaterialTheme.typography.titleMedium,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                    color = if (t != null)
-                                                        MaterialTheme.colorScheme.onSurface
-                                                    else
-                                                        Color.Red
-                                                )
-                                            }
-
-                                            Divider(
-                                                modifier = Modifier
-                                                    .padding(vertical = 6.dp),
-                                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+                                            Text(
+                                                text = "Event:",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
+                                            Spacer(Modifier.width(6.dp))
+                                            Text(
+                                                text = currentEvent?.displayName
+                                                    ?.takeIf { it.isNotBlank() }
+                                                    ?: currentEvent?.name
+                                                    ?: "(none)",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
 
-                                            // Event row
+// --- Recording status + controls section ---
+                                    Surface(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 8.dp),
+                                        color = MaterialTheme.colorScheme.surface,
+                                        tonalElevation = 4.dp,
+                                        shape = MaterialTheme.shapes.medium
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            RecordingStatusChip(recordingState)
+
                                             Row(
-                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Text(
-                                                    text = "Event:",
-                                                    style = MaterialTheme.typography.labelMedium,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                                Spacer(Modifier.width(6.dp))
-                                                Text(
-                                                    text = currentEvent?.displayName
-                                                        ?.takeIf { it.isNotBlank() }
-                                                        ?: currentEvent?.name
-                                                        ?: "(none)",
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                            }
-
-                                            Divider(modifier = Modifier.padding(vertical = 4.dp))
-
-                                            // Recording status + controls
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.SpaceBetween
-                                            ) {
-                                                RecordingStatusChip(recordingState)
-
-                                                Row(
-                                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    when (recordingState) {
-                                                        DriveViewModel.RecordingState.Idle -> {
-                                                            Button(
-                                                                onClick = {
-                                                                    val track = activeTrack
-                                                                    driveViewModel.startManualEvent(
-                                                                        context,
-                                                                        track
-                                                                    )
-                                                                    Log.d(
-                                                                        "GGScreen",
-                                                                        "Record pressed — startManualEvent, track=${track?.name ?: "(none)"}"
-                                                                    )
-                                                                },
-                                                                colors = ButtonDefaults.buttonColors(
-                                                                    containerColor = RecordRed,
-                                                                    contentColor = Color.White
+                                                when (recordingState) {
+                                                    DriveViewModel.RecordingState.Idle -> {
+                                                        Button(
+                                                            onClick = {
+                                                                val track = activeTrack
+                                                                driveViewModel.startManualEvent(context, track)
+                                                                Log.d(
+                                                                    "GGScreen",
+                                                                    "Record pressed — startManualEvent, track=${track?.name ?: "(none)"}"
                                                                 )
-                                                            ) {
-                                                                Icon(
-                                                                    imageVector = Icons.Filled.FiberManualRecord,
-                                                                    contentDescription = "Start recording",
-                                                                    modifier = Modifier.size(20.dp)
-                                                                )
-                                                                Spacer(Modifier.width(4.dp))
-                                                                Text("Record")
-                                                            }
+                                                            },
+                                                            colors = ButtonDefaults.buttonColors(
+                                                                containerColor = RecordRed,
+                                                                contentColor = Color.White
+                                                            )
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Filled.FiberManualRecord,
+                                                                contentDescription = "Start recording",
+                                                                modifier = Modifier.size(20.dp)
+                                                            )
+                                                            Spacer(Modifier.width(4.dp))
+                                                            Text("Record")
+                                                        }
+                                                    }
+
+                                                    DriveViewModel.RecordingState.Recording -> {
+                                                        TextButton(onClick = { driveViewModel.pauseRecording() }) {
+                                                            Icon(
+                                                                imageVector = Icons.Filled.Pause,
+                                                                contentDescription = "Pause",
+                                                                modifier = Modifier.size(18.dp)
+                                                            )
+                                                            Spacer(Modifier.width(4.dp))
+                                                            Text("Pause")
                                                         }
 
-                                                        DriveViewModel.RecordingState.Recording -> {
-                                                            TextButton(onClick = {
-                                                                driveViewModel.pauseRecording()
-                                                            }) {
-                                                                Icon(
-                                                                    imageVector = Icons.Filled.Pause,
-                                                                    contentDescription = "Pause",
-                                                                    modifier = Modifier.size(18.dp)
-                                                                )
-                                                                Spacer(Modifier.width(4.dp))
-                                                                Text("Pause")
+                                                        TextButton(onClick = {
+                                                            val evt = currentEvent
+                                                            if (evt != null) {
+                                                                pendingEventName = evt.displayName.ifBlank { evt.name }
+                                                                showRenameDialog = true
+                                                            } else {
+                                                                driveViewModel.stopEvent()
                                                             }
+                                                        }) {
+                                                            Icon(
+                                                                imageVector = Icons.Filled.Stop,
+                                                                contentDescription = "Stop",
+                                                                modifier = Modifier.size(18.dp)
+                                                            )
+                                                            Spacer(Modifier.width(4.dp))
+                                                            Text("Stop")
+                                                        }
+                                                    }
 
-                                                            TextButton(onClick = {
-                                                                val evt = currentEvent
-                                                                if (evt != null) {
-                                                                    pendingEventName =
-                                                                        evt.displayName.ifBlank { evt.name }
-                                                                    showRenameDialog = true
-                                                                } else {
-                                                                    driveViewModel.stopEvent()
-                                                                }
-                                                            }) {
-                                                                Icon(
-                                                                    imageVector = Icons.Filled.Stop,
-                                                                    contentDescription = "Stop",
-                                                                    modifier = Modifier.size(18.dp)
-                                                                )
-                                                                Spacer(Modifier.width(4.dp))
-                                                                Text("Stop")
-                                                            }
+                                                    DriveViewModel.RecordingState.Paused -> {
+                                                        TextButton(onClick = { driveViewModel.resumeRecording() }) {
+                                                            Icon(
+                                                                imageVector = Icons.Filled.PlayArrow,
+                                                                contentDescription = "Resume",
+                                                                modifier = Modifier.size(18.dp)
+                                                            )
+                                                            Spacer(Modifier.width(4.dp))
+                                                            Text("Resume")
                                                         }
 
-                                                        DriveViewModel.RecordingState.Paused -> {
-                                                            TextButton(onClick = {
-                                                                driveViewModel.resumeRecording()
-                                                            }) {
-                                                                Icon(
-                                                                    imageVector = Icons.Filled.PlayArrow,
-                                                                    contentDescription = "Resume",
-                                                                    modifier = Modifier.size(18.dp)
-                                                                )
-                                                                Spacer(Modifier.width(4.dp))
-                                                                Text("Resume")
+                                                        TextButton(onClick = {
+                                                            val evt = currentEvent
+                                                            if (evt != null) {
+                                                                pendingEventName = evt.displayName.ifBlank { evt.name }
+                                                                showRenameDialog = true
+                                                            } else {
+                                                                driveViewModel.stopEvent()
                                                             }
-
-                                                            TextButton(onClick = {
-                                                                val evt = currentEvent
-                                                                if (evt != null) {
-                                                                    pendingEventName =
-                                                                        evt.displayName.ifBlank { evt.name }
-                                                                    showRenameDialog = true
-                                                                } else {
-                                                                    driveViewModel.stopEvent()
-                                                                }
-                                                            }) {
-                                                                Icon(
-                                                                    imageVector = Icons.Filled.Stop,
-                                                                    contentDescription = "Stop",
-                                                                    modifier = Modifier.size(18.dp)
-                                                                )
-                                                                Spacer(Modifier.width(4.dp))
-                                                                Text("Stop")
-                                                            }
+                                                        }) {
+                                                            Icon(
+                                                                imageVector = Icons.Filled.Stop,
+                                                                contentDescription = "Stop",
+                                                                modifier = Modifier.size(18.dp)
+                                                            )
+                                                            Spacer(Modifier.width(4.dp))
+                                                            Text("Stop")
                                                         }
                                                     }
                                                 }
                                             }
                                         }
                                     }
-                                    // === END SESSION CARD ===============================================
+// === END SESSION HEADER SECTIONS =====================================
+
+
+
 
                                     nearestCornerInfo?.let { (label, distM) ->
                                         Text(
