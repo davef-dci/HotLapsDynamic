@@ -307,33 +307,50 @@ fun EventViewerScreen(
                         Spacer(Modifier.height(4.dp))
                         MaxGSummaryRow(label = "Event", summary = overallSummary)
                     } else {
-                        // If we DO have corner-tagged samples, show one row per visit
-                        Text(
-                            text = "Per visit (across all corners):",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        Spacer(Modifier.height(8.dp))
-
-                        MaxGSummaryHeaderRow()
-                        Spacer(Modifier.height(4.dp))
-
-                        // Group tagged samples by visit number
-                        val samplesByVisit = remember(samplesForSelected) {
-                            samplesForSelected
-                                .filter { it.cornerIndex > 0 && it.visitNumber > 0 }
-                                .groupBy { it.visitNumber }
-                                .toSortedMap()
+                        // We DO have corner-tagged samples.
+                        // Limit stats to ONLY the (corner, visit) pairs that are checked.
+                        val samplesForSummary = samplesForSelected.filter { sample ->
+                            selectedCornerVisits.contains(sample.cornerIndex to sample.visitNumber)
                         }
 
-                        samplesByVisit.forEach { (visitNum, visitSamples) ->
-                            val summary = computeMaxGSummary(visitSamples)
-                            MaxGSummaryRow(
-                                label = "Visit $visitNum",
-                                summary = summary
+                        if (samplesForSummary.isEmpty()) {
+                            Text(
+                                text = "No corner visits selected – toggle checkboxes above to see stats.",
+                                style = MaterialTheme.typography.bodySmall
                             )
-                            Spacer(Modifier.height(2.dp))
+                        } else {
+                            Text(
+                                text = "Per selected corner visit:",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Spacer(Modifier.height(8.dp))
+
+                            MaxGSummaryHeaderRow()
+                            Spacer(Modifier.height(4.dp))
+
+                            // Group by (cornerIndex, visitNumber) so each checkbox pair gets its own row
+                            val samplesByCornerVisit = samplesForSummary
+                                .filter { it.cornerIndex > 0 && it.visitNumber > 0 }
+                                .groupBy { it.cornerIndex to it.visitNumber }
+
+                            val sortedKeys = samplesByCornerVisit.keys
+                                .sortedWith(
+                                    compareBy<Pair<Int, Int>> { it.first }.thenBy { it.second }
+                                )
+
+                            sortedKeys.forEach { (cornerIdx, visitNum) ->
+                                val visitSamples = samplesByCornerVisit[cornerIdx to visitNum].orEmpty()
+                                val summary = computeMaxGSummary(visitSamples)
+
+                                MaxGSummaryRow(
+                                    label = "Corner $cornerIdx – Visit $visitNum",
+                                    summary = summary
+                                )
+                                Spacer(Modifier.height(2.dp))
+                            }
                         }
                     }
+
                 }
 
 
@@ -660,22 +677,22 @@ private fun MaxGSummaryRow(
             modifier = Modifier.weight(1.2f)
         )
         Text(
-            text = String.format("%.1fG", summary.braking),
+            text = String.format("%.2fG", summary.braking),
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.weight(1f)
         )
         Text(
-            text = String.format("%.1fG", summary.accel),
+            text = String.format("%.2fG", summary.accel),
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.weight(1f)
         )
         Text(
-            text = String.format("%.1fG", summary.left),
+            text = String.format("%.2fG", summary.left),
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.weight(1f)
         )
         Text(
-            text = String.format("%.1fG", summary.right),
+            text = String.format("%.2fG", summary.right),
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.weight(1f)
         )
