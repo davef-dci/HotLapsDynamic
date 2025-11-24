@@ -54,9 +54,22 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Divider
 import androidx.compose.foundation.background
+import androidx.compose.material3.Icon
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.res.painterResource
 import com.hotlaps.dynamic.ui.DisclaimerScreen
 import com.hotlaps.dynamic.ui.TeachCornersScreen
 import com.hotlaps.dynamic.ui.HelpAboutScreen
+
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Icon
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.dp
+import com.hotlaps.dynamic.R
+
 
 
 
@@ -112,9 +125,7 @@ class MainActivity : ComponentActivity() {
                                 Spacer(modifier = Modifier.height(12.dp))
 
 
-                                Text(
-                                    text = "G-Force Map",
-                                    style = MaterialTheme.typography.bodyLarge,
+                                Row(
                                     modifier = Modifier
                                         .clickable {
                                             scope.launch {
@@ -124,13 +135,27 @@ class MainActivity : ComponentActivity() {
                                                 }
                                             }
                                         }
-                                        .padding(vertical = 8.dp)
+                                        .padding(vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.ggmap),
+                                        contentDescription = "G-Force Map",
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(24.dp)
+                                    )
 
-                                )
+                                    Spacer(modifier = Modifier.width(16.dp))
 
-                                Text(
-                                    text = "Tracks",
-                                    style = MaterialTheme.typography.bodyLarge,
+                                    Text(
+                                        text = "G-Force Map",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+
+
+                                Row(
                                     modifier = Modifier
                                         .clickable {
                                             scope.launch {
@@ -140,13 +165,27 @@ class MainActivity : ComponentActivity() {
                                                 }
                                             }
                                         }
-                                        .padding(vertical = 8.dp)
+                                        .padding(vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.track),
+                                        contentDescription = "Tracks",
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(24.dp)
+                                    )
 
-                                )
+                                    Spacer(modifier = Modifier.width(16.dp))
 
-                                Text(
-                                    text = "Events",
-                                    style = MaterialTheme.typography.bodyLarge,
+                                    Text(
+                                        text = "Tracks",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+
+
+                                Row(
                                     modifier = Modifier
                                         .clickable {
                                             scope.launch {
@@ -156,9 +195,25 @@ class MainActivity : ComponentActivity() {
                                                 }
                                             }
                                         }
-                                        .padding(vertical = 8.dp)
+                                        .padding(vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.event),
+                                        contentDescription = "Events",
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(24.dp)
+                                    )
 
-                                )
+                                    Spacer(modifier = Modifier.width(16.dp))
+
+                                    Text(
+                                        text = "Events",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+
                                 Text(
                                     text = "Calibrate accelerometers",
                                     style = MaterialTheme.typography.bodyLarge,
