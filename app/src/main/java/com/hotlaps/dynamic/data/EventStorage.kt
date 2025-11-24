@@ -22,6 +22,9 @@ import android.content.Intent
 object EventStorage {
 
     private const val TAG = "EventStorage"
+    // Single lock for all event CSV file access.
+    // We only write one event at a time, so a global lock is fine.
+    private val fileLock = Any()
 
     // -----------------------
     // Directory management
@@ -54,79 +57,80 @@ object EventStorage {
 // Append a sample (CSV per event)
 // -----------------------
     fun appendSample(context: Context, sample: EventSample) {
-        val dir = eventsDir(context) ?: return
+        synchronized(fileLock) {
+            val dir = eventsDir(context) ?: return
 
-        // One CSV file per event:
-        //   event_<eventId>.csv
-        val file = File(dir, "event_${sample.eventId}.csv")
-        val isNewFile = !file.exists()
+            // One CSV file per event:
+            //   event_<eventId>.csv
+            val file = File(dir, "event_${sample.eventId}.csv")
+            val isNewFile = !file.exists()
 
-        try {
-            // If it's a brand-new file, write a header row first.
-            if (isNewFile) {
-                file.appendText(
-                    "intervalMs,utcMs,localTime,trackName,eventName," +
-                            "cornerIndex,cornerName,visitNumber,latG,longG,zG,gSum,gpsLat,gpsLon," +
-                            "insideCornerTrigger,closestCornerIndex,distanceToClosestCornerM\n"
-                )
+            try {
+                // If it's a brand-new file, write a header row first.
+                if (isNewFile) {
+                    file.appendText(
+                        "intervalMs,utcMs,localTime,trackName,eventName," +
+                                "cornerIndex,cornerName,visitNumber,latG,longG,zG,gSum,gpsLat,gpsLon," +
+                                "insideCornerTrigger,closestCornerIndex,distanceToClosestCornerM\n"
+                    )
+                }
+
+
+                val localTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+                    .apply { timeZone = TimeZone.getDefault() }
+                    .format(Date(sample.utcMs))
+
+                // "Yes" if this sample is inside a corner window (cornerIndex > 0)
+                val insideCornerTriggerForCsv = if (sample.cornerIndex > 0) "Yes" else "No"
+
+
+                // Write one CSV line for this sample
+                val line = buildString {
+                    append(sample.intervalMs); append(',')
+                    append(sample.utcMs); append(',')
+                    append(localTime); append(',')
+                    append(sample.trackName); append(',')
+                    append(sample.eventName); append(',')
+
+                    // cornerIndex
+                    append(sample.cornerIndex); append(',')
+
+                    // cornerName
+                    append(sample.cornerName); append(',')
+
+                    // visitNumber
+                    append(sample.visitNumber); append(',')
+
+                    // G forces
+                    append(sample.latG); append(',')
+                    append(sample.longG); append(',')
+                    append(sample.zG); append(',')
+                    append(sample.gSum); append(',')
+
+                    // GPS
+                    append(sample.gpsLat); append(',')
+                    append(sample.gpsLon); append(',')
+
+                    // insideCornerTrigger
+                    append(insideCornerTriggerForCsv); append(',')
+
+                    // closestCornerIndex
+                    append(sample.closestCornerIndex); append(',')
+
+                    // distanceToClosestCornerM
+                    append(sample.distanceToClosestCornerM)
+
+                    append('\n')
+                }
+
+
+
+
+
+                file.appendText(line)
+            } catch (e: Exception) {
+                Log.e(TAG, "appendSample: error writing sample for event ${sample.eventId}", e)
             }
-
-
-            val localTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-                .apply { timeZone = TimeZone.getDefault() }
-                .format(Date(sample.utcMs))
-
-            // "Yes" if this sample is inside a corner window (cornerIndex > 0)
-            val insideCornerTriggerForCsv = if (sample.cornerIndex > 0) "Yes" else "No"
-
-
-
-            // Write one CSV line for this sample
-            val line = buildString {
-                append(sample.intervalMs); append(',')
-                append(sample.utcMs); append(',')
-                append(localTime); append(',')
-                append(sample.trackName); append(',')
-                append(sample.eventName); append(',')
-
-                // cornerIndex
-                append(sample.cornerIndex); append(',')
-
-                // cornerName
-                append(sample.cornerName); append(',')
-
-                // visitNumber
-                append(sample.visitNumber); append(',')
-
-                // G forces
-                append(sample.latG); append(',')
-                append(sample.longG); append(',')
-                append(sample.zG); append(',')
-                append(sample.gSum); append(',')
-
-                // GPS
-                append(sample.gpsLat); append(',')
-                append(sample.gpsLon); append(',')
-
-                // insideCornerTrigger
-                append(insideCornerTriggerForCsv); append(',')
-
-                // closestCornerIndex
-                append(sample.closestCornerIndex); append(',')
-
-                // distanceToClosestCornerM
-                append(sample.distanceToClosestCornerM)
-
-                append('\n')
-            }
-
-
-
-
-
-            file.appendText(line)
-        } catch (e: Exception) {
-            Log.e(TAG, "appendSample: error writing sample for event ${sample.eventId}", e)
         }
     }
 
@@ -369,132 +373,143 @@ object EventStorage {
         startUtcMs: Long,
         apexUtcMs: Long
     ) {
-        val dir = eventsDir(context) ?: run {
-            Log.w(TAG, "backfillCornerSamplesInCsv: eventsDir is null")
-            return
-        }
 
-        val file = File(dir, "event_${eventId}.csv")
-        if (!file.exists()) {
-            Log.w(
+        synchronized(fileLock) {
+            val dir = eventsDir(context) ?: run {
+                Log.w(TAG, "backfillCornerSamplesInCsv: eventsDir is null")
+                return
+            }
+
+            val file = File(dir, "event_${eventId}.csv")
+            if (!file.exists()) {
+                Log.w(
+                    TAG,
+                    "backfillCornerSamplesInCsv: no CSV file found for eventId=$eventId " +
+                            "(corner=$cornerIndex visit=$visitNumber)"
+                )
+                return
+            }
+
+            Log.d(
                 TAG,
-                "backfillCornerSamplesInCsv: no CSV file found for eventId=$eventId " +
-                        "(corner=$cornerIndex visit=$visitNumber)"
+                "backfillCornerSamplesInCsv: will backfill pre-apex rows for " +
+                        "eventId=$eventId corner=$cornerIndex visit=$visitNumber, " +
+                        "window=[$startUtcMs .. $apexUtcMs], file=${file.name}"
             )
-            return
-        }
 
-        Log.d(
-            TAG,
-            "backfillCornerSamplesInCsv: will backfill pre-apex rows for " +
-                    "eventId=$eventId corner=$cornerIndex visit=$visitNumber, " +
-                    "window=[$startUtcMs .. $apexUtcMs], file=${file.name}"
-        )
-
-        Log.d(
-            TAG,
-            "backfillCornerSamplesInCsv: will backfill pre-apex rows for " +
-                    "eventId=$eventId corner=$cornerIndex visit=$visitNumber, " +
-                    "window=[$startUtcMs .. $apexUtcMs], file=${file.name}"
-        )
-
-        val lines: MutableList<String> = try {
-            file.readLines().toMutableList()
-        } catch (e: Exception) {
-            Log.e(
+            Log.d(
                 TAG,
-                "backfillCornerSamplesInCsv: error reading CSV for eventId=$eventId",
-                e
+                "backfillCornerSamplesInCsv: will backfill pre-apex rows for " +
+                        "eventId=$eventId corner=$cornerIndex visit=$visitNumber, " +
+                        "window=[$startUtcMs .. $apexUtcMs], file=${file.name}"
             )
-            return
-        }
 
-        if (lines.isEmpty()) {
-            Log.w(
+            val lines: MutableList<String> = try {
+                file.readLines().toMutableList()
+            } catch (e: Exception) {
+                Log.e(
+                    TAG,
+                    "backfillCornerSamplesInCsv: error reading CSV for eventId=$eventId",
+                    e
+                )
+                return
+            }
+
+            if (lines.isEmpty()) {
+                Log.w(
+                    TAG,
+                    "backfillCornerSamplesInCsv: CSV for eventId=$eventId is empty"
+                )
+                return
+            }
+
+            Log.d(
                 TAG,
-                "backfillCornerSamplesInCsv: CSV for eventId=$eventId is empty"
+                "backfillCornerSamplesInCsv: loaded ${lines.size} line(s) from ${file.name}"
             )
-            return
-        }
 
-        Log.d(
-            TAG,
-            "backfillCornerSamplesInCsv: loaded ${lines.size} line(s) from ${file.name}"
-        )
-
-        Log.d(
-            TAG,
-            "backfillCornerSamplesInCsv: loaded ${lines.size} line(s) from ${file.name}"
-        )
+            Log.d(
+                TAG,
+                "backfillCornerSamplesInCsv: loaded ${lines.size} line(s) from ${file.name}"
+            )
 
 
 // We know the header is:
 // intervalMs,utcMs,localTime,trackName,eventName,
 // cornerIndex,cornerName,visitNumber,latG,longG,zG,gSum,gpsLat,gpsLon,
 // insideCornerTrigger,closestCornerIndex,distanceToClosestCornerM
-        val UTC_MS_INDEX = 1
-        val CORNER_INDEX_INDEX = 5
-        val CORNER_NAME_INDEX = 6          // <-- for clarity; we won't modify this
-        val VISIT_NUMBER_INDEX = 7         // <-- the IMPORTANT change
+            val UTC_MS_INDEX = 1
+            val CORNER_INDEX_INDEX = 5
+            val CORNER_NAME_INDEX = 6          // <-- for clarity; we won't modify this
+            val VISIT_NUMBER_INDEX = 7         // <-- the IMPORTANT change
+            val INSIDE_CORNER_INDEX_INDEX = 14
 
 
-        var candidateCount = 0
-        var updatedCount = 0
+            var candidateCount = 0
+            var updatedCount = 0
 
-        // Skip header at index 0; data rows start at 1
-        for (i in 1 until lines.size) {
-            val line = lines[i]
-            if (line.isBlank()) continue
+            // Skip header at index 0; data rows start at 1
+            for (i in 1 until lines.size) {
+                val line = lines[i]
+                if (line.isBlank()) continue
 
-            val parts = line.split(',')
-            if (parts.size <= VISIT_NUMBER_INDEX) continue
+                val parts = line.split(',')
+                if (parts.size <= VISIT_NUMBER_INDEX) continue
 
-            val utcMs = parts[UTC_MS_INDEX].toLongOrNull() ?: continue
-            val cornerVal = parts[CORNER_INDEX_INDEX].toIntOrNull() ?: 0
-            val visitVal = parts[VISIT_NUMBER_INDEX].toIntOrNull() ?: 0
+                val utcMs = parts[UTC_MS_INDEX].toLongOrNull() ?: continue
+                val cornerVal = parts[CORNER_INDEX_INDEX].toIntOrNull() ?: 0
+                val visitVal = parts[VISIT_NUMBER_INDEX].toIntOrNull() ?: 0
 
-            // Only consider rows in our window [startUtcMs, apexUtcMs]
-            if (utcMs < startUtcMs || utcMs > apexUtcMs) continue
+                // Only consider rows in our window [startUtcMs, apexUtcMs]
+                if (utcMs < startUtcMs || utcMs > apexUtcMs) continue
 
-            // Only interested in rows that do NOT already belong to a corner
-            if (cornerVal == 0 && visitVal == 0) {
-                candidateCount++
+                // Only interested in rows that do NOT already belong to a corner
+                if (cornerVal == 0 && visitVal == 0) {
+                    candidateCount++
 
-                // Make a mutable copy so we can edit fields
-                val cols = parts.toMutableList()
-                cols[CORNER_INDEX_INDEX] = cornerIndex.toString()
-                cols[VISIT_NUMBER_INDEX] = visitNumber.toString()
+// Make a mutable copy so we can edit fields
+                    val cols = parts.toMutableList()
 
-                // Re-join into a CSV line and store back
-                lines[i] = cols.joinToString(",")
+// Tag this row as belonging to this corner visit
+                    cols[CORNER_INDEX_INDEX] = cornerIndex.toString()
+                    cols[VISIT_NUMBER_INDEX] = visitNumber.toString()
 
-                updatedCount++
+// Also mark it as "inside/capturing corner data"
+                    if (cols.size > INSIDE_CORNER_INDEX_INDEX) {
+                        cols[INSIDE_CORNER_INDEX_INDEX] = "Yes"
+                    }
+
+// Re-join into a CSV line and store back
+                    lines[i] = cols.joinToString(",")
+
+
+                    updatedCount++
+                }
+            }
+
+            Log.d(
+                TAG,
+                "backfillCornerSamplesInCsv: found $candidateCount CSV row(s) in pre-apex " +
+                        "window; updated $updatedCount row(s) for corner=$cornerIndex visit=$visitNumber"
+            )
+
+            // If we changed anything, write the updated lines back to the file
+            if (updatedCount > 0) {
+                try {
+                    file.writeText(lines.joinToString("\n"))
+                    Log.d(
+                        TAG,
+                        "backfillCornerSamplesInCsv: wrote updated CSV for eventId=$eventId"
+                    )
+                } catch (e: Exception) {
+                    Log.e(
+                        TAG,
+                        "backfillCornerSamplesInCsv: error writing updated CSV for eventId=$eventId",
+                        e
+                    )
+                }
             }
         }
-
-        Log.d(
-            TAG,
-            "backfillCornerSamplesInCsv: found $candidateCount CSV row(s) in pre-apex " +
-                    "window; updated $updatedCount row(s) for corner=$cornerIndex visit=$visitNumber"
-        )
-
-        // If we changed anything, write the updated lines back to the file
-        if (updatedCount > 0) {
-            try {
-                file.writeText(lines.joinToString("\n"))
-                Log.d(
-                    TAG,
-                    "backfillCornerSamplesInCsv: wrote updated CSV for eventId=$eventId"
-                )
-            } catch (e: Exception) {
-                Log.e(
-                    TAG,
-                    "backfillCornerSamplesInCsv: error writing updated CSV for eventId=$eventId",
-                    e
-                )
-            }
-        }
-
 
     }
 
