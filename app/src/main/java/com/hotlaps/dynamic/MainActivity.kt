@@ -54,6 +54,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Divider
 import androidx.compose.foundation.background
+import com.hotlaps.dynamic.ui.DisclaimerScreen
 import com.hotlaps.dynamic.ui.TeachCornersScreen
 import com.hotlaps.dynamic.ui.HelpAboutScreen
 
@@ -221,12 +222,23 @@ class MainActivity : ComponentActivity() {
                             composable("splash") {
                                 SplashDynamics(
                                     onFinished = {
-                                        nav.navigate("drive") {
+                                        nav.navigate("disclaimer") {
                                             popUpTo("splash") { inclusive = true }
                                         }
                                     }
                                 )
                             }
+
+                            composable("disclaimer") {
+                                DisclaimerScreen(
+                                    onAccept = {
+                                        nav.navigate("drive") {
+                                            popUpTo("disclaimer") { inclusive = true }
+                                        }
+                                    }
+                                )
+                            }
+
 
                             composable("menu") {
 
