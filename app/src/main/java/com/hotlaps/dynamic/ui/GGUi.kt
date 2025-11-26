@@ -324,7 +324,7 @@ fun GGScreen(
     // --- 10 Hz loop: project sensors into calibrated car axes, smooth, and publish ---
     LaunchedEffect(calibState.vec) {
         val g = SensorManager.GRAVITY_EARTH           // 9.80665 m/s^2
-        val tauMs = 600.0f                       // EMA time constant (~0.5 s) 500.0f
+        val tauMs = 200.0f                       // EMA time constant (~0.5 s) 500.0f
 
         var latEma = 0f
         var longEma = 0f
@@ -368,6 +368,11 @@ fun GGScreen(
             val longClamped = longNow.coerceIn(-G_CLAMP, G_CLAMP)
             val latClamped = latNow.coerceIn(-G_CLAMP, G_CLAMP)
 
+            // Raw values for logging (clamped, but before EMA/deadband/MA)
+            val rawLongG = longClamped
+            val rawLatG  = latClamped
+
+
             // 2) Time-aware EMA on clamped values
             val nowMs = System.currentTimeMillis()
             val dtMs = (nowMs - lastUpdateMs).coerceAtLeast(1L)
@@ -381,11 +386,15 @@ fun GGScreen(
             longEma = longEmaNew
             latEma = latEmaNew
 
+                /* Comment out - Dead band was causing clipping at zero crossing.
             // 3) Deadband to keep “coast” from jittering
             val DEAD_BAND_G = 0.04f       // tweak; ~0.03–0.05g works well
             val longDb = if (kotlin.math.abs(longEmaNew) < DEAD_BAND_G) 0f else longEmaNew
             val latDb = if (kotlin.math.abs(latEmaNew) < DEAD_BAND_G) 0f else latEmaNew
 
+                 */
+            val longDb = longEmaNew
+            val latDb  = latEmaNew
             // 4) Moving-average smoothing on top of EMA + deadband
             //    NOTE: we store lat first, long second
             val (latMa, longMa) = ma.add(latDb, longDb)
@@ -395,7 +404,12 @@ fun GGScreen(
             longG = longMa
 
             // Feed into ViewModel, just like before
-            driveViewModel.updateGForces(latG, longG)
+            driveViewModel.updateGForces(
+                smoothedLat = latG,
+                smoothedLong = longG,
+                rawLat = rawLatG,
+                rawLong = rawLongG
+            )
             driveViewModel.recordCurrentSample()
             driveViewModel.updateCornerCaptureState(activeTrack)
 

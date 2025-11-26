@@ -71,7 +71,8 @@ object EventStorage {
                     file.appendText(
                         "intervalMs,utcMs,localTime,trackName,eventName," +
                                 "cornerIndex,cornerName,visitNumber,latG,longG,zG,gSum,gpsLat,gpsLon," +
-                                "insideCornerTrigger,closestCornerIndex,distanceToClosestCornerM\n"
+                                "insideCornerTrigger,closestCornerIndex,distanceToClosestCornerM," +
+                                "rawLatG,rawLongG\n"
                     )
                 }
 
@@ -118,7 +119,11 @@ object EventStorage {
                     append(sample.closestCornerIndex); append(',')
 
                     // distanceToClosestCornerM
-                    append(sample.distanceToClosestCornerM)
+                    append(sample.distanceToClosestCornerM); append(',')
+
+                    // raw (pre-smoothing) G values
+                    append(sample.rawLatG); append(',')
+                    append(sample.rawLongG)
 
                     append('\n')
                 }
@@ -239,7 +244,7 @@ object EventStorage {
                 updatedLines.add(mutable.joinToString(","))
             }
 
-            file.writeText(updatedLines.joinToString("\n"))
+            file.writeText(lines.joinToString("\n") + "\n")
             Log.d(TAG, "updateEventNameInCsv: updated eventName for eventId=$eventId")
         } catch (e: Exception) {
             Log.e(TAG, "updateEventNameInCsv: error updating CSV for eventId=$eventId", e)
@@ -496,7 +501,7 @@ object EventStorage {
             // If we changed anything, write the updated lines back to the file
             if (updatedCount > 0) {
                 try {
-                    file.writeText(lines.joinToString("\n"))
+                    file.writeText(lines.joinToString("\n") + "\n")
                     Log.d(
                         TAG,
                         "backfillCornerSamplesInCsv: wrote updated CSV for eventId=$eventId"

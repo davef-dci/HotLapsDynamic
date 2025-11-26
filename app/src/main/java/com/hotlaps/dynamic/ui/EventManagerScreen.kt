@@ -17,7 +17,8 @@ import androidx.compose.runtime.setValue
 import java.io.File
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
-
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -68,11 +69,14 @@ fun EventManagerScreen(
             )
         }
     ) { innerPadding ->
+        val scrollState = rememberScrollState()
 
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .verticalScroll(scrollState)
                 .padding(innerPadding)
+
                 .padding(24.dp),
             verticalArrangement = Arrangement.Top,
             horizontalAlignment = Alignment.CenterHorizontally

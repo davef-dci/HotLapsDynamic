@@ -56,9 +56,11 @@ data class EventSample(
 
     // Nearest corner at this instant (by index and distance)
     val closestCornerIndex: Int = 0,
-    val distanceToClosestCornerM: Double = 0.0
+    val distanceToClosestCornerM: Double = 0.0,
 
-
+    // Raw (unsmoothed, pre-deadband) lateral and longitudinal G
+    val rawLatG: Float = 0f,
+    val rawLongG: Float = 0f
 )
 
 

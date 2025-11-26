@@ -14,7 +14,6 @@ import com.hotlaps.dynamic.model.CornerVisit
 import android.content.Context
 import android.util.Log
 
-import com.hotlaps.dynamic.util.MovingAverage2D
 import kotlin.math.abs
 
 import com.hotlaps.dynamic.viewmodel.TrackSelectionViewModel
@@ -259,12 +258,30 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
     private val _zG = MutableStateFlow(0f)
     val zG: StateFlow<Float> get() = _zG
 
-    // Called when GGScreen computes new smoothed G values
-    fun updateGForces(lat: Float, long: Float, z: Float = 0f) {
-        _latG.value = lat
-        _longG.value = long
+    private val _rawLatG = MutableStateFlow(0f)
+    val rawLatG: StateFlow<Float> get() = _rawLatG
+
+    private val _rawLongG = MutableStateFlow(0f)
+    val rawLongG: StateFlow<Float> get() = _rawLongG
+
+    // Called when GGScreen computes new G values
+//  - smoothedLat / smoothedLong are for UI plots
+//  - rawLat / rawLong are pre-smoothing values for logging
+    fun updateGForces(
+        smoothedLat: Float,
+        smoothedLong: Float,
+        rawLat: Float,
+        rawLong: Float,
+        z: Float = 0f
+    ) {
+        _latG.value = smoothedLat
+        _longG.value = smoothedLong
         _zG.value = z
+
+        _rawLatG.value = rawLat
+        _rawLongG.value = rawLong
     }
+
 
     fun recordCurrentSample() {
         val event = _currentEvent.value ?: return   // no active event -> do nothing
@@ -324,6 +341,11 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
                     (z * z)
         )
 
+        val rawLong = _rawLongG.value
+        val rawLat  = _rawLatG.value
+
+
+
         val eventNameForSample = event.displayName.ifBlank { event.name }
 
         // Nearest corner at this instant (using existing helper and currentTrack)
@@ -348,7 +370,9 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
             gpsLat = gpsLat.value,
             gpsLon = gpsLon.value,
             closestCornerIndex = closestCornerIndex,
-            distanceToClosestCornerM = distanceToClosestCornerM
+            distanceToClosestCornerM = distanceToClosestCornerM,
+            rawLatG = rawLat,
+            rawLongG = rawLong
         )
 
         if (::appContext.isInitialized) {
