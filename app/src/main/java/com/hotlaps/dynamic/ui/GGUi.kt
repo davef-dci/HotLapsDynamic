@@ -116,6 +116,10 @@ import androidx.compose.ui.graphics.toArgb
 import com.hotlaps.dynamic.AccentLime
 import com.hotlaps.dynamic.RecordRed
 
+import com.hotlaps.dynamic.data.SmoothingLevel
+
+
+
 
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -150,6 +154,25 @@ fun GGScreen(
     val ggTrailWindow by repo.ggTrailWindowS.collectAsStateWithLifecycle(initialValue = 3.0f)
     val trailBrakeG by repo.trailBrakeG.collectAsStateWithLifecycle(initialValue = 0.30f)
 
+    // Smoothing level from settings (0 = Off, 1 = Low, 2 = Medium, 3 = Heavy)
+    val smoothingIndex by repo.smoothingLevel.collectAsStateWithLifecycle(initialValue = 1)
+    val smoothingLevel = SmoothingLevel.entries.getOrElse(smoothingIndex) { SmoothingLevel.Low }
+
+    // === Moving-average smoothing for G-G plot ===
+// Start with whatever the current smoothing preset says
+    var smoothingSamples by remember { mutableStateOf(smoothingLevel.windowSize as Int) }
+
+    val ma = remember { MovingAverage2D(smoothingSamples) }
+
+// Keep the moving-average window in sync with the smoothing preset.
+// (Debug slider can still override at runtime.)
+    LaunchedEffect(smoothingLevel) {
+        smoothingSamples = smoothingLevel.windowSize
+        ma.setWindowSize(smoothingLevel.windowSize)
+    }
+
+
+
     // --- Sensor hookup: keep the same states you already have ---
     var ticks by remember { mutableStateOf(0L) }
     var latG by remember { mutableStateOf(0f) }
@@ -159,10 +182,6 @@ fun GGScreen(
     var latestX by remember { mutableStateOf(0f) }
     var latestY by remember { mutableStateOf(0f) }
     // (We ignore Z for the G-G plot)
-
-    // === Moving-average smoothing for G-G plot ===
-    var smoothingSamples by remember { mutableStateOf(10) }  // user-adjustable
-    val ma = remember { MovingAverage2D(smoothingSamples) }
 
     // === Active track (from TrackSelectionViewModel) ===
     val activeTrack by trackSelectionViewModel
@@ -322,9 +341,14 @@ fun GGScreen(
 
     // 3) 10 Hz publisher: convert to g's + small EMA smoothing, then tick
     // --- 10 Hz loop: project sensors into calibrated car axes, smooth, and publish ---
-    LaunchedEffect(calibState.vec) {
+    LaunchedEffect(calibState.vec, smoothingLevel) {
         val g = SensorManager.GRAVITY_EARTH           // 9.80665 m/s^2
-        val tauMs = 200.0f                       // EMA time constant (~0.5 s) 500.0f
+// If Off: no EMA at all (just pass clamped values through)
+        val tauMsOrNull: Float? = when (smoothingLevel) {
+            SmoothingLevel.Off -> null
+            else -> smoothingLevel.tauMs.coerceAtLeast(1).toFloat()
+        }
+
 
         var latEma = 0f
         var longEma = 0f
@@ -378,23 +402,25 @@ fun GGScreen(
             val dtMs = (nowMs - lastUpdateMs).coerceAtLeast(1L)
             lastUpdateMs = nowMs
 
-            val alpha = 1f - kotlin.math.exp(-dtMs.toFloat() / tauMs)
+            // 2) Time-aware EMA on clamped values (or bypass if Off)
+            val (longDb, latDb) = if (tauMsOrNull == null) {
+                // Off → no EMA: just use clamped values directly
+                longEma = longClamped
+                latEma = latClamped
+                longClamped to latClamped
+            } else {
+                val alpha = 1f - kotlin.math.exp(-dtMs.toFloat() / tauMsOrNull)
 
-            val longEmaNew = longEma + alpha * (longClamped - longEma)
-            val latEmaNew = latEma + alpha * (latClamped - latEma)
+                val longEmaNew = longEma + alpha * (longClamped - longEma)
+                val latEmaNew = latEma + alpha * (latClamped - latEma)
 
-            longEma = longEmaNew
-            latEma = latEmaNew
+                longEma = longEmaNew
+                latEma = latEmaNew
 
-                /* Comment out - Dead band was causing clipping at zero crossing.
-            // 3) Deadband to keep “coast” from jittering
-            val DEAD_BAND_G = 0.04f       // tweak; ~0.03–0.05g works well
-            val longDb = if (kotlin.math.abs(longEmaNew) < DEAD_BAND_G) 0f else longEmaNew
-            val latDb = if (kotlin.math.abs(latEmaNew) < DEAD_BAND_G) 0f else latEmaNew
+                // currently no deadband; just forward EMA outputs
+                longEmaNew to latEmaNew
+            }
 
-                 */
-            val longDb = longEmaNew
-            val latDb  = latEmaNew
             // 4) Moving-average smoothing on top of EMA + deadband
             //    NOTE: we store lat first, long second
             val (latMa, longMa) = ma.add(latDb, longDb)

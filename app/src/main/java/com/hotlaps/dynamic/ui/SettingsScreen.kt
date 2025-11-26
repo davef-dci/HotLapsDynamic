@@ -19,6 +19,8 @@ import com.hotlaps.dynamic.data.SettingsRepo
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.foundation.text.KeyboardOptions
+import com.hotlaps.dynamic.data.SmoothingLevel
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -45,6 +47,13 @@ fun SettingsScreen(onBack: () -> Unit) {
     // Corner capture trigger radius (meters)
     val cornerRadiusM by repo.cornerTriggerRadiusM.collectAsState(initial = 30f)
     var cornerRadiusText by remember(cornerRadiusM) { mutableStateOf("%.0f".format(cornerRadiusM)) }
+
+// Smoothing level (0 = Off, 1 = Low, 2 = Medium, 3 = Heavy)
+    val smoothingIndex by repo.smoothingLevel.collectAsState(initial = 1)
+    var smoothingLevel by remember(smoothingIndex) {
+        mutableStateOf(SmoothingLevel.entries[smoothingIndex])
+    }
+
 
     Scaffold(
         topBar = {
@@ -200,6 +209,45 @@ fun SettingsScreen(onBack: () -> Unit) {
                     status = "Reverted to saved value"
                 }) { Text("Revert") }
             }
+
+
+            Divider()
+
+            Text("Data Smoothing")
+
+// Dropdown selector
+            var expanded by remember { mutableStateOf(false) }
+
+            Box {
+                OutlinedButton(
+                    onClick = { expanded = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(smoothingLevel.name)
+                }
+
+                DropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false }
+                ) {
+                    SmoothingLevel.entries.forEachIndexed { idx, level ->
+                        DropdownMenuItem(
+                            text = { Text(level.name) },
+                            onClick = {
+                                smoothingLevel = level
+                                expanded = false
+
+                                // Save to DataStore
+                                scope.launch {
+                                    repo.updateSmoothingLevel(level.ordinal)
+                                    status = "Saved ✓  (Smoothing = ${level.name})"
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+
 
             if (status.isNotBlank()) {
                 Text(status, color = MaterialTheme.colorScheme.primary)

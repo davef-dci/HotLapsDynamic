@@ -30,7 +30,7 @@ class SettingsRepo(private val context: Context) {
         // 5) Corner capture trigger radius (meters)
         val CORNER_TRIGGER_RADIUS_M = floatPreferencesKey("corner_trigger_radius_m")
 
-
+        val SMOOTHING_LEVEL = intPreferencesKey("smoothing_level")
     }
 
     // --- Defaults (tweak as you like)
@@ -40,6 +40,7 @@ class SettingsRepo(private val context: Context) {
         const val GG_TRAIL_WINDOW_S = 3.0f
         const val GG_UPDATE_RATE_HZ = 10  // 2–50 Hz supported
         const val CORNER_TRIGGER_RADIUS_M = 30f
+        const val SMOOTHING_LEVEL = 1  // 0=Off, 1=Low, 2=Medium, 3=Heavy
 
     }
 
@@ -61,6 +62,11 @@ class SettingsRepo(private val context: Context) {
             it[K.CORNER_TRIGGER_RADIUS_M] ?: D.CORNER_TRIGGER_RADIUS_M
         }
 
+
+    val smoothingLevel: Flow<Int> =
+        context.settingsDataStore.data.map {
+            it[K.SMOOTHING_LEVEL] ?: D.SMOOTHING_LEVEL
+        }
     // --- Updaters
     suspend fun updateTrailBrakeG(v: Float) {
         context.settingsDataStore.edit { it[K.TRAIL_BRAKE_G] = v.coerceIn(0f, 3f) }
@@ -81,6 +87,13 @@ class SettingsRepo(private val context: Context) {
     suspend fun updateCornerTriggerRadiusM(v: Float) {
         context.settingsDataStore.edit { prefs ->
             prefs[K.CORNER_TRIGGER_RADIUS_M] = v.coerceIn(5f, 100f)
+        }
+    }
+
+    suspend fun updateSmoothingLevel(level: Int) {
+        context.settingsDataStore.edit { prefs ->
+            // 0 = Off, 1 = Low, 2 = Medium, 3 = Heavy
+            prefs[K.SMOOTHING_LEVEL] = level.coerceIn(0, 3)
         }
     }
 
