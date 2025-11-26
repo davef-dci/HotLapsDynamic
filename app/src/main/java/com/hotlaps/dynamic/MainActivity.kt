@@ -29,27 +29,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Text
 import com.hotlaps.dynamic.viewmodel.DriveViewModel
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.LaunchedEffect
 import com.hotlaps.dynamic.ui.EventViewerScreen
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.hotlaps.dynamic.ui.EditTrackScreen
-import com.hotlaps.dynamic.HotLapsDynamicTheme
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Divider
@@ -62,14 +54,11 @@ import com.hotlaps.dynamic.ui.TeachCornersScreen
 import com.hotlaps.dynamic.ui.HelpAboutScreen
 
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.material3.Icon
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.hotlaps.dynamic.R
+import com.hotlaps.dynamic.ui.help.HelpQuickStartScreen
+import com.hotlaps.dynamic.ui.help.HelpScreen
 
 
 
@@ -242,14 +231,14 @@ class MainActivity : ComponentActivity() {
                                 )
 
                                 Text(
-                                    text = "Help & About",
+                                    text = "Help",
                                     fontSize = 20.sp,
                                     style = MaterialTheme.typography.bodyLarge,
                                     modifier = Modifier
                                         .clickable {
                                             scope.launch {
                                                 drawerState.close()
-                                                nav.navigate("helpAbout") {
+                                                nav.navigate("help") {
                                                     launchSingleTop = true
                                                 }
                                             }
@@ -499,7 +488,23 @@ class MainActivity : ComponentActivity() {
                             }
 
 
+                            composable("help") {
+                                HelpScreen(
+                                    onBack = { nav.popBackStack() },
+                                    onQuickStartClick = {
+                                        nav.navigate("helpQuickStart") {
+                                            launchSingleTop = true
+                                        }
+                                    }
+                                )
+                            }
 
+
+                            composable("helpQuickStart") {
+                                HelpQuickStartScreen(
+                                    onBack = { nav.popBackStack() }
+                                )
+                            }
 
 
 
