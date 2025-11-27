@@ -60,7 +60,11 @@ data class EventSample(
 
     // Raw (unsmoothed, pre-deadband) lateral and longitudinal G
     val rawLatG: Float = 0f,
-    val rawLongG: Float = 0f
+    val rawLongG: Float = 0f,
+
+    val isApexSample: Boolean = false,
+    val timeFromApexMs: Long? = null
+
 )
 
 

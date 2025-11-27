@@ -72,9 +72,10 @@ object EventStorage {
                         "intervalMs,utcMs,localTime,trackName,eventName," +
                                 "cornerIndex,cornerName,visitNumber,latG,longG,zG,gSum,gpsLat,gpsLon," +
                                 "insideCornerTrigger,closestCornerIndex,distanceToClosestCornerM," +
-                                "rawLatG,rawLongG\n"
+                                "rawLatG,rawLongG,isApexSample,timeFromApexMs\n"
                     )
                 }
+
 
 
                 val localTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
@@ -124,6 +125,10 @@ object EventStorage {
                     // raw (pre-smoothing) G values
                     append(sample.rawLatG); append(',')
                     append(sample.rawLongG)
+
+                    // NEW: apex flags/relative time
+                    append(sample.isApexSample); append(',')
+                    append(sample.timeFromApexMs ?: "")
 
                     append('\n')
                 }

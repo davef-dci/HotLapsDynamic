@@ -65,10 +65,19 @@ class DriveViewModel : ViewModel() {
 
 
 
+
+
     private enum class CornerCaptureState {
         Idle,
         Capturing
     }
+
+
+    // For apex detection: one distance sample at a moment in time
+    private data class CornerDistanceSample(
+        val utcMs: Long,
+        val distanceToCornerM: Double
+    )
 
 
     // NEW: high-level recording state for the whole event
@@ -126,6 +135,11 @@ class DriveViewModel : ViewModel() {
     // Time window (UTC millis) for the currently active corner visit
     private var activeVisitStartUtcMs: Long = 0L
     private var activeVisitEndUtcMs: Long = 0L
+
+
+    // Distance-to-corner samples captured during the *current* visit
+    // (we'll use these later to fit a curve and find the apex time)
+    private val activeCornerDistanceSamples = mutableListOf<CornerDistanceSample>()
 
 
     // Per-corner visit counters within this Event: cornerIndex -> visits so far
@@ -353,6 +367,23 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
         val closestCornerIndex = nearest?.first ?: 0
         val distanceToClosestCornerM = nearest?.second ?: 0.0
 
+        // If we're currently capturing a corner, store this distance sample for apex detection
+        if (cornerCaptureState == CornerCaptureState.Capturing &&
+            activeCornerIndex != null &&
+            activeVisitNumber > 0 &&
+            distanceToClosestCornerM > 0.0
+        ) {
+            activeCornerDistanceSamples.add(
+                CornerDistanceSample(
+                    utcMs = nowUtc,
+                    distanceToCornerM = distanceToClosestCornerM
+                )
+            )
+        }
+
+
+
+
 
         val sample = EventSample(
             eventId = event.id,
@@ -372,7 +403,10 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
             closestCornerIndex = closestCornerIndex,
             distanceToClosestCornerM = distanceToClosestCornerM,
             rawLatG = rawLat,
-            rawLongG = rawLong
+            rawLongG = rawLong,
+                    // New fields – for now all samples start as non-apex, no relative time
+            isApexSample = false,
+            timeFromApexMs = null
         )
 
         if (::appContext.isInitialized) {
@@ -573,6 +607,10 @@ fun updateCornerCaptureState(track: Track?) {
             activeVisitNumber = newVisitNumber
             cornerCaptureState = CornerCaptureState.Capturing
 
+            // Clear any leftover distance samples from a previous visit.
+// We'll refill this during the new visit.
+            activeCornerDistanceSamples.clear()
+
             Log.d(
                 "CornerFSM",
                 "Started capturing corner=$cornerIndex visit=$newVisitNumber, " +
@@ -590,6 +628,10 @@ fun updateCornerCaptureState(track: Track?) {
             val endUtc = nowUtc + afterMs
 
             activeVisitStartUtcMs = startUtc
+
+            // NEW: starting a fresh corner visit -> reset stored distance samples
+            activeCornerDistanceSamples.clear()
+
             activeVisitEndUtcMs = endUtc
 
             val visit = CornerVisit(
@@ -602,6 +644,10 @@ fun updateCornerCaptureState(track: Track?) {
             )
             cornerVisits.add(visit)
 
+            // TODO: we'll re-enable these using the *distance-based* apex time
+            // once we have it at the end of the visit.
+
+            /*
             // Retroactively tag samples that occurred just before the apex
             backfillPreApexSamples(
                 event = event,
@@ -622,6 +668,8 @@ fun updateCornerCaptureState(track: Track?) {
                     apexUtcMs = nowUtc
                 )
             }
+            */
+
 
 
 
@@ -646,6 +694,57 @@ fun updateCornerCaptureState(track: Track?) {
                             "(window end=$activeVisitEndUtcMs), samplesForVisit=$samplesForVisit"
                 )
 
+// NEW: Try to compute a candidate apex time from our distance samples
+                val apexUtcFromDistances = findApexTimeUsingCubicFit(activeCornerDistanceSamples)
+                if (apexUtcFromDistances != null) {
+                    Log.d(
+                        "ApexDetect",
+                        "Computed candidate apexUtc=$apexUtcFromDistances from " +
+                                "${activeCornerDistanceSamples.size} distance samples " +
+                                "for corner=$activeCorner visit=$activeVisit"
+                    )
+                }
+
+                // If we got a valid apex time, backfill pre-apex samples now
+                if (apexUtcFromDistances != null) {
+                    // In-memory samples
+                    backfillPreApexSamples(
+                        event = event,
+                        cornerIndex = activeCorner,
+                        visitNumber = activeVisit,
+                        startUtcMs = activeVisitStartUtcMs,
+                        apexUtcMs = apexUtcFromDistances
+                    )
+
+                    // CSV on disk
+                    if (::appContext.isInitialized) {
+                        EventStorage.backfillCornerSamplesInCsv(
+                            context = appContext,
+                            eventId = event.id,
+                            cornerIndex = activeCorner,
+                            visitNumber = activeVisit,
+                            startUtcMs = activeVisitStartUtcMs,
+                            apexUtcMs = apexUtcFromDistances
+                        )
+                    } else {
+                        Log.w(
+                            "ApexDetect",
+                            "appContext not initialized; cannot backfill CSV for corner=$activeCorner visit=$activeVisit"
+                        )
+                    }
+
+                    // Mark the apex sample and time-from-apex for this visit in memory
+                    markApexSampleForVisit(
+                        event = event,
+                        cornerIndex = activeCorner,
+                        visitNumber = activeVisit,
+                        apexUtcMs = apexUtcFromDistances
+                    )
+
+                }
+
+
+
                 // Mark the end time for this corner so we enforce the gap
                 val state = perCornerState.getOrPut(activeCorner) { CornerState() }
                 state.lastVisitEndUtcMs = nowUtc
@@ -657,6 +756,9 @@ fun updateCornerCaptureState(track: Track?) {
                 activeVisitNumber = 0
                 activeVisitStartUtcMs = 0L
                 activeVisitEndUtcMs = 0L
+
+                // NEW: done with this visit; discard its temporary distance samples
+                activeCornerDistanceSamples.clear()
             }
         }
     }
@@ -689,6 +791,219 @@ fun updateCornerCaptureState(track: Track?) {
     fun getCornerTriggerRadiusMeters(): Double {
         return cornerTriggerRadiusM.value
     }
+
+    /**
+     * Very first pass at apex detection:
+     *  - Take all distance samples for the current visit
+     *  - Pick the 4 smallest distances
+     *  - Sort those 4 by time (utcMs)
+     *  - Return the time of the minimum-distance sample
+     *
+     * (We'll upgrade this later to a proper cubic curve fit.)
+     */
+    private fun computeApexUtcFromDistanceSamples(): Long? {
+        if (activeCornerDistanceSamples.size < 4) {
+            Log.d(
+                "ApexDetect",
+                "Not enough distance samples (${activeCornerDistanceSamples.size}) to compute apex"
+            )
+            return null
+        }
+
+        // Work on a sorted copy so we don't mutate the original list
+        val fourClosest = activeCornerDistanceSamples
+            .sortedBy { it.distanceToCornerM }   // smallest distances first
+            .take(4)
+            .sortedBy { it.utcMs }               // ensure chronological order
+
+        val minSample = fourClosest.minByOrNull { it.distanceToCornerM } ?: return null
+
+        Log.d(
+            "ApexDetect",
+            "Selected ${fourClosest.size} samples for apex; " +
+                    "minSampleUtc=${minSample.utcMs}, " +
+                    "minSampleDist=${minSample.distanceToCornerM}"
+        )
+
+        return minSample.utcMs
+    }
+    /**
+     * Use a cubic fit on the 4 closest distance samples to estimate
+     * the time (utcMs) when the car was closest to the corner apex.
+     *
+     * Steps:
+     *  - Pick 4 samples with smallest distanceToCornerM
+     *  - Sort those 4 by time (utcMs)
+     *  - Shift time so the first sample is t = 0
+     *  - Fit y(t) = a t^3 + b t^2 + c t + d  (d = y0)
+     *  - Solve y'(t) = 3 a t^2 + 2 b t + c = 0
+     *  - Choose the root that lies within the time span of the 4 samples
+     *  - Convert back to absolute utcMs
+     */
+    private fun findApexTimeUsingCubicFit(
+        samples: List<CornerDistanceSample>
+    ): Long? {
+        if (samples.size < 4) {
+            Log.d("ApexDetect", "Not enough samples (${samples.size}) for cubic fit")
+            return null
+        }
+
+        // 1) Take the 4 closest samples (by distance), then sort them by time.
+        val fourClosest = samples
+            .sortedBy { it.distanceToCornerM }
+            .take(4)
+            .sortedBy { it.utcMs }
+
+        // Base time so our times are small and numerically stable.
+        val baseTimeMs = fourClosest.first().utcMs.toDouble()
+        val y0 = fourClosest[0].distanceToCornerM
+
+        // Work in seconds, with t0 = 0.
+        val t = DoubleArray(4) { (fourClosest[it].utcMs.toDouble() - baseTimeMs) / 1000.0 }
+        val y = DoubleArray(4) { fourClosest[it].distanceToCornerM }
+
+        // We know at t0 = 0: y(0) = d = y0
+        // So y(t) = a t^3 + b t^2 + c t + d, with d = y0.
+        // For points 1,2,3: y(i) - y0 = a t^3 + b t^2 + c t
+        val t1 = t[1]; val t2 = t[2]; val t3 = t[3]
+        val yShift1 = y[1] - y0
+        val yShift2 = y[2] - y0
+        val yShift3 = y[3] - y0
+
+        // Build 3x3 system: A * [a b c]^T = Y
+        val A = arrayOf(
+            doubleArrayOf(t1 * t1 * t1, t1 * t1, t1, yShift1),
+            doubleArrayOf(t2 * t2 * t2, t2 * t2, t2, yShift2),
+            doubleArrayOf(t3 * t3 * t3, t3 * t3, t3, yShift3)
+        )
+
+        // Simple Gaussian elimination to solve for a, b, c.
+        fun solve3x3Augmented(mat: Array<DoubleArray>): Triple<Double, Double, Double>? {
+            val n = 3
+
+            // Forward elimination
+            for (col in 0 until n) {
+                // Pivot row
+                var pivotRow = col
+                for (r in col + 1 until n) {
+                    if (kotlin.math.abs(mat[r][col]) >
+                        kotlin.math.abs(mat[pivotRow][col])
+                    ) {
+                        pivotRow = r
+                    }
+                }
+
+                val pivot = mat[pivotRow][col]
+                if (kotlin.math.abs(pivot) < 1e-12) {
+                    // Singular / ill-conditioned -> bail
+                    return null
+                }
+
+                // Swap rows if needed
+                if (pivotRow != col) {
+                    val tmp = mat[col]
+                    mat[col] = mat[pivotRow]
+                    mat[pivotRow] = tmp
+                }
+
+                // Normalize pivot row
+                for (c in col until n + 1) {
+                    mat[col][c] /= pivot
+                }
+
+                // Eliminate this column in other rows
+                for (r in 0 until n) {
+                    if (r == col) continue
+                    val factor = mat[r][col]
+                    for (c in col until n + 1) {
+                        mat[r][c] -= factor * mat[col][c]
+                    }
+                }
+            }
+
+            // Now matrix is in reduced row echelon form
+            val a = mat[0][3]
+            val b = mat[1][3]
+            val c = mat[2][3]
+            return Triple(a, b, c)
+        }
+
+        val (a, b, c) = solve3x3Augmented(A)
+            ?: run {
+                // Fall back to simply using the closest sample if fit fails
+                val fallback = fourClosest.minByOrNull { it.distanceToCornerM }
+                Log.d("ApexDetect", "Cubic fit failed, falling back to min sample")
+                return fallback?.utcMs
+            }
+
+        val d = y0
+
+        // y'(t) = 3 a t^2 + 2 b t + c
+        val eps = 1e-12
+        var bestT: Double? = null
+
+        if (kotlin.math.abs(a) < eps) {
+            // Degenerates to linear: y'(t) = 2 b t + c
+            if (kotlin.math.abs(b) < eps) {
+                // Derivative is ~ constant; just pick the closest sample
+                val fallback = fourClosest.minByOrNull { it.distanceToCornerM }
+                return fallback?.utcMs
+            } else {
+                val root = -c / (2.0 * b)
+                bestT = root
+            }
+        } else {
+            val A2 = 3.0 * a
+            val B2 = 2.0 * b
+            val C2 = c
+            val disc = B2 * B2 - 4.0 * A2 * C2
+
+            if (disc < 0.0) {
+                // No real critical point -> fallback
+                val fallback = fourClosest.minByOrNull { it.distanceToCornerM }
+                return fallback?.utcMs
+            } else {
+                val sqrtDisc = kotlin.math.sqrt(disc)
+                val r1 = (-B2 - sqrtDisc) / (2.0 * A2)
+                val r2 = (-B2 + sqrtDisc) / (2.0 * A2)
+
+                val tMin = t.first()
+                val tMax = t.last()
+
+                // Accept only roots within the span of our 4 samples
+                val candidates = listOf(r1, r2).filter { it in tMin - 1e-6..tMax + 1e-6 }
+
+                bestT = when {
+                    candidates.isEmpty() -> null
+                    candidates.size == 1 -> candidates[0]
+                    else -> {
+                        // Evaluate the cubic and pick the smaller y(t)
+                        fun f(tt: Double): Double =
+                            a * tt * tt * tt + b * tt * tt + c * tt + d
+
+                        val y1 = f(candidates[0])
+                        val y2 = f(candidates[1])
+                        if (y1 <= y2) candidates[0] else candidates[1]
+                    }
+                }
+            }
+        }
+
+        if (bestT == null) {
+            val fallback = fourClosest.minByOrNull { it.distanceToCornerM }
+            return fallback?.utcMs
+        }
+
+        val apexUtcMs = baseTimeMs + bestT * 1000.0
+        Log.d(
+            "ApexDetect",
+            "Cubic apex fit: a=$a b=$b c=$c d=$d, t*=$bestT s, apexUtcMs=$apexUtcMs"
+        )
+
+        return apexUtcMs.toLong()
+    }
+
+
     /**
      * Later we'll use this to retroactively tag samples that happened
      * just BEFORE we detected the apex, so they get cornerIndex/visitNumber
@@ -737,6 +1052,70 @@ fun updateCornerCaptureState(track: Track?) {
     }
 
 
+    /**
+     * Given an apex time (UTC) for a specific corner visit, find the sample in
+     * _samples for (eventId, cornerIndex, visitNumber) whose intervalMs is
+     * closest to that apex time, and:
+     *
+     *  - Mark exactly one sample as isApexSample = true, timeFromApexMs = 0
+     *  - For all other samples in that visit, set timeFromApexMs relative to
+     *    the same apexIntervalMs and isApexSample = false.
+     */
+    private fun markApexSampleForVisit(
+        event: Event,
+        cornerIndex: Int,
+        visitNumber: Int,
+        apexUtcMs: Long
+    ) {
+        val apexIntervalMs = apexUtcMs - event.createdUtcMs
+
+        // 1) Find the sample in this visit whose intervalMs is closest to apexIntervalMs.
+        var bestIndex = -1
+        var bestError = Long.MAX_VALUE
+
+        for (i in _samples.indices) {
+            val s = _samples[i]
+            if (s.eventId != event.id) continue
+            if (s.cornerIndex != cornerIndex || s.visitNumber != visitNumber) continue
+
+            val err = kotlin.math.abs(s.intervalMs - apexIntervalMs)
+            if (err < bestError) {
+                bestError = err
+                bestIndex = i
+            }
+        }
+
+        if (bestIndex == -1) {
+            Log.w(
+                "ApexDetect",
+                "markApexSampleForVisit: no samples found for event=${event.id} " +
+                        "corner=$cornerIndex visit=$visitNumber"
+            )
+            return
+        }
+
+        // 2) Second pass: update ALL samples in this visit with timeFromApexMs
+        //    and flag exactly one as the apex sample.
+        for (i in _samples.indices) {
+            val s = _samples[i]
+            if (s.eventId != event.id) continue
+            if (s.cornerIndex != cornerIndex || s.visitNumber != visitNumber) continue
+
+            val timeFromApex = s.intervalMs - apexIntervalMs
+            val isApex = (i == bestIndex)
+
+            _samples[i] = s.copy(
+                isApexSample = isApex,
+                timeFromApexMs = timeFromApex
+            )
+        }
+
+        Log.d(
+            "ApexDetect",
+            "Marked apex sample index=$bestIndex for corner=$cornerIndex " +
+                    "visit=$visitNumber, apexIntervalMs=$apexIntervalMs ms"
+        )
+    }
 
 
 }
