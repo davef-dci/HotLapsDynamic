@@ -27,7 +27,7 @@ import java.util.Locale
 import androidx.lifecycle.viewModelScope
 import com.hotlaps.dynamic.data.SettingsRepo
 import kotlinx.coroutines.launch
-
+import java.io.File
 
 
 /**
@@ -392,7 +392,17 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
                     )
                 )
                 lastDistanceSampledM = distanceToClosestCornerM
+
+                // NEW: log this GPS-distance sample for offline debugging
+                appendApexDebugSample(
+                    event = event,
+                    cornerIndex = activeCornerIndex!!,
+                    visitNumber = activeVisitNumber,
+                    utcMs = nowUtc,
+                    distanceToCornerM = distanceToClosestCornerM
+                )
             }
+
         }
 
 
@@ -866,6 +876,22 @@ fun updateCornerCaptureState(track: Track?) {
      *      * t* is inside [t0, t3]
      *    otherwise we fall back to the discrete minimum-distance sample.
      */
+    /**
+     * Estimate apex time (utcMs) by fitting a *quadratic* to a local window
+     * of time-adjacent distance samples around the minimum-distance point.
+     *
+     * Steps:
+     *  - Sort all samples by time
+     *  - Find the index of the global minimum distance
+     *  - Build a 4-sample window: (minIndex-1, minIndex, minIndex+1, minIndex+2),
+     *    clamped/expanded so we stay in-bounds and still get 4 points
+     *  - Fit y(t) = a t^2 + b t + c by least-squares over those 4 points
+     *  - Vertex is at t* = -b / (2a)
+     *  - Only accept t* if:
+     *      * a > 0 (true minimum)
+     *      * t* is inside [t0, tLast] for the selected window
+     *    otherwise we fall back to the discrete minimum-distance sample.
+     */
     private fun findApexTimeUsingCubicFit(
         samples: List<CornerDistanceSample>
     ): Long? {
@@ -874,18 +900,59 @@ fun updateCornerCaptureState(track: Track?) {
             return null
         }
 
-        // 1) Take the 4 closest samples (by distance), then sort them by time.
-        val fourClosest = samples
-            .sortedBy { it.distanceToCornerM }
-            .take(4)
-            .sortedBy { it.utcMs }
+        // 1) Sort all samples by time (utcMs)
+        val byTime = samples.sortedBy { it.utcMs }
+
+        // 2) Find the index of the smallest distance *in time order*
+        val minIndex = byTime.indices.minByOrNull { idx ->
+            byTime[idx].distanceToCornerM
+        } ?: return null
+
+        // 3) Build a local 4-point window around minIndex: (min-1, min, min+1, min+2)
+        val lastIndex = byTime.lastIndex
+        var startIdx = minIndex - 1
+        var endIdx = minIndex + 2
+
+        // Clamp into [0, lastIndex]
+        if (startIdx < 0) startIdx = 0
+        if (endIdx > lastIndex) endIdx = lastIndex
+
+        // Expand as needed to ensure we have 4 points, staying in-bounds
+        while ((endIdx - startIdx + 1) < 4 && (startIdx > 0 || endIdx < lastIndex)) {
+            if (startIdx > 0) {
+                startIdx--
+            } else if (endIdx < lastIndex) {
+                endIdx++
+            } else {
+                break
+            }
+        }
+
+        val windowSize = endIdx - startIdx + 1
+        if (windowSize < 4) {
+            // Super-short visits / edge cases: fall back to global min sample
+            val fallbackMin = byTime.minByOrNull { it.distanceToCornerM }
+            Log.d(
+                "ApexDetect",
+                "Could not build 4-point window (size=$windowSize); " +
+                        "falling back to discrete min at utc=${fallbackMin?.utcMs}"
+            )
+            return fallbackMin?.utcMs
+        }
+
+        val localSamples = byTime.subList(startIdx, endIdx + 1)
 
         // Base time so our times are small and numerically stable.
-        val baseTimeMs = fourClosest.first().utcMs.toDouble()
+        val baseTimeMs = localSamples.first().utcMs.toDouble()
+        val n = localSamples.size
 
-        // Work in seconds relative to the first sample
-        val t = DoubleArray(4) { (fourClosest[it].utcMs.toDouble() - baseTimeMs) / 1000.0 }
-        val y = DoubleArray(4) { fourClosest[it].distanceToCornerM }
+        // Work in seconds relative to the first sample in the window
+        val t = DoubleArray(n) { i ->
+            (localSamples[i].utcMs.toDouble() - baseTimeMs) / 1000.0
+        }
+        val y = DoubleArray(n) { i ->
+            localSamples[i].distanceToCornerM
+        }
 
         // --- Build normal equations for least-squares quadratic fit ---
         // y(t) = a t^2 + b t + c
@@ -903,7 +970,7 @@ fun updateCornerCaptureState(track: Track?) {
         var sTY = 0.0
         var sT2Y = 0.0
 
-        val n = t.size.toDouble()
+        val nDouble = n.toDouble()
 
         for (i in t.indices) {
             val ti = t[i]
@@ -926,7 +993,7 @@ fun updateCornerCaptureState(track: Track?) {
         val mat = arrayOf(
             doubleArrayOf(sT4, sT3, sT2, sT2Y),
             doubleArrayOf(sT3, sT2, sT,  sTY),
-            doubleArrayOf(sT2, sT,  n,   sY)
+            doubleArrayOf(sT2, sT,  nDouble,   sY)
         )
 
         // Simple Gaussian elimination to solve for a, b, c.
@@ -982,19 +1049,18 @@ fun updateCornerCaptureState(track: Track?) {
 
         val coeffs = solve3x3Augmented(mat)
         if (coeffs == null) {
-            val fallback = fourClosest.minByOrNull { it.distanceToCornerM }
-            Log.d("ApexDetect", "Quadratic fit failed, falling back to min sample")
+            val fallback = localSamples.minByOrNull { it.distanceToCornerM }
+            Log.d("ApexDetect", "Quadratic fit failed, falling back to min sample in local window")
             return fallback?.utcMs
         }
 
         val (a, b, c) = coeffs
-
         val eps = 1e-12
 
         // If a ≈ 0, the curve is basically linear -> no well-defined vertex
         if (kotlin.math.abs(a) < eps) {
-            val fallback = fourClosest.minByOrNull { it.distanceToCornerM }
-            Log.d("ApexDetect", "Quadratic fit nearly linear; falling back to min sample")
+            val fallback = localSamples.minByOrNull { it.distanceToCornerM }
+            Log.d("ApexDetect", "Quadratic fit nearly linear; falling back to min sample in local window")
             return fallback?.utcMs
         }
 
@@ -1003,19 +1069,19 @@ fun updateCornerCaptureState(track: Track?) {
 
         // We only trust a *minimum* if the parabola opens upward.
         if (a <= 0.0) {
-            val fallback = fourClosest.minByOrNull { it.distanceToCornerM }
-            Log.d("ApexDetect", "Quadratic fit opens downward; falling back to min sample")
+            val fallback = localSamples.minByOrNull { it.distanceToCornerM }
+            Log.d("ApexDetect", "Quadratic fit opens downward; falling back to min sample in local window")
             return fallback?.utcMs
         }
 
-        // Require t* to lie within the span of the 4 samples
-        val tMin = t[0]
-        val tMax = t[3]
+        // Require t* to lie within the span of the selected window
+        val tMin = t.first()
+        val tMax = t.last()
         if (tStar < tMin - 1e-6 || tStar > tMax + 1e-6) {
-            val fallback = fourClosest.minByOrNull { it.distanceToCornerM }
+            val fallback = localSamples.minByOrNull { it.distanceToCornerM }
             Log.d(
                 "ApexDetect",
-                "Quadratic apex t*=$tStar outside [${tMin}, ${tMax}]s; falling back to min sample"
+                "Quadratic apex t*=$tStar outside [${tMin}, ${tMax}]s; falling back to min sample in local window"
             )
             return fallback?.utcMs
         }
@@ -1023,12 +1089,12 @@ fun updateCornerCaptureState(track: Track?) {
         val apexUtcMs = baseTimeMs + tStar * 1000.0
         Log.d(
             "ApexDetect",
-            "Quadratic apex fit: a=$a b=$b c=$c, t*=$tStar s, apexUtcMs=$apexUtcMs"
+            "Quadratic apex (local window $startIdx..$endIdx, minIndex=$minIndex): " +
+                    "a=$a b=$b c=$c, t*=$tStar s, apexUtcMs=$apexUtcMs"
         )
 
         return apexUtcMs.toLong()
     }
-
 
 
     /**
@@ -1246,6 +1312,49 @@ fun updateCornerCaptureState(track: Track?) {
             "Applied apex-centered window [$windowStartUtcMs .. $windowEndUtcMs] " +
                     "for corner=$cornerIndex visit=$visitNumber; updated $updatedCount samples"
         )
+    }
+
+
+    // --- Apex debug logging ----------------------------------------------------
+// Writes one line per GPS-distance sample used for apex detection.
+// File lives in: Android/data/com.hotlaps.dynamic/files/apex_debug/
+    private fun appendApexDebugSample(
+        event: Event,
+        cornerIndex: Int,
+        visitNumber: Int,
+        utcMs: Long,
+        distanceToCornerM: Double
+    ) {
+        // If we somehow haven't been given a Context yet, just skip logging.
+        if (!::appContext.isInitialized) return
+
+        try {
+            // Put logs in an app-private external files dir so we can grab them later
+            val dir = appContext.getExternalFilesDir("apex_debug")
+            if (dir != null && (dir.exists() || dir.mkdirs())) {
+                // One file per event so they don't mix together
+                val file = File(dir, "apex_${event.id}.log")
+
+                val lat = _gpsLat.value
+                val lon = _gpsLon.value
+
+                // Simple, parseable CSV-ish line
+                val line = buildString {
+                    append("SAMPLE")
+                    append(", utcMs="); append(utcMs)
+                    append(", eventId="); append(event.id)
+                    append(", cornerIndex="); append(cornerIndex)
+                    append(", visitNumber="); append(visitNumber)
+                    append(", lat="); append(lat)
+                    append(", lon="); append(lon)
+                    append(", distanceM="); append(distanceToCornerM)
+                }
+
+                file.appendText(line + "\n")
+            }
+        } catch (e: Exception) {
+            Log.e("ApexDebugWriter", "Failed to write apex debug sample", e)
+        }
     }
 
 
