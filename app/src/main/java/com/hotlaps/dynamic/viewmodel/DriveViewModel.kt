@@ -142,6 +142,10 @@ class DriveViewModel : ViewModel() {
     private val activeCornerDistanceSamples = mutableListOf<CornerDistanceSample>()
 
 
+    // Last distance value we recorded for apex detection
+    // (used to avoid logging duplicate accel-only samples where distance doesn't change)
+    private var lastDistanceSampledM: Double? = null
+
     // Per-corner visit counters within this Event: cornerIndex -> visits so far
     private val cornerVisitCounts = mutableMapOf<Int, Int>()
 
@@ -367,19 +371,30 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
         val closestCornerIndex = nearest?.first ?: 0
         val distanceToClosestCornerM = nearest?.second ?: 0.0
 
-        // If we're currently capturing a corner, store this distance sample for apex detection
+        // If we're currently capturing a corner, store *only GPS-change* distance samples
+        // for apex detection. That means: only log a new sample when the distance changes.
         if (cornerCaptureState == CornerCaptureState.Capturing &&
             activeCornerIndex != null &&
             activeVisitNumber > 0 &&
             distanceToClosestCornerM > 0.0
         ) {
-            activeCornerDistanceSamples.add(
-                CornerDistanceSample(
-                    utcMs = nowUtc,
-                    distanceToCornerM = distanceToClosestCornerM
+            val last = lastDistanceSampledM
+
+            // Only add when the distance actually changes (i.e., new GPS position),
+            // not for every accelerometer-only tick where distance is identical.
+            if (last == null ||
+                kotlin.math.abs(distanceToClosestCornerM - last) > 1e-6
+            ) {
+                activeCornerDistanceSamples.add(
+                    CornerDistanceSample(
+                        utcMs = nowUtc,
+                        distanceToCornerM = distanceToClosestCornerM
+                    )
                 )
-            )
+                lastDistanceSampledM = distanceToClosestCornerM
+            }
         }
+
 
 
 
@@ -608,8 +623,10 @@ fun updateCornerCaptureState(track: Track?) {
             cornerCaptureState = CornerCaptureState.Capturing
 
             // Clear any leftover distance samples from a previous visit.
-// We'll refill this during the new visit.
+            // We'll refill this during the new visit.
             activeCornerDistanceSamples.clear()
+            lastDistanceSampledM = null
+
 
             Log.d(
                 "CornerFSM",
@@ -764,6 +781,8 @@ fun updateCornerCaptureState(track: Track?) {
 
                 // NEW: done with this visit; discard its temporary distance samples
                 activeCornerDistanceSamples.clear()
+                lastDistanceSampledM = null
+
             }
         }
     }
@@ -833,23 +852,25 @@ fun updateCornerCaptureState(track: Track?) {
         return minSample.utcMs
     }
     /**
-     * Use a cubic fit on the 4 closest distance samples to estimate
-     * the time (utcMs) when the car was closest to the corner apex.
+     * Estimate apex time (utcMs) by fitting a *quadratic* to the 4 closest
+     * distance samples (least-squares) and using the vertex as the minimum.
      *
-     * Steps:
-     *  - Pick 4 samples with smallest distanceToCornerM
-     *  - Sort those 4 by time (utcMs)
-     *  - Shift time so the first sample is t = 0
-     *  - Fit y(t) = a t^3 + b t^2 + c t + d  (d = y0)
-     *  - Solve y'(t) = 3 a t^2 + 2 b t + c = 0
-     *  - Choose the root that lies within the time span of the 4 samples
-     *  - Convert back to absolute utcMs
+     * We:
+     *  - Take the 4 smallest distanceToCornerM samples for this visit
+     *  - Sort them by time
+     *  - Work in seconds relative to the first sample (t0 = 0)
+     *  - Fit y(t) = a t^2 + b t + c by least-squares over the 4 points
+     *  - Vertex is at t* = -b / (2a)
+     *  - Only accept t* if:
+     *      * a > 0 (true minimum)
+     *      * t* is inside [t0, t3]
+     *    otherwise we fall back to the discrete minimum-distance sample.
      */
     private fun findApexTimeUsingCubicFit(
         samples: List<CornerDistanceSample>
     ): Long? {
         if (samples.size < 4) {
-            Log.d("ApexDetect", "Not enough samples (${samples.size}) for cubic fit")
+            Log.d("ApexDetect", "Not enough samples (${samples.size}) for quadratic fit")
             return null
         }
 
@@ -861,44 +882,70 @@ fun updateCornerCaptureState(track: Track?) {
 
         // Base time so our times are small and numerically stable.
         val baseTimeMs = fourClosest.first().utcMs.toDouble()
-        val y0 = fourClosest[0].distanceToCornerM
 
-        // Work in seconds, with t0 = 0.
+        // Work in seconds relative to the first sample
         val t = DoubleArray(4) { (fourClosest[it].utcMs.toDouble() - baseTimeMs) / 1000.0 }
         val y = DoubleArray(4) { fourClosest[it].distanceToCornerM }
 
-        // We know at t0 = 0: y(0) = d = y0
-        // So y(t) = a t^3 + b t^2 + c t + d, with d = y0.
-        // For points 1,2,3: y(i) - y0 = a t^3 + b t^2 + c t
-        val t1 = t[1]; val t2 = t[2]; val t3 = t[3]
-        val yShift1 = y[1] - y0
-        val yShift2 = y[2] - y0
-        val yShift3 = y[3] - y0
+        // --- Build normal equations for least-squares quadratic fit ---
+        // y(t) = a t^2 + b t + c
+        //
+        // Sum over i:
+        //  [ Σ t^4   Σ t^3   Σ t^2 ] [a] = [Σ t^2 y]
+        //  [ Σ t^3   Σ t^2   Σ t   ] [b]   [Σ t y  ]
+        //  [ Σ t^2   Σ t     n     ] [c]   [Σ y    ]
 
-        // Build 3x3 system: A * [a b c]^T = Y
-        val A = arrayOf(
-            doubleArrayOf(t1 * t1 * t1, t1 * t1, t1, yShift1),
-            doubleArrayOf(t2 * t2 * t2, t2 * t2, t2, yShift2),
-            doubleArrayOf(t3 * t3 * t3, t3 * t3, t3, yShift3)
+        var sT  = 0.0
+        var sT2 = 0.0
+        var sT3 = 0.0
+        var sT4 = 0.0
+        var sY  = 0.0
+        var sTY = 0.0
+        var sT2Y = 0.0
+
+        val n = t.size.toDouble()
+
+        for (i in t.indices) {
+            val ti = t[i]
+            val yi = y[i]
+            val ti2 = ti * ti
+            val ti3 = ti2 * ti
+            val ti4 = ti2 * ti2
+
+            sT  += ti
+            sT2 += ti2
+            sT3 += ti3
+            sT4 += ti4
+
+            sY  += yi
+            sTY += ti * yi
+            sT2Y += ti2 * yi
+        }
+
+        // Augmented matrix [A|b] for the 3x3 system
+        val mat = arrayOf(
+            doubleArrayOf(sT4, sT3, sT2, sT2Y),
+            doubleArrayOf(sT3, sT2, sT,  sTY),
+            doubleArrayOf(sT2, sT,  n,   sY)
         )
 
         // Simple Gaussian elimination to solve for a, b, c.
-        fun solve3x3Augmented(mat: Array<DoubleArray>): Triple<Double, Double, Double>? {
-            val n = 3
+        fun solve3x3Augmented(m: Array<DoubleArray>): Triple<Double, Double, Double>? {
+            val size = 3
 
             // Forward elimination
-            for (col in 0 until n) {
+            for (col in 0 until size) {
                 // Pivot row
                 var pivotRow = col
-                for (r in col + 1 until n) {
-                    if (kotlin.math.abs(mat[r][col]) >
-                        kotlin.math.abs(mat[pivotRow][col])
+                for (r in col + 1 until size) {
+                    if (kotlin.math.abs(m[r][col]) >
+                        kotlin.math.abs(m[pivotRow][col])
                     ) {
                         pivotRow = r
                     }
                 }
 
-                val pivot = mat[pivotRow][col]
+                val pivot = m[pivotRow][col]
                 if (kotlin.math.abs(pivot) < 1e-12) {
                     // Singular / ill-conditioned -> bail
                     return null
@@ -906,107 +953,82 @@ fun updateCornerCaptureState(track: Track?) {
 
                 // Swap rows if needed
                 if (pivotRow != col) {
-                    val tmp = mat[col]
-                    mat[col] = mat[pivotRow]
-                    mat[pivotRow] = tmp
+                    val tmp = m[col]
+                    m[col] = m[pivotRow]
+                    m[pivotRow] = tmp
                 }
 
                 // Normalize pivot row
-                for (c in col until n + 1) {
-                    mat[col][c] /= pivot
+                for (c in col until size + 1) {
+                    m[col][c] /= pivot
                 }
 
                 // Eliminate this column in other rows
-                for (r in 0 until n) {
+                for (r in 0 until size) {
                     if (r == col) continue
-                    val factor = mat[r][col]
-                    for (c in col until n + 1) {
-                        mat[r][c] -= factor * mat[col][c]
+                    val factor = m[r][col]
+                    for (c in col until size + 1) {
+                        m[r][c] -= factor * m[col][c]
                     }
                 }
             }
 
             // Now matrix is in reduced row echelon form
-            val a = mat[0][3]
-            val b = mat[1][3]
-            val c = mat[2][3]
+            val a = m[0][3]
+            val b = m[1][3]
+            val c = m[2][3]
             return Triple(a, b, c)
         }
 
-        val (a, b, c) = solve3x3Augmented(A)
-            ?: run {
-                // Fall back to simply using the closest sample if fit fails
-                val fallback = fourClosest.minByOrNull { it.distanceToCornerM }
-                Log.d("ApexDetect", "Cubic fit failed, falling back to min sample")
-                return fallback?.utcMs
-            }
-
-        val d = y0
-
-        // y'(t) = 3 a t^2 + 2 b t + c
-        val eps = 1e-12
-        var bestT: Double? = null
-
-        if (kotlin.math.abs(a) < eps) {
-            // Degenerates to linear: y'(t) = 2 b t + c
-            if (kotlin.math.abs(b) < eps) {
-                // Derivative is ~ constant; just pick the closest sample
-                val fallback = fourClosest.minByOrNull { it.distanceToCornerM }
-                return fallback?.utcMs
-            } else {
-                val root = -c / (2.0 * b)
-                bestT = root
-            }
-        } else {
-            val A2 = 3.0 * a
-            val B2 = 2.0 * b
-            val C2 = c
-            val disc = B2 * B2 - 4.0 * A2 * C2
-
-            if (disc < 0.0) {
-                // No real critical point -> fallback
-                val fallback = fourClosest.minByOrNull { it.distanceToCornerM }
-                return fallback?.utcMs
-            } else {
-                val sqrtDisc = kotlin.math.sqrt(disc)
-                val r1 = (-B2 - sqrtDisc) / (2.0 * A2)
-                val r2 = (-B2 + sqrtDisc) / (2.0 * A2)
-
-                val tMin = t.first()
-                val tMax = t.last()
-
-                // Accept only roots within the span of our 4 samples
-                val candidates = listOf(r1, r2).filter { it in tMin - 1e-6..tMax + 1e-6 }
-
-                bestT = when {
-                    candidates.isEmpty() -> null
-                    candidates.size == 1 -> candidates[0]
-                    else -> {
-                        // Evaluate the cubic and pick the smaller y(t)
-                        fun f(tt: Double): Double =
-                            a * tt * tt * tt + b * tt * tt + c * tt + d
-
-                        val y1 = f(candidates[0])
-                        val y2 = f(candidates[1])
-                        if (y1 <= y2) candidates[0] else candidates[1]
-                    }
-                }
-            }
-        }
-
-        if (bestT == null) {
+        val coeffs = solve3x3Augmented(mat)
+        if (coeffs == null) {
             val fallback = fourClosest.minByOrNull { it.distanceToCornerM }
+            Log.d("ApexDetect", "Quadratic fit failed, falling back to min sample")
             return fallback?.utcMs
         }
 
-        val apexUtcMs = baseTimeMs + bestT * 1000.0
+        val (a, b, c) = coeffs
+
+        val eps = 1e-12
+
+        // If a ≈ 0, the curve is basically linear -> no well-defined vertex
+        if (kotlin.math.abs(a) < eps) {
+            val fallback = fourClosest.minByOrNull { it.distanceToCornerM }
+            Log.d("ApexDetect", "Quadratic fit nearly linear; falling back to min sample")
+            return fallback?.utcMs
+        }
+
+        // Vertex: y'(t) = 2 a t + b -> t* = -b / (2a)
+        val tStar = -b / (2.0 * a)
+
+        // We only trust a *minimum* if the parabola opens upward.
+        if (a <= 0.0) {
+            val fallback = fourClosest.minByOrNull { it.distanceToCornerM }
+            Log.d("ApexDetect", "Quadratic fit opens downward; falling back to min sample")
+            return fallback?.utcMs
+        }
+
+        // Require t* to lie within the span of the 4 samples
+        val tMin = t[0]
+        val tMax = t[3]
+        if (tStar < tMin - 1e-6 || tStar > tMax + 1e-6) {
+            val fallback = fourClosest.minByOrNull { it.distanceToCornerM }
+            Log.d(
+                "ApexDetect",
+                "Quadratic apex t*=$tStar outside [${tMin}, ${tMax}]s; falling back to min sample"
+            )
+            return fallback?.utcMs
+        }
+
+        val apexUtcMs = baseTimeMs + tStar * 1000.0
         Log.d(
             "ApexDetect",
-            "Cubic apex fit: a=$a b=$b c=$c d=$d, t*=$bestT s, apexUtcMs=$apexUtcMs"
+            "Quadratic apex fit: a=$a b=$b c=$c, t*=$tStar s, apexUtcMs=$apexUtcMs"
         )
 
         return apexUtcMs.toLong()
     }
+
 
 
     /**
