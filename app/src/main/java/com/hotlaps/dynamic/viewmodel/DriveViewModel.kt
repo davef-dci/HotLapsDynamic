@@ -696,35 +696,46 @@ fun updateCornerCaptureState(track: Track?) {
 
 // NEW: Try to compute a candidate apex time from our distance samples
                 val apexUtcFromDistances = findApexTimeUsingCubicFit(activeCornerDistanceSamples)
+                // If we got a valid apex time, re-tag this visit using an apex-centered window
                 if (apexUtcFromDistances != null) {
-                    Log.d(
-                        "ApexDetect",
-                        "Computed candidate apexUtc=$apexUtcFromDistances from " +
-                                "${activeCornerDistanceSamples.size} distance samples " +
-                                "for corner=$activeCorner visit=$activeVisit"
-                    )
-                }
 
-                // If we got a valid apex time, backfill pre-apex samples now
-                if (apexUtcFromDistances != null) {
-                    // In-memory samples
-                    backfillPreApexSamples(
+                    // Look up this corner's captureBefore/captureAfter settings
+                    val cornerConfig = currentTrack
+                        ?.corners
+                        ?.firstOrNull { it.index == activeCorner }
+
+                    // Fallbacks in case something is missing
+                    val beforeMs = (cornerConfig?.captureBeforeMs ?: 3000).toLong()
+                    val afterMs  = (cornerConfig?.captureAfterMs ?: 3000).toLong()
+
+                    // Define the final, apex-centered window
+                    val windowStartUtcMs = apexUtcFromDistances - beforeMs
+                    val windowEndUtcMs   = apexUtcFromDistances + afterMs
+
+                    // Keep these around in case other logic wants the refined window later
+                    activeVisitStartUtcMs = windowStartUtcMs
+                    activeVisitEndUtcMs = windowEndUtcMs
+
+                    // 1) In-memory samples: apply the apex-centered window
+                    updateCornerSamplesAroundApexWindow(
                         event = event,
                         cornerIndex = activeCorner,
                         visitNumber = activeVisit,
-                        startUtcMs = activeVisitStartUtcMs,
-                        apexUtcMs = apexUtcFromDistances
+                        apexUtcMs = apexUtcFromDistances,
+                        windowStartUtcMs = windowStartUtcMs,
+                        windowEndUtcMs = windowEndUtcMs
                     )
 
-                    // CSV on disk
+                    // 2) CSV on disk: we'll mirror the same logic in EventStorage
                     if (::appContext.isInitialized) {
                         EventStorage.backfillCornerSamplesInCsv(
                             context = appContext,
                             eventId = event.id,
                             cornerIndex = activeCorner,
                             visitNumber = activeVisit,
-                            startUtcMs = activeVisitStartUtcMs,
-                            apexUtcMs = apexUtcFromDistances
+                            windowStartUtcMs = windowStartUtcMs,
+                            apexUtcMs = apexUtcFromDistances,
+                            windowEndUtcMs = windowEndUtcMs
                         )
                     } else {
                         Log.w(
@@ -732,16 +743,10 @@ fun updateCornerCaptureState(track: Track?) {
                             "appContext not initialized; cannot backfill CSV for corner=$activeCorner visit=$activeVisit"
                         )
                     }
-
-                    // Mark the apex sample and time-from-apex for this visit in memory
-                    markApexSampleForVisit(
-                        event = event,
-                        cornerIndex = activeCorner,
-                        visitNumber = activeVisit,
-                        apexUtcMs = apexUtcFromDistances
-                    )
-
                 }
+
+
+
 
 
 
@@ -1114,6 +1119,110 @@ fun updateCornerCaptureState(track: Track?) {
             "ApexDetect",
             "Marked apex sample index=$bestIndex for corner=$cornerIndex " +
                     "visit=$visitNumber, apexIntervalMs=$apexIntervalMs ms"
+        )
+    }
+
+
+    /**
+     * New apex-centered tagging:
+     *
+     * For a given (eventId, cornerIndex, visitNumber) and a given apexUtcMs:
+     *
+     *  - Define the window [windowStartUtcMs, windowEndUtcMs].
+     *  - Any sample from this event whose utcMs lies inside that window
+     *    gets:
+     *       cornerIndex = cornerIndex
+     *       visitNumber = visitNumber
+     *       timeFromApexMs = sample.utcMs - apexUtcMs
+     *    and exactly one of them is flagged isApexSample = true (the one
+     *    whose utcMs is closest to apexUtcMs).
+     *
+     *  - Any sample that was previously tagged with this corner/visit but
+     *    lies OUTSIDE the window has its corner tags cleared and
+     *    apex fields reset.
+     */
+    private fun updateCornerSamplesAroundApexWindow(
+        event: Event,
+        cornerIndex: Int,
+        visitNumber: Int,
+        apexUtcMs: Long,
+        windowStartUtcMs: Long,
+        windowEndUtcMs: Long
+    ) {
+        if (windowEndUtcMs <= windowStartUtcMs) {
+            Log.w(
+                "ApexWindow",
+                "updateCornerSamplesAroundApexWindow: invalid window [$windowStartUtcMs .. $windowEndUtcMs]"
+            )
+            return
+        }
+
+        // ---- First pass: find which sample in this window is the apex sample ----
+        var bestIndex = -1
+        var bestError = Long.MAX_VALUE
+
+        for (i in _samples.indices) {
+            val s = _samples[i]
+            if (s.eventId != event.id) continue
+
+            val t = s.utcMs
+            if (t < windowStartUtcMs || t > windowEndUtcMs) continue
+
+            val error = kotlin.math.abs(t - apexUtcMs)
+            if (error < bestError) {
+                bestError = error
+                bestIndex = i
+            }
+        }
+
+        if (bestIndex == -1) {
+            Log.w(
+                "ApexWindow",
+                "No samples found in apex-centered window for " +
+                        "corner=$cornerIndex visit=$visitNumber"
+            )
+            return
+        }
+
+        val apexSampleUtc = _samples[bestIndex].utcMs
+
+        // ---- Second pass: write tags for samples in this window, and clear outside ones ----
+        var updatedCount = 0
+        for (i in _samples.indices) {
+            val s = _samples[i]
+            if (s.eventId != event.id) continue
+
+            val t = s.utcMs
+            val inWindow = (t in windowStartUtcMs..windowEndUtcMs)
+
+            if (inWindow) {
+                val timeFromApexMs = t - apexSampleUtc
+                val isApex = (i == bestIndex)
+
+                _samples[i] = s.copy(
+                    cornerIndex = cornerIndex,
+                    visitNumber = visitNumber,
+                    isApexSample = isApex,
+                    timeFromApexMs = timeFromApexMs
+                )
+                updatedCount++
+            } else if (s.cornerIndex == cornerIndex && s.visitNumber == visitNumber) {
+                // This sample used to belong to this visit, but is now
+                // outside the apex-centered window. Clear its tags.
+                _samples[i] = s.copy(
+                    cornerIndex = 0,
+                    visitNumber = 0,
+                    isApexSample = false,
+                    timeFromApexMs = null
+                )
+                updatedCount++
+            }
+        }
+
+        Log.d(
+            "ApexWindow",
+            "Applied apex-centered window [$windowStartUtcMs .. $windowEndUtcMs] " +
+                    "for corner=$cornerIndex visit=$visitNumber; updated $updatedCount samples"
         )
     }
 

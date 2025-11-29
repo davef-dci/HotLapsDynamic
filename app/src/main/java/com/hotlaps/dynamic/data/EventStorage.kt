@@ -124,7 +124,7 @@ object EventStorage {
 
                     // raw (pre-smoothing) G values
                     append(sample.rawLatG); append(',')
-                    append(sample.rawLongG)
+                    append(sample.rawLongG); append(',')
 
                     // NEW: apex flags/relative time
                     append(sample.isApexSample); append(',')
@@ -380,8 +380,9 @@ object EventStorage {
         eventId: Long,
         cornerIndex: Int,
         visitNumber: Int,
-        startUtcMs: Long,
-        apexUtcMs: Long
+        windowStartUtcMs: Long,
+        apexUtcMs: Long,
+        windowEndUtcMs: Long
     ) {
 
         synchronized(fileLock) {
@@ -402,16 +403,10 @@ object EventStorage {
 
             Log.d(
                 TAG,
-                "backfillCornerSamplesInCsv: will backfill pre-apex rows for " +
-                        "eventId=$eventId corner=$cornerIndex visit=$visitNumber, " +
-                        "window=[$startUtcMs .. $apexUtcMs], file=${file.name}"
-            )
-
-            Log.d(
-                TAG,
-                "backfillCornerSamplesInCsv: will backfill pre-apex rows for " +
-                        "eventId=$eventId corner=$cornerIndex visit=$visitNumber, " +
-                        "window=[$startUtcMs .. $apexUtcMs], file=${file.name}"
+                "backfillCornerSamplesInCsv: apex-centered window for eventId=$eventId " +
+                        "corner=$cornerIndex visit=$visitNumber, " +
+                        "window=[$windowStartUtcMs .. $windowEndUtcMs], apex=$apexUtcMs, " +
+                        "file=${file.name}"
             )
 
             val lines: MutableList<String> = try {
@@ -433,95 +428,207 @@ object EventStorage {
                 return
             }
 
-            Log.d(
-                TAG,
-                "backfillCornerSamplesInCsv: loaded ${lines.size} line(s) from ${file.name}"
-            )
-
-            Log.d(
-                TAG,
-                "backfillCornerSamplesInCsv: loaded ${lines.size} line(s) from ${file.name}"
-            )
-
-
-// We know the header is:
-// intervalMs,utcMs,localTime,trackName,eventName,
-// cornerIndex,cornerName,visitNumber,latG,longG,zG,gSum,gpsLat,gpsLon,
-// insideCornerTrigger,closestCornerIndex,distanceToClosestCornerM
+            // Column positions in the CSV
             val UTC_MS_INDEX = 1
             val CORNER_INDEX_INDEX = 5
-            val CORNER_NAME_INDEX = 6          // <-- for clarity; we won't modify this
-            val VISIT_NUMBER_INDEX = 7         // <-- the IMPORTANT change
+            val CORNER_NAME_INDEX = 6          // (for clarity; we leave this alone)
+            val VISIT_NUMBER_INDEX = 7
             val INSIDE_CORNER_INDEX_INDEX = 14
 
+            // Apex metadata columns
+            val APEX_FLAG_INDEX = 19          // "isApexSample"
+            val TIME_FROM_APEX_INDEX = 20     // "timeFromApexMs"
 
-            var candidateCount = 0
-            var updatedCount = 0
+            var candidateCount = 0    // rows we newly adopt (were 0/0)
+            var updatedCount = 0      // rows we changed at all
 
-            // Skip header at index 0; data rows start at 1
+            // Track which CSV row is closest in time to the apex
+            var apexRowIndex = -1
+            var bestApexError = Long.MAX_VALUE
+
+            // ----- FIRST PASS -----
+            // Decide which rows belong to this visit *based on the apex-centered window*,
+            // adopt untagged rows in that window, and clear rows outside that window
+            // that used to belong to this visit. Also find the apex row.
             for (i in 1 until lines.size) {
                 val line = lines[i]
                 if (line.isBlank()) continue
 
                 val parts = line.split(',')
-                if (parts.size <= VISIT_NUMBER_INDEX) continue
+                if (parts.size <= UTC_MS_INDEX) continue
 
                 val utcMs = parts[UTC_MS_INDEX].toLongOrNull() ?: continue
-                val cornerVal = parts[CORNER_INDEX_INDEX].toIntOrNull() ?: 0
-                val visitVal = parts[VISIT_NUMBER_INDEX].toIntOrNull() ?: 0
 
-                // Only consider rows in our window [startUtcMs, apexUtcMs]
-                if (utcMs < startUtcMs || utcMs > apexUtcMs) continue
+                val cornerVal = if (parts.size > CORNER_INDEX_INDEX) {
+                    parts[CORNER_INDEX_INDEX].toIntOrNull() ?: 0
+                } else 0
 
-                // Only interested in rows that do NOT already belong to a corner
-                if (cornerVal == 0 && visitVal == 0) {
-                    candidateCount++
+                val visitVal = if (parts.size > VISIT_NUMBER_INDEX) {
+                    parts[VISIT_NUMBER_INDEX].toIntOrNull() ?: 0
+                } else 0
 
-// Make a mutable copy so we can edit fields
-                    val cols = parts.toMutableList()
+                val inWindow =
+                    (utcMs >= windowStartUtcMs && utcMs <= windowEndUtcMs)
 
-// Tag this row as belonging to this corner visit
-                    cols[CORNER_INDEX_INDEX] = cornerIndex.toString()
-                    cols[VISIT_NUMBER_INDEX] = visitNumber.toString()
+                val cols = parts.toMutableList()
 
-// Also mark it as "inside/capturing corner data"
-                    if (cols.size > INSIDE_CORNER_INDEX_INDEX) {
-                        cols[INSIDE_CORNER_INDEX_INDEX] = "Yes"
-                    }
-
-// Re-join into a CSV line and store back
-                    lines[i] = cols.joinToString(",")
-
-
-                    updatedCount++
+                // Ensure we have enough columns for the apex fields
+                while (cols.size <= TIME_FROM_APEX_INDEX) {
+                    cols.add("")
                 }
+
+                var nowBelongsToVisit = false
+
+                if (inWindow) {
+                    when {
+                        // Case 1: untagged row inside window -> adopt it
+                        cornerVal == 0 && visitVal == 0 -> {
+                            cols[CORNER_INDEX_INDEX] = cornerIndex.toString()
+                            cols[VISIT_NUMBER_INDEX] = visitNumber.toString()
+
+                            if (INSIDE_CORNER_INDEX_INDEX < cols.size) {
+                                cols[INSIDE_CORNER_INDEX_INDEX] = "Yes"
+                            }
+
+                            candidateCount++
+                            updatedCount++
+                            nowBelongsToVisit = true
+                        }
+
+                        // Case 2: already belongs to this visit and inside window
+                        cornerVal == cornerIndex && visitVal == visitNumber -> {
+                            if (INSIDE_CORNER_INDEX_INDEX < cols.size &&
+                                cols[INSIDE_CORNER_INDEX_INDEX] != "Yes"
+                            ) {
+                                cols[INSIDE_CORNER_INDEX_INDEX] = "Yes"
+                                updatedCount++
+                            }
+                            nowBelongsToVisit = true
+                        }
+
+                        // Case 3: belongs to some other corner/visit -> leave it alone
+                        else -> {
+                            // no-op
+                        }
+                    }
+                } else {
+                    // Outside the apex-centered window
+                    if (cornerVal == cornerIndex && visitVal == visitNumber) {
+                        // This row used to belong to this visit, but it's outside the
+                        // new apex-centered window. Clear its corner/visit/apex tags.
+                        cols[CORNER_INDEX_INDEX] = "0"
+                        cols[VISIT_NUMBER_INDEX] = "0"
+
+                        if (INSIDE_CORNER_INDEX_INDEX < cols.size) {
+                            cols[INSIDE_CORNER_INDEX_INDEX] = "No"
+                        }
+
+                        cols[APEX_FLAG_INDEX] = ""
+                        cols[TIME_FROM_APEX_INDEX] = ""
+
+                        updatedCount++
+                    }
+                }
+
+                if (nowBelongsToVisit) {
+                    // Consider this row as a candidate for the apex row
+                    val error = kotlin.math.abs(utcMs - apexUtcMs)
+                    if (error < bestApexError) {
+                        bestApexError = error
+                        apexRowIndex = i
+                    }
+                }
+
+                lines[i] = cols.joinToString(",")
             }
 
             Log.d(
                 TAG,
-                "backfillCornerSamplesInCsv: found $candidateCount CSV row(s) in pre-apex " +
-                        "window; updated $updatedCount row(s) for corner=$cornerIndex visit=$visitNumber"
+                "backfillCornerSamplesInCsv: first pass apex-centered window " +
+                        "for eventId=$eventId corner=$cornerIndex visit=$visitNumber; " +
+                        "newly adopted=$candidateCount, updated=$updatedCount, " +
+                        "apexRowIndex=$apexRowIndex, bestError=${bestApexError}ms"
             )
 
-            // If we changed anything, write the updated lines back to the file
-            if (updatedCount > 0) {
-                try {
-                    file.writeText(lines.joinToString("\n") + "\n")
-                    Log.d(
-                        TAG,
-                        "backfillCornerSamplesInCsv: wrote updated CSV for eventId=$eventId"
-                    )
-                } catch (e: Exception) {
-                    Log.e(
-                        TAG,
-                        "backfillCornerSamplesInCsv: error writing updated CSV for eventId=$eventId",
-                        e
-                    )
+            // ----- SECOND PASS -----
+            // Now that we know which rows belong to this visit, tag the apex row
+            // and time-from-apex for those rows. We define timeFromApexMs relative
+            // to the APEX SAMPLE's utcMs (matching in-memory behavior), not the
+            // raw fitted apexUtcMs value.
+            if (apexRowIndex == -1) {
+                Log.w(
+                    TAG,
+                    "backfillCornerSamplesInCsv: no rows belong to this apex-centered " +
+                            "window for corner=$cornerIndex visit=$visitNumber"
+                )
+            } else {
+                // Determine the apex sample's utcMs from the chosen apexRowIndex
+                val apexRowParts = lines[apexRowIndex].split(',')
+                val apexSampleUtcMs = apexRowParts
+                    .getOrNull(UTC_MS_INDEX)
+                    ?.toLongOrNull()
+                    ?: apexUtcMs
+
+                for (i in 1 until lines.size) {
+                    val line = lines[i]
+                    if (line.isBlank()) continue
+
+                    val parts = line.split(',')
+                    if (parts.size <= UTC_MS_INDEX) continue
+
+                    val utcMs = parts[UTC_MS_INDEX].toLongOrNull() ?: continue
+
+                    val cornerVal = if (parts.size > CORNER_INDEX_INDEX) {
+                        parts[CORNER_INDEX_INDEX].toIntOrNull() ?: 0
+                    } else 0
+
+                    val visitVal = if (parts.size > VISIT_NUMBER_INDEX) {
+                        parts[VISIT_NUMBER_INDEX].toIntOrNull() ?: 0
+                    } else 0
+
+                    // Only rows that belong to this visit
+                    if (cornerVal != cornerIndex || visitVal != visitNumber) continue
+
+                    val cols = parts.toMutableList()
+                    while (cols.size <= TIME_FROM_APEX_INDEX) {
+                        cols.add("")
+                    }
+
+                    val timeFromApexMs = utcMs - apexSampleUtcMs
+
+                    cols[APEX_FLAG_INDEX] =
+                        if (i == apexRowIndex) "true" else "false"
+                    cols[TIME_FROM_APEX_INDEX] = timeFromApexMs.toString()
+
+                    lines[i] = cols.joinToString(",")
+                    updatedCount++
                 }
+
+                Log.d(
+                    TAG,
+                    "backfillCornerSamplesInCsv: applied apex flag/timeFromApex " +
+                            "for corner=$cornerIndex visit=$visitNumber (eventId=$eventId)"
+                )
+            }
+
+
+            // ----- WRITE BACK -----
+            try {
+                file.writeText(lines.joinToString("\n") + "\n")
+                Log.d(
+                    TAG,
+                    "backfillCornerSamplesInCsv: wrote updated CSV for eventId=$eventId"
+                )
+            } catch (e: Exception) {
+                Log.e(
+                    TAG,
+                    "backfillCornerSamplesInCsv: error writing updated CSV for eventId=$eventId",
+                    e
+                )
             }
         }
-
     }
+
 
 
     fun renameEventFile(context: Context, eventId: Long, newName: String) {
