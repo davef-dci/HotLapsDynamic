@@ -450,10 +450,15 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
         )
 
         if (::appContext.isInitialized) {
-            EventStorage.appendSample(appContext, sample)
+            EventStorage.appendSample(
+                context = appContext,
+                sample = sample,
+                cornerTriggerRadiusM = _cornerTriggerRadiusM.value
+            )
         } else {
             Log.w("DriveViewModel", "appendSample: appContext not initialized yet")
         }
+
 
 
 

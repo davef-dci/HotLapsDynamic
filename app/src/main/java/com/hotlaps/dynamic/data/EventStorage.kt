@@ -56,7 +56,11 @@ object EventStorage {
     // -----------------------
 // Append a sample (CSV per event)
 // -----------------------
-    fun appendSample(context: Context, sample: EventSample) {
+    fun appendSample(
+        context: Context,
+        sample: EventSample,
+        cornerTriggerRadiusM: Double
+    ) {
         synchronized(fileLock) {
             val dir = eventsDir(context) ?: return
 
@@ -82,9 +86,18 @@ object EventStorage {
                     .apply { timeZone = TimeZone.getDefault() }
                     .format(Date(sample.utcMs))
 
-                // "Yes" if this sample is inside a corner window (cornerIndex > 0)
-                val insideCornerTriggerForCsv = if (sample.cornerIndex > 0) "Yes" else "No"
-
+                // Distance-based insideCornerTrigger:
+// "Yes" if we have a valid closest corner and the distance is within the trigger radius.
+                val distance = sample.distanceToClosestCornerM
+                val insideCornerTriggerForCsv =
+                    if (sample.closestCornerIndex > 0 &&
+                        distance > 0.0 &&
+                        distance <= cornerTriggerRadiusM
+                    ) {
+                        "Yes"
+                    } else {
+                        "No"
+                    }
 
                 // Write one CSV line for this sample
                 val line = buildString {
@@ -486,10 +499,6 @@ object EventStorage {
                             cols[CORNER_INDEX_INDEX] = cornerIndex.toString()
                             cols[VISIT_NUMBER_INDEX] = visitNumber.toString()
 
-                            if (INSIDE_CORNER_INDEX_INDEX < cols.size) {
-                                cols[INSIDE_CORNER_INDEX_INDEX] = "Yes"
-                            }
-
                             candidateCount++
                             updatedCount++
                             nowBelongsToVisit = true
@@ -497,12 +506,7 @@ object EventStorage {
 
                         // Case 2: already belongs to this visit and inside window
                         cornerVal == cornerIndex && visitVal == visitNumber -> {
-                            if (INSIDE_CORNER_INDEX_INDEX < cols.size &&
-                                cols[INSIDE_CORNER_INDEX_INDEX] != "Yes"
-                            ) {
-                                cols[INSIDE_CORNER_INDEX_INDEX] = "Yes"
-                                updatedCount++
-                            }
+                            // Keep as part of this visit; do NOT change insideCornerTrigger here.
                             nowBelongsToVisit = true
                         }
 
@@ -519,9 +523,7 @@ object EventStorage {
                         cols[CORNER_INDEX_INDEX] = "0"
                         cols[VISIT_NUMBER_INDEX] = "0"
 
-                        if (INSIDE_CORNER_INDEX_INDEX < cols.size) {
-                            cols[INSIDE_CORNER_INDEX_INDEX] = "No"
-                        }
+                        // Do NOT touch insideCornerTrigger; it remains distance-based.
 
                         cols[APEX_FLAG_INDEX] = ""
                         cols[TIME_FROM_APEX_INDEX] = ""
@@ -529,6 +531,7 @@ object EventStorage {
                         updatedCount++
                     }
                 }
+
 
                 if (nowBelongsToVisit) {
                     // Consider this row as a candidate for the apex row
