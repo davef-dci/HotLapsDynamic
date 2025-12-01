@@ -48,6 +48,10 @@ class DriveViewModel : ViewModel() {
     private var settingsRepo: SettingsRepo? = null
     private var isDeskSimulationRunning: Boolean = false
 
+    // NEW: Distance-based visit tracking per corner, independent of the old FSM.
+    private val geoVisitStates: MutableMap<Int, GeoVisitState> = mutableMapOf()
+
+
 
     fun setAppContext(context: Context) {
         appContext = context.applicationContext
@@ -81,6 +85,46 @@ class DriveViewModel : ViewModel() {
         val utcMs: Long,
         val distanceToCornerM: Double
     )
+
+    // NEW: State for distance-based "geo visits" defined purely by insideCornerTrigger (distance <= radius).
+    private data class GeoVisitState(
+        var isInsideRadius: Boolean = false,
+        var visitCount: Int = 0,
+        var lastDistanceM: Double = -1.0,
+        val currentSamples: MutableList<CornerDistanceSample> = mutableListOf()
+    )
+
+
+    // NEW: Finalize a distance-based "geo visit" and log its four closest distances.
+    private fun finalizeGeoVisitForCorner(
+        event: Event,
+        cornerIndex: Int,
+        geoVisitState: GeoVisitState
+    ) {
+        if (!geoVisitState.isInsideRadius) return
+        if (geoVisitState.currentSamples.isEmpty()) {
+            geoVisitState.isInsideRadius = false
+            geoVisitState.lastDistanceM = -1.0
+            return
+        }
+
+        // This visit number is independent of the old FSM visitNumber.
+        val visitNumber = geoVisitState.visitCount
+
+        // Reuse our existing helper: this sorts by distance and picks the 4 smallest.
+        logFourClosestDistanceSamplesForVisit(
+            event = event,
+            cornerIndex = cornerIndex,
+            visitNumber = visitNumber,
+            samples = geoVisitState.currentSamples
+        )
+
+        // Reset for the next visit.
+        geoVisitState.isInsideRadius = false
+        geoVisitState.lastDistanceM = -1.0
+        geoVisitState.currentSamples.clear()
+    }
+
 
 
     // NEW: high-level recording state for the whole event
@@ -385,6 +429,62 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
         val nearest = findNearestCornerIndex(currentTrack)
         val closestCornerIndex = nearest?.first ?: 0
         val distanceToClosestCornerM = nearest?.second ?: 0.0
+
+        // NEW: Distance-based insideCornerTrigger check (must match EventStorage.appendSample logic).
+        val cornerTriggerRadiusM = _cornerTriggerRadiusM.value
+        val insideByRadius =
+            closestCornerIndex > 0 &&
+                    distanceToClosestCornerM > 0.0 &&
+                    distanceToClosestCornerM <= cornerTriggerRadiusM
+
+// Distance-based "geo visit" tracking: each contiguous stretch where insideByRadius is true
+// for a given corner is treated as its own visit.
+//
+// This is independent of the old FSM; we will *only* use it to find the four closest
+// GPS-distance samples for each "insideCornerTrigger == Yes" window.
+//
+// Note: we only add a sample to the visit when the distance actually changes
+// (one entry per GPS update), not for every accelerometer tick.
+        if (closestCornerIndex > 0) {
+            val geoState = geoVisitStates.getOrPut(closestCornerIndex) { GeoVisitState() }
+
+            if (insideByRadius) {
+                // Entering a new visit for this corner?
+                if (!geoState.isInsideRadius) {
+                    geoState.isInsideRadius = true
+                    geoState.visitCount += 1
+                    geoState.currentSamples.clear()
+                    geoState.lastDistanceM = -1.0
+                }
+
+                // Only store a sample when distance changes (GPS-change-only).
+                if (geoState.lastDistanceM < 0.0 ||
+                    kotlin.math.abs(distanceToClosestCornerM - geoState.lastDistanceM) > 1e-6
+                ) {
+                    geoState.currentSamples.add(
+                        CornerDistanceSample(
+                            utcMs = nowUtc,
+                            distanceToCornerM = distanceToClosestCornerM
+                        )
+                    )
+                    geoState.lastDistanceM = distanceToClosestCornerM
+                }
+            } else {
+                // We are outside the radius for this corner; if we were inside, we need to finalize that visit.
+                if (geoState.isInsideRadius) {
+                    val event = _currentEvent.value
+                    if (event != null) {
+                        finalizeGeoVisitForCorner(event, closestCornerIndex, geoState)
+                    } else {
+                        // No event? Just reset the state.
+                        geoState.isInsideRadius = false
+                        geoState.lastDistanceM = -1.0
+                        geoState.currentSamples.clear()
+                    }
+                }
+            }
+        }
+
 
         // If we're currently capturing a corner, store *only GPS-change* distance samples
         // for apex detection. That means: only log a new sample when the distance changes.
@@ -745,6 +845,8 @@ fun updateCornerCaptureState(
                     "Stopped capturing corner=$activeCorner visit=$activeVisit at nowUtc=$nowUtc " +
                             "(window end=$activeVisitEndUtcMs), samplesForVisit=$samplesForVisit"
                 )
+
+
 
 // NEW: Try to compute a candidate apex time from our distance samples
                 val apexUtcFromDistances = findApexTimeUsingCubicFit(activeCornerDistanceSamples)
@@ -1381,6 +1483,79 @@ fun updateCornerCaptureState(
             Log.e("ApexDebugWriter", "Failed to write apex debug sample", e)
         }
     }
+
+
+    // NEW: Log the 4 closest GPS-distance samples for a visit (by distance).
+//  - Uses the *unique* GPS-change-only samples in activeCornerDistanceSamples.
+//  - Writes a single summary line into apex_<eventId>.log and also to Logcat.
+    private fun logFourClosestDistanceSamplesForVisit(
+        event: Event,
+        cornerIndex: Int,
+        visitNumber: Int,
+        samples: List<CornerDistanceSample>
+    ) {
+        if (samples.isEmpty()) {
+            Log.d(
+                "ApexFourClosest",
+                "No distance samples for event=${event.id}, corner=$cornerIndex, visit=$visitNumber"
+            )
+            return
+        }
+
+        // Sort all samples by distance (ascending) and take up to 4
+        val fourClosest = samples
+            .sortedBy { it.distanceToCornerM }
+            .take(4)
+
+        // Log to Logcat
+        val debugString = buildString {
+            append("Four closest distances for event="); append(event.id)
+            append(", corner="); append(cornerIndex)
+            append(", visit="); append(visitNumber)
+            append(" -> ")
+
+            fourClosest.forEachIndexed { index, s ->
+                if (index > 0) append(" | ")
+                append("#"); append(index + 1)
+                append(": utcMs="); append(s.utcMs)
+                append(", distM="); append(String.format("%.2f", s.distanceToCornerM))
+            }
+        }
+
+        Log.d("ApexFourClosest", debugString)
+
+        // Also dump a single summary line into the same apex_debug log directory
+        if (!::appContext.isInitialized) return
+
+        try {
+            val dir = appContext.getExternalFilesDir("apex_debug")
+            if (dir != null && (dir.exists() || dir.mkdirs())) {
+                val file = File(dir, "apex_${event.id}.log")
+
+                val line = buildString {
+                    append("FOUR_CLOSEST")
+                    append(", eventId="); append(event.id)
+                    append(", cornerIndex="); append(cornerIndex)
+                    append(", visitNumber="); append(visitNumber)
+
+                    fourClosest.forEachIndexed { index, s ->
+                        append(", sample"); append(index + 1)
+                        append("_utcMs="); append(s.utcMs)
+                        append(", sample"); append(index + 1)
+                        append("_distanceM="); append(s.distanceToCornerM)
+                    }
+                }
+
+                file.appendText(line + "\n")
+            }
+        } catch (e: Exception) {
+            Log.e("ApexDebugWriter", "Failed to write FOUR_CLOSEST summary", e)
+        }
+    }
+
+
+
+
     /**
      * Debug-only: replay simulation.csv which has a truncated schema:
      *
@@ -1565,6 +1740,9 @@ fun updateCornerCaptureState(
             }
         }
     }
+
+
+
 
 
 }
