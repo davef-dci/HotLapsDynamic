@@ -919,6 +919,38 @@ fun GGScreen(
                                         steps = 30 - 2
                                     )
 
+                                    // --- Desk Simulation from simulation.csv (truncated file) ---
+                                    Spacer(Modifier.height(16.dp))
+
+                                    Text(
+                                        text = "Desk Simulation (simulation.csv)",
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(bottom = 4.dp)
+                                    )
+
+                                    if (t != null) {
+                                        Button(
+                                            onClick = {
+                                                driveViewModel.startSimulationFromTruncatedCsv(
+                                                    context = context,
+                                                    track = t,
+                                                    playbackSpeed = 0.0
+                                                )
+                                            },
+                                            modifier = Modifier.padding(bottom = 8.dp)
+                                        ) {
+                                            Text("Replay simulation.csv")
+                                        }
+                                    } else {
+                                        Text(
+                                            text = "Replay simulation.csv: select a track first",
+                                            fontSize = 14.sp,
+                                            modifier = Modifier.padding(bottom = 8.dp)
+                                        )
+                                    }
+
+                                    // Existing GPS teleport sim
                                     if (t != null && firstCorner != null) {
                                         Text(
                                             text = "GPS Simulation (Debug only)",
@@ -940,6 +972,33 @@ fun GGScreen(
                                     } else {
                                         Text("GPS Simulation: (needs a track with at least one corner)")
                                     }
+
+
+
+                                    if (t != null && firstCorner != null) {
+                                        Text(
+                                            text = "GPS Simulation (Debug only)",
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(bottom = 4.dp)
+                                        )
+
+                                        Button(
+                                            onClick = {
+                                                driveViewModel.updateGps(
+                                                    firstCorner.lat,
+                                                    firstCorner.lon
+                                                )
+                                            },
+                                            modifier = Modifier.padding(bottom = 4.dp)
+                                        ) {
+                                            Text("Teleport INSIDE corner 1")
+                                        }
+                                    } else {
+                                        Text("GPS Simulation: (needs a track with at least one corner)")
+                                    }
+
+
+
                                 }
                             }
                         }

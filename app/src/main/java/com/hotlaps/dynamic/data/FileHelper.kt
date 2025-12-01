@@ -25,6 +25,20 @@ object FileHelper {
         return base
     }
 
+    /** Events directory in APP-PRIVATE storage: /Android/data/com.hotlaps.dynamic/files/events */
+    fun appEventsDir(context: Context): File? {
+        val root = appPrivateRoot(context) ?: return null
+
+        val dir = File(root, "events")
+        if (!dir.exists() && !dir.mkdirs()) {
+            Log.e(TAG, "appEventsDir: failed to create ${dir.absolutePath}")
+            return null
+        }
+        return dir
+    }
+
+
+
     /** Events directory – now in PUBLIC Downloads so users & email can see it easily. */
     fun eventsDir(context: Context): File? {
         // Public Downloads root: /storage/emulated/0/Download

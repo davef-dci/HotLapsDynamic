@@ -28,6 +28,9 @@ import androidx.lifecycle.viewModelScope
 import com.hotlaps.dynamic.data.SettingsRepo
 import kotlinx.coroutines.launch
 import java.io.File
+import com.hotlaps.dynamic.data.FileHelper
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 
 
 /**
@@ -43,7 +46,7 @@ class DriveViewModel : ViewModel() {
 
     private lateinit var appContext: Context
     private var settingsRepo: SettingsRepo? = null
-
+    private var isDeskSimulationRunning: Boolean = false
 
 
     fun setAppContext(context: Context) {
@@ -301,11 +304,20 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
     }
 
 
-    fun recordCurrentSample() {
+    fun recordCurrentSample(intervalMsOverride: Long? = null) {
+
+        // If we're in desk sim mode and this call didn't come from the sim
+        // (no override), ignore it so we don't mix real-time ticks with sim data.
+        if (isDeskSimulationRunning && intervalMsOverride == null) {
+            return
+        }
+
+
         val event = _currentEvent.value ?: return   // no active event -> do nothing
 
         val nowUtc = System.currentTimeMillis()
-        val intervalMs = nowUtc - event.createdUtcMs
+        // If simulation passes an override, use that; otherwise use wall-clock.
+        val intervalMs = intervalMsOverride ?: (nowUtc - event.createdUtcMs)
 
         // Default: not in any corner window
         var cornerIndex = 0
@@ -1354,6 +1366,154 @@ fun updateCornerCaptureState(track: Track?) {
             }
         } catch (e: Exception) {
             Log.e("ApexDebugWriter", "Failed to write apex debug sample", e)
+        }
+    }
+    /**
+     * Debug-only: replay simulation.csv which has a truncated schema:
+     *
+     *   intervalMs,gpsLat,gpsLon,rawLatG,rawLongG
+     *
+     * This will:
+     *  - create a new simulated event (if none exists)
+     *  - feed GPS + Gs through the normal pipeline
+     *  - let recordCurrentSample() write out a normal event CSV
+     */
+    fun startSimulationFromTruncatedCsv(
+        context: Context,
+        track: Track?,
+        playbackSpeed: Double = 1.0
+    ) {
+        val currentTrack = track
+        if (currentTrack == null) {
+            Log.w("DebugSim", "startSimulationFromTruncatedCsv called with null track")
+            return
+        }
+
+        // Tell the VM we're in desk simulation mode (suppress 10 Hz samples)
+        isDeskSimulationRunning = true
+
+        // Start a new simulated event
+        startManualEvent(context, currentTrack)
+
+        val event = _currentEvent.value
+        if (event == null) {
+            Log.w("DebugSim", "No current event after startManualEvent; aborting truncated simulation")
+            isDeskSimulationRunning = false
+            return
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val eventsDir = FileHelper.appEventsDir(context)
+                if (eventsDir == null || !eventsDir.exists()) {
+                    Log.w("DebugSim", "appEventsDir not available; cannot load simulation.csv")
+                    return@launch
+                }
+
+                val simFile = java.io.File(eventsDir, "simulation.csv")
+                if (!simFile.exists()) {
+                    Log.w("DebugSim", "simulation.csv not found at ${simFile.absolutePath}")
+                    return@launch
+                }
+
+                val allLines = try {
+                    simFile.readLines()
+                        .map { it.trim() }
+                        .filter { it.isNotEmpty() }
+                } catch (e: Exception) {
+                    Log.e("DebugSim", "Error reading simulation.csv", e)
+                    return@launch
+                }
+
+                if (allLines.isEmpty()) {
+                    Log.w("DebugSim", "simulation.csv is empty")
+                    return@launch
+                }
+
+                val dataLines = if (allLines.first().startsWith("intervalMs", ignoreCase = true)) {
+                    allLines.drop(1)
+                } else {
+                    allLines
+                }
+
+                if (dataLines.isEmpty()) {
+                    Log.w("DebugSim", "simulation.csv has no data rows")
+                    return@launch
+                }
+
+                Log.d(
+                    "DebugSim",
+                    "Starting truncated simulation from simulation.csv with ${dataLines.size} rows " +
+                            "into eventId=${event.id}, track=${currentTrack.name}, playbackSpeed=$playbackSpeed"
+                )
+
+                var lastIntervalMs: Long? = null
+
+                for (line in dataLines) {
+                    val parts = line.split(',')
+                    if (parts.size < 5) {
+                        Log.w("DebugSim", "Skipping malformed line in simulation.csv: '$line'")
+                        continue
+                    }
+
+                    val intervalMs = parts[0].toLongOrNull()
+                    val gpsLat = parts[1].toDoubleOrNull()
+                    val gpsLon = parts[2].toDoubleOrNull()
+                    val rawLat = parts[3].toFloatOrNull()
+                    val rawLong = parts[4].toFloatOrNull()
+
+                    if (intervalMs == null || gpsLat == null || gpsLon == null ||
+                        rawLat == null || rawLong == null
+                    ) {
+                        Log.w("DebugSim", "Skipping line with parse error: '$line'")
+                        continue
+                    }
+
+                    // Delay based on delta intervalMs (optional for playbackSpeed)
+                    val delayMs: Long = if (playbackSpeed <= 0.0) {
+                        0L
+                    } else {
+                        lastIntervalMs?.let { last ->
+                            val delta = intervalMs - last
+                            val scaled = (delta / playbackSpeed).toLong()
+                            scaled.coerceAtLeast(1L)
+                        } ?: 0L
+                    }
+
+                    if (delayMs > 0L) {
+                        delay(delayMs)
+                    }
+                    lastIntervalMs = intervalMs
+
+                    val smoothedLat = rawLat
+                    val smoothedLong = rawLong
+
+                    updateGps(lat = gpsLat, lon = gpsLon)
+
+                    updateGForces(
+                        smoothedLat = smoothedLat,
+                        smoothedLong = smoothedLong,
+                        rawLat = rawLat,
+                        rawLong = rawLong,
+                        z = 0f
+                    )
+
+                    updateCornerCaptureState(currentTrack)
+
+                    // *** KEY CHANGE: feed CSV intervalMs into the sample ***
+                    recordCurrentSample(intervalMsOverride = intervalMs)
+                }
+
+                Log.d(
+                    "DebugSim",
+                    "Finished truncated simulation from simulation.csv into eventId=${event.id}"
+                )
+
+                stopEvent()
+            } finally {
+                // Always clear the flag even if something fails
+                isDeskSimulationRunning = false
+            }
         }
     }
 
