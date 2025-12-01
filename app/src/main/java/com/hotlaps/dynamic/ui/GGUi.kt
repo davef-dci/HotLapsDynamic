@@ -118,7 +118,8 @@ import com.hotlaps.dynamic.RecordRed
 
 import com.hotlaps.dynamic.data.SmoothingLevel
 
-
+import com.hotlaps.dynamic.util.GForceSmoother
+import com.hotlaps.dynamic.util.GSmoothedSample
 
 
 
@@ -158,18 +159,31 @@ fun GGScreen(
     val smoothingIndex by repo.smoothingLevel.collectAsStateWithLifecycle(initialValue = 1)
     val smoothingLevel = SmoothingLevel.entries.getOrElse(smoothingIndex) { SmoothingLevel.Low }
 
-    // === Moving-average smoothing for G-G plot ===
-// Start with whatever the current smoothing preset says
+    // === Shared G-force smoother (EMA + MA) ===
+    // UI starts with whatever the current preset says
     var smoothingSamples by remember { mutableStateOf(smoothingLevel.windowSize as Int) }
 
-    val ma = remember { MovingAverage2D(smoothingSamples) }
+    // Time constant for EMA; Off = no EMA
+    val tauMsOrNull: Float? = when (smoothingLevel) {
+        SmoothingLevel.Off -> null
+        else -> smoothingLevel.tauMs.coerceAtLeast(1).toFloat()
+    }
 
-// Keep the moving-average window in sync with the smoothing preset.
-// (Debug slider can still override at runtime.)
+    // Single “master” smoother for live driving (in this screen)
+    val gSmoother = remember(smoothingLevel) {
+        GForceSmoother(
+            tauMs = tauMsOrNull,
+            maWindowSize = smoothingLevel.windowSize
+        )
+    }
+
+    // Keep UI slider and smoother window in sync with preset
     LaunchedEffect(smoothingLevel) {
         smoothingSamples = smoothingLevel.windowSize
-        ma.setWindowSize(smoothingLevel.windowSize)
+        gSmoother.setWindowSize(smoothingLevel.windowSize)
+        gSmoother.reset()
     }
+
 
 
 
@@ -397,8 +411,19 @@ fun GGScreen(
             val rawLatG  = latClamped
 
 
+            // Use the shared smoother (EMA + moving average)
+            val nowMs = System.currentTimeMillis()
+            val smoothed = gSmoother.addSample(
+                rawLatG = rawLatG,
+                rawLongG = rawLongG,
+                sampleTimeMs = nowMs
+            )
+
+/*
             // 2) Time-aware EMA on clamped values
             val nowMs = System.currentTimeMillis()
+
+
             val dtMs = (nowMs - lastUpdateMs).coerceAtLeast(1L)
             lastUpdateMs = nowMs
 
@@ -428,6 +453,13 @@ fun GGScreen(
             // Final values used by the rest of the UI
             latG = latMa
             longG = longMa
+
+
+ */
+
+            // Final values used by the rest of the UI
+            latG = smoothed.latG
+            longG = smoothed.longG
 
             // Feed into ViewModel, just like before
             driveViewModel.updateGForces(
@@ -913,7 +945,7 @@ fun GGScreen(
                                         onValueChange = { newValue ->
                                             val clamped = newValue.toInt().coerceIn(1, 30)
                                             smoothingSamples = clamped
-                                            ma.setWindowSize(clamped)
+                                            gSmoother.setWindowSize(clamped)
                                         },
                                         valueRange = 1f..30f,
                                         steps = 30 - 2
@@ -934,8 +966,10 @@ fun GGScreen(
                                             onClick = {
                                                 driveViewModel.startSimulationFromTruncatedCsv(
                                                     context = context,
-                                                    track = t,
-                                                    playbackSpeed = 0.0
+                                                    track = activeTrack,
+                                                    playbackSpeed = 0.0,
+                                                    emaTauMs = tauMsOrNull,
+                                                    maWindowSize = smoothingLevel.windowSize
                                                 )
                                             },
                                             modifier = Modifier.padding(bottom = 8.dp)

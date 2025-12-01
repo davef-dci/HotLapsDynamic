@@ -304,8 +304,10 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
     }
 
 
-    fun recordCurrentSample(intervalMsOverride: Long? = null) {
-
+    fun recordCurrentSample(
+        utcMsOverride: Long? = null,
+        intervalMsOverride: Long? = null
+    ) {
         // If we're in desk sim mode and this call didn't come from the sim
         // (no override), ignore it so we don't mix real-time ticks with sim data.
         if (isDeskSimulationRunning && intervalMsOverride == null) {
@@ -315,7 +317,8 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
 
         val event = _currentEvent.value ?: return   // no active event -> do nothing
 
-        val nowUtc = System.currentTimeMillis()
+        // Use override if provided, else wall-clock
+        val nowUtc = utcMsOverride ?: System.currentTimeMillis()
         // If simulation passes an override, use that; otherwise use wall-clock.
         val intervalMs = intervalMsOverride ?: (nowUtc - event.createdUtcMs)
 
@@ -599,10 +602,15 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
  *  - After a visit ends, we require MIN_CORNER_GAP_MS before that corner
  *    can trigger again. This works even for tracks with a single corner.
  */
-fun updateCornerCaptureState(track: Track?) {
+fun updateCornerCaptureState(
+    track: Track?,
+    utcMsOverride: Long? = null
+)
+
+{
     // If there's no active event, we don't capture anything
     val event = _currentEvent.value ?: return
-    val nowUtc = System.currentTimeMillis()
+    val nowUtc = utcMsOverride ?: System.currentTimeMillis()
 
     when (cornerCaptureState) {
 
@@ -1381,8 +1389,11 @@ fun updateCornerCaptureState(track: Track?) {
     fun startSimulationFromTruncatedCsv(
         context: Context,
         track: Track?,
-        playbackSpeed: Double = 1.0
-    ) {
+        playbackSpeed: Double = 1.0,
+        emaTauMs: Float? = null,
+        maWindowSize: Int = 1
+    )
+ {
         val currentTrack = track
         if (currentTrack == null) {
             Log.w("DebugSim", "startSimulationFromTruncatedCsv called with null track")
@@ -1402,7 +1413,17 @@ fun updateCornerCaptureState(track: Track?) {
             return
         }
 
-        viewModelScope.launch(Dispatchers.IO) {
+     // Use the same smoothing behaviour as the live app
+     val simTauMs = emaTauMs
+     val simMaWindow = maWindowSize.coerceAtLeast(1)
+     val simSmoother = com.hotlaps.dynamic.util.GForceSmoother(
+         tauMs = simTauMs,
+         maWindowSize = simMaWindow
+     )
+
+
+
+     viewModelScope.launch(Dispatchers.IO) {
             try {
                 val eventsDir = FileHelper.appEventsDir(context)
                 if (eventsDir == null || !eventsDir.exists()) {
@@ -1485,23 +1506,56 @@ fun updateCornerCaptureState(track: Track?) {
                     }
                     lastIntervalMs = intervalMs
 
-                    val smoothedLat = rawLat
-                    val smoothedLong = rawLong
+                    // Simulated UTC time for this sample (same base as your intervalMs fix)
+                    val simUtc = event.createdUtcMs + intervalMs
 
-                    updateGps(lat = gpsLat, lon = gpsLon)
+// Run raw Gs through the same EMA + MA pipeline as live driving
+                    val smoothedSample = simSmoother.addSample(
+                        rawLatG = rawLat,
+                        rawLongG = rawLong,
+                        sampleTimeMs = simUtc
+                    )
 
+// Feed GPS into VM
+                    updateGps(
+                        lat = gpsLat,
+                        lon = gpsLon
+                    )
+
+// Feed smoothed + raw G-forces into VM
                     updateGForces(
-                        smoothedLat = smoothedLat,
-                        smoothedLong = smoothedLong,
-                        rawLat = rawLat,
-                        rawLong = rawLong,
+                        smoothedLat = smoothedSample.latG,
+                        smoothedLong = smoothedSample.longG,
+                        rawLat = smoothedSample.rawLatG,
+                        rawLong = smoothedSample.rawLongG,
                         z = 0f
                     )
 
-                    updateCornerCaptureState(currentTrack)
+// Corner FSM + logging, using your simulated time + interval overrides
+                    updateCornerCaptureState(
+                        track = currentTrack,
+                        utcMsOverride = simUtc
+                    )
 
-                    // *** KEY CHANGE: feed CSV intervalMs into the sample ***
-                    recordCurrentSample(intervalMsOverride = intervalMs)
+                    recordCurrentSample(
+                        utcMsOverride = simUtc,
+                        intervalMsOverride = intervalMs
+                    )
+
+// Simulated UTC timeline: event start + intervalMs from CSV
+
+
+                    // Corner FSM using simulated time
+                    updateCornerCaptureState(
+                        track = currentTrack,
+                        utcMsOverride = simUtc
+                    )
+
+                    // Sample logging using simulated time + interval
+                    recordCurrentSample(
+                        utcMsOverride = simUtc,
+                        intervalMsOverride = intervalMs
+                    )
                 }
 
                 Log.d(
