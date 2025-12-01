@@ -1531,16 +1531,6 @@ fun updateCornerCaptureState(
                         z = 0f
                     )
 
-// Corner FSM + logging, using your simulated time + interval overrides
-                    updateCornerCaptureState(
-                        track = currentTrack,
-                        utcMsOverride = simUtc
-                    )
-
-                    recordCurrentSample(
-                        utcMsOverride = simUtc,
-                        intervalMsOverride = intervalMs
-                    )
 
 // Simulated UTC timeline: event start + intervalMs from CSV
 
