@@ -95,23 +95,84 @@ class DriveViewModel : ViewModel() {
     )
 
 
-    // NEW: Finalize a distance-based "geo visit" and log its four closest distances.
+    // Finalize a distance-based "geo visit":
+    //  - Use ALL GPS-change-only samples while inside the radius
+    //  - Find an apex time from the 4 closest distances
+    //  - Use that apex to define the capture window
+    //  - Retag in-memory samples and the CSV around that apex
     private fun finalizeGeoVisitForCorner(
         event: Event,
         cornerIndex: Int,
         geoVisitState: GeoVisitState
     ) {
         if (!geoVisitState.isInsideRadius) return
+
         if (geoVisitState.currentSamples.isEmpty()) {
+            // Nothing useful for this visit; just reset state.
             geoVisitState.isInsideRadius = false
             geoVisitState.lastDistanceM = -1.0
             return
         }
 
-        // This visit number is independent of the old FSM visitNumber.
+        // Visit number for this corner based on the geo visit counter.
         val visitNumber = geoVisitState.visitCount
 
-        // Reuse our existing helper: this sorts by distance and picks the 4 smallest.
+        // 1) Try to compute an apex time from ALL distance samples for this geo visit.
+        val apexUtcFromDistances =
+            findApexTimeUsingFourClosestSamples(geoVisitState.currentSamples)
+
+        if (apexUtcFromDistances != null) {
+            // Look up this corner's captureBefore/captureAfter settings from the current track
+            val cornerConfig = currentTrack
+                ?.corners
+                ?.firstOrNull { it.index == cornerIndex }
+
+            // Fallbacks if something is missing
+            val beforeMs = (cornerConfig?.captureBeforeMs ?: 3000).toLong()
+            val afterMs  = (cornerConfig?.captureAfterMs  ?: 3000).toLong()
+
+            // Apex-centered time window
+            val windowStartUtcMs = apexUtcFromDistances - beforeMs
+            val windowEndUtcMs   = apexUtcFromDistances + afterMs
+
+            // 1a) In-memory samples: retag everything in this window
+            updateCornerSamplesAroundApexWindow(
+                event = event,
+                cornerIndex = cornerIndex,
+                visitNumber = visitNumber,
+                apexUtcMs = apexUtcFromDistances,
+                windowStartUtcMs = windowStartUtcMs,
+                windowEndUtcMs = windowEndUtcMs
+            )
+
+            // 1b) CSV on disk: mirror the same apex-centered window/tagging
+            if (::appContext.isInitialized) {
+                EventStorage.backfillCornerSamplesInCsv(
+                    context = appContext,
+                    eventId = event.id,
+                    cornerIndex = cornerIndex,
+                    visitNumber = visitNumber,
+                    windowStartUtcMs = windowStartUtcMs,
+                    apexUtcMs = apexUtcFromDistances,
+                    windowEndUtcMs = windowEndUtcMs
+                )
+            } else {
+                Log.w(
+                    "ApexDetect",
+                    "appContext not initialized; cannot backfill CSV " +
+                            "for corner=$cornerIndex visit=$visitNumber"
+                )
+            }
+        } else {
+            // Not enough or not suitable data to fit an apex for this visit.
+            Log.d(
+                "ApexDetect",
+                "finalizeGeoVisitForCorner: no apex time for " +
+                        "event=${event.id}, corner=$cornerIndex, visit=$visitNumber"
+            )
+        }
+
+        // 2) Keep the four-closest debug summary for this visit (same samples).
         logFourClosestDistanceSamplesForVisit(
             event = event,
             cornerIndex = cornerIndex,
@@ -119,7 +180,7 @@ class DriveViewModel : ViewModel() {
             samples = geoVisitState.currentSamples
         )
 
-        // Reset for the next visit.
+        // 3) Reset geo visit state for this corner.
         geoVisitState.isInsideRadius = false
         geoVisitState.lastDistanceM = -1.0
         geoVisitState.currentSamples.clear()
@@ -507,15 +568,7 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
                     )
                 )
                 lastDistanceSampledM = distanceToClosestCornerM
-
-                // NEW: log this GPS-distance sample for offline debugging
-                appendApexDebugSample(
-                    event = event,
-                    cornerIndex = activeCornerIndex!!,
-                    visitNumber = activeVisitNumber,
-                    utcMs = nowUtc,
-                    distanceToCornerM = distanceToClosestCornerM
-                )
+                
             }
 
         }
@@ -849,7 +902,8 @@ fun updateCornerCaptureState(
 
 
 // NEW: Try to compute a candidate apex time from our distance samples
-                val apexUtcFromDistances = findApexTimeUsingCubicFit(activeCornerDistanceSamples)
+                val apexUtcFromDistances = findApexTimeUsingFourClosestSamples(activeCornerDistanceSamples)
+
                 // If we got a valid apex time, re-tag this visit using an apex-centered window
                 if (apexUtcFromDistances != null) {
 
@@ -1223,6 +1277,31 @@ fun updateCornerCaptureState(
         return apexUtcMs.toLong()
     }
 
+    // NEW: Use exactly the 4 closest distance samples (by distance),
+// then fit the quadratic using those 4 in chronological order.
+    private fun findApexTimeUsingFourClosestSamples(
+        samples: List<CornerDistanceSample>
+    ): Long? {
+        if (samples.size < 4) {
+            Log.d(
+                "ApexDetect",
+                "findApexTimeUsingFourClosestSamples: not enough samples (${samples.size})"
+            )
+            return null
+        }
+
+        // 1) Take the 4 smallest distances
+        val fourClosestByDistance = samples
+            .sortedBy { it.distanceToCornerM }
+            .take(4)
+
+        // 2) Sort those 4 by time (chronological order)
+        val fourClosestChronological = fourClosestByDistance
+            .sortedBy { it.utcMs }
+
+        // 3) Run the existing quadratic fit on JUST these 4 points
+        return findApexTimeUsingCubicFit(fourClosestChronological)
+    }
 
     /**
      * Later we'll use this to retroactively tag samples that happened
