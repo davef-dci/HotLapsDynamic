@@ -129,20 +129,16 @@ fun EventViewerScreen(
             }
 
 
-            // --- NEW: Detect distinct (cornerIndex, visitNumber) groups in the selected event ---
-            val cornerVisitGroups = remember(samplesForSelected) {
-                samplesForSelected
-                    // Only keep samples that are actually tagged to a corner visit
-                    .filter { it.cornerIndex > 0 && it.visitNumber > 0 }
-                    // Group by (cornerIndex, visitNumber)
-                    .groupBy { it.cornerIndex to it.visitNumber }
-                    // We only need the unique keys (the groups themselves)
-                    .keys
-                    // Sort nicely: by corner, then by visit number
+            // --- NEW: Corner/visit groups are driven by apexVisits, not per-sample tags ---
+            val cornerVisitGroups = remember(apexVisits) {
+                apexVisits
+                    .map { it.cornerIndex to it.visitNumber }
+                    .distinct()
                     .sortedWith(
                         compareBy<Pair<Int, Int>> { it.first }.thenBy { it.second }
                     )
             }
+
 
             // --- NEW: Which (cornerIndex, visitNumber) groups are selected for plotting ---
             var selectedCornerVisits by remember(cornerVisitGroups) {
@@ -308,35 +304,33 @@ fun EventViewerScreen(
             }
 
 
-            // --- NEW: Filter samples based on selected corner/visit groups ---
-// --- Filter samples based on selected corner/visit groups AND apex window ---
+            // --- Filter samples based on selected corner/visit groups AND apex window ---
+// Now based purely on apex times, not on per-sample corner tags.
             val samplesForPlot =
-                if (cornerVisitGroups.isNotEmpty() && selectedCornerVisits.isNotEmpty()) {
+                if (apexVisits.isNotEmpty() && selectedCornerVisits.isNotEmpty()) {
                     val beforeMs = (beforeApexSeconds * 1000f).toLong()
                     val afterMs  = (afterApexSeconds * 1000f).toLong()
 
                     val filtered = samplesForSelected.filter { sample ->
-                        val key = sample.cornerIndex to sample.visitNumber
+                        // Include this sample if it falls within the [−before, +after] window
+                        // of ANY selected apex visit.
+                        apexVisits.any { apex ->
+                            val key = apex.cornerIndex to apex.visitNumber
+                            if (!selectedCornerVisits.contains(key)) {
+                                // This apex group is not selected → ignore it
+                                return@any false
+                            }
 
-                        // Keep only selected corner/visit groups
-                        if (!selectedCornerVisits.contains(key)) {
-                            return@filter false
+                            val dt = sample.intervalMs - apex.apexIntervalMs
+                            dt >= -beforeMs && dt <= afterMs
                         }
-
-                        // If we don't know an apex for this group, include all its samples as a fallback
-                        val apex = apexByGroup[key] ?: return@filter true
-
-                        val dt = sample.intervalMs - apex.apexIntervalMs
-                        dt >= -beforeMs && dt <= afterMs
                     }
 
-                    // If filtering somehow yields nothing, fall back to all samples
                     if (filtered.isNotEmpty()) filtered else samplesForSelected
                 } else {
-                    // If there are no corner groups, or none selected, just plot everything
+                    // No apexes or none selected → just show the whole event
                     samplesForSelected
                 }
-
 
 
 // Neutral background color for non-corner samples
@@ -382,7 +376,7 @@ fun EventViewerScreen(
                     Slider(
                         value = beforeApexSeconds,
                         onValueChange = { beforeApexSeconds = it },
-                        valueRange = 0f..5f,        // you can tweak this range
+                        valueRange = 0f..7.5f,        // you can tweak this range
                         steps = 0                   // continuous
                     )
 
@@ -395,7 +389,7 @@ fun EventViewerScreen(
                     Slider(
                         value = afterApexSeconds,
                         onValueChange = { afterApexSeconds = it },
-                        valueRange = 0f..5f,
+                        valueRange = 0f..7.5f,
                         steps = 0
                     )
                 }
