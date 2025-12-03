@@ -100,6 +100,35 @@ fun EventViewerScreen(
                     EventStorage.loadSamplesFromCsv(file)
                 } ?: emptyList()
             }
+
+// Collect one apex sample per (cornerIndex, visitNumber)
+            val apexVisits = remember(samplesForSelected) {
+                samplesForSelected
+                    // Only keep samples marked as apex and tagged to a corner/visit
+                    .filter { it.isApexSample && it.cornerIndex > 0 && it.visitNumber > 0 }
+                    // Group by (cornerIndex, visitNumber) in case there are duplicates
+                    .groupBy { it.cornerIndex to it.visitNumber }
+                    .mapNotNull { (cornerVisitKey, samples) ->
+                        val apexSample = samples.minByOrNull { it.intervalMs } ?: samples.firstOrNull()
+                        if (apexSample == null) {
+                            null
+                        } else {
+                            ApexVisit(
+                                cornerIndex = cornerVisitKey.first,
+                                visitNumber = cornerVisitKey.second,
+                                cornerName = apexSample.cornerName.ifBlank { "Corner ${cornerVisitKey.first}" },
+                                apexIntervalMs = apexSample.intervalMs,
+                                apexUtcMs = apexSample.utcMs
+                            )
+                        }
+                    }
+                    // Sort nicely: by corner, then visit
+                    .sortedWith(
+                        compareBy<ApexVisit> { it.cornerIndex }.thenBy { it.visitNumber }
+                    )
+            }
+
+
             // --- NEW: Detect distinct (cornerIndex, visitNumber) groups in the selected event ---
             val cornerVisitGroups = remember(samplesForSelected) {
                 samplesForSelected
@@ -120,6 +149,12 @@ fun EventViewerScreen(
                 // By default, select all corner/visit groups when they first appear
                 mutableStateOf(cornerVisitGroups.toSet())
             }
+
+// Adjustable time window around the apex (in seconds)
+            var beforeApexSeconds by remember { mutableStateOf(3f) }
+            var afterApexSeconds  by remember { mutableStateOf(3f) }
+
+
 
             // --- NEW: Assign a distinct color to each selected (corner, visit) group ---
             // --- NEW: Assign a distinct color to each (corner, visit) group ---
@@ -155,7 +190,32 @@ fun EventViewerScreen(
                 style = MaterialTheme.typography.bodySmall
             )
 
+            Text(
+                text = if (selectedFile == null) {
+                    ""
+                } else {
+                    "Detected ${apexVisits.size} apex sample(s) in this event"
+                },
+                style = MaterialTheme.typography.bodySmall
+            )
 
+            if (selectedFile != null && apexVisits.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "Apex summary:",
+                    style = MaterialTheme.typography.bodySmall
+                )
+
+                apexVisits.forEach { apex ->
+                    val seconds = apex.apexIntervalMs / 1000f
+                    Text(
+                        text = "• Corner ${apex.cornerIndex} – Visit ${apex.visitNumber} " +
+                                "(${apex.cornerName}) at ${"%.3f".format(seconds)} s",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
 
 
             Spacer(Modifier.height(16.dp))
@@ -242,14 +302,32 @@ fun EventViewerScreen(
 
                 Spacer(Modifier.height(16.dp))
             }
+// Map (cornerIndex, visitNumber) -> ApexVisit for quick lookup
+            val apexByGroup = remember(apexVisits) {
+                apexVisits.associateBy { it.cornerIndex to it.visitNumber }
+            }
 
 
             // --- NEW: Filter samples based on selected corner/visit groups ---
+// --- Filter samples based on selected corner/visit groups AND apex window ---
             val samplesForPlot =
                 if (cornerVisitGroups.isNotEmpty() && selectedCornerVisits.isNotEmpty()) {
+                    val beforeMs = (beforeApexSeconds * 1000f).toLong()
+                    val afterMs  = (afterApexSeconds * 1000f).toLong()
+
                     val filtered = samplesForSelected.filter { sample ->
-                        // Only keep samples whose (cornerIndex, visitNumber) is selected
-                        selectedCornerVisits.contains(sample.cornerIndex to sample.visitNumber)
+                        val key = sample.cornerIndex to sample.visitNumber
+
+                        // Keep only selected corner/visit groups
+                        if (!selectedCornerVisits.contains(key)) {
+                            return@filter false
+                        }
+
+                        // If we don't know an apex for this group, include all its samples as a fallback
+                        val apex = apexByGroup[key] ?: return@filter true
+
+                        val dt = sample.intervalMs - apex.apexIntervalMs
+                        dt >= -beforeMs && dt <= afterMs
                     }
 
                     // If filtering somehow yields nothing, fall back to all samples
@@ -258,6 +336,7 @@ fun EventViewerScreen(
                     // If there are no corner groups, or none selected, just plot everything
                     samplesForSelected
                 }
+
 
 
 // Neutral background color for non-corner samples
@@ -284,6 +363,43 @@ fun EventViewerScreen(
                             ?: neutralSampleColor
                     }
                 )
+
+
+                // --- NEW: Before/After Apex window sliders (UI only, not wired yet) ---
+                Spacer(Modifier.height(16.dp))
+
+                Text(
+                    text = "Apex window (time around apex):",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(Modifier.height(8.dp))
+
+                Column {
+                    Text(
+                        text = "Before apex: ${"%.1f".format(beforeApexSeconds)} s",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Slider(
+                        value = beforeApexSeconds,
+                        onValueChange = { beforeApexSeconds = it },
+                        valueRange = 0f..5f,        // you can tweak this range
+                        steps = 0                   // continuous
+                    )
+
+                    Spacer(Modifier.height(8.dp))
+
+                    Text(
+                        text = "After apex: ${"%.1f".format(afterApexSeconds)} s",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Slider(
+                        value = afterApexSeconds,
+                        onValueChange = { afterApexSeconds = it },
+                        valueRange = 0f..5f,
+                        steps = 0
+                    )
+                }
+
 
 
                 // --- MAX G SUMMARY SECTION ---
@@ -703,4 +819,13 @@ private fun MaxGSummaryRow(
         )
     }
 }
+
+data class ApexVisit(
+    val cornerIndex: Int,
+    val visitNumber: Int,
+    val cornerName: String,
+    val apexIntervalMs: Long,
+    val apexUtcMs: Long
+)
+
 
