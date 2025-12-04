@@ -76,7 +76,9 @@ object EventStorage {
                         "intervalMs,utcMs,localTime,trackName,eventName," +
                                 "cornerIndex,cornerName,visitNumber,latG,longG,zG,gSum,gpsLat,gpsLon," +
                                 "closestCornerIndex,distanceToClosestCornerM," +
-                                "rawLatG,rawLongG,isApexSample,speed\n"
+                                "rawLatG,rawLongG,Apex,speed\n"
+
+
                     )
                 }
 
@@ -129,7 +131,9 @@ object EventStorage {
                     append(sample.rawLongG); append(',')
 
 // apex flag
-                    append(sample.isApexSample); append(',')
+                    // Apex column: "True" only on the apex sample, blank otherwise
+                    append(if (sample.isApexSample) "True" else ""); append(',')
+
 
 // speed (m/s)
                     append(speedStr)
