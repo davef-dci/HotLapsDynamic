@@ -28,6 +28,7 @@ import com.hotlaps.dynamic.model.EventSample
 import java.io.File
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.ui.graphics.Color // May or may not be used depending on theme
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
@@ -57,6 +58,8 @@ import android.graphics.Paint as AndroidPaint
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.sp
+import com.hotlaps.dynamic.ui.ChartMode
+
 
 
 
@@ -93,6 +96,8 @@ fun EventViewerScreen(
             val eventFiles = remember { EventStorage.listEventFiles(context) }
             // --- NEW: which event file the user has selected (if any) ---
             var selectedFile by remember { mutableStateOf<File?>(null) }
+            // NEW: toggle between G-G and G-vs-Time modes
+            var chartMode by remember { mutableStateOf(ChartMode.GG) }
 
             // --- NEW: Load samples for the currently selected file (or empty if none selected) ---
             val samplesForSelected = remember(selectedFile) {
@@ -194,6 +199,33 @@ fun EventViewerScreen(
                 },
                 style = MaterialTheme.typography.bodySmall
             )
+
+            // --- NEW: Chart mode toggle ---
+            Spacer(Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Button(
+                    onClick = { chartMode = ChartMode.GG },
+                    enabled = chartMode != ChartMode.GG
+                ) {
+                    Text("G-G Plot")
+                }
+
+                Button(
+                    onClick = { chartMode = ChartMode.G_VS_TIME },
+                    enabled = chartMode != ChartMode.G_VS_TIME
+                ) {
+                    Text("G vs Time")
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
 
             if (selectedFile != null && apexVisits.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(8.dp))
@@ -303,7 +335,6 @@ fun EventViewerScreen(
                 apexVisits.associateBy { it.cornerIndex to it.visitNumber }
             }
 
-
             // --- Filter samples based on selected corner/visit groups AND apex window ---
 // Now based purely on apex times, not on per-sample corner tags.
             val samplesForPlot =
@@ -333,6 +364,35 @@ fun EventViewerScreen(
                 }
 
 
+            // Samples with time centered on apex (intervalMs becomes "delta ms from apex")
+// If we have no apex info, we just fall back to the original samplesForPlot.
+
+            val samplesForTimePlot: List<EventSample> =
+                remember(samplesForPlot, apexByGroup) {
+                    if (apexByGroup.isEmpty()) {
+                        samplesForPlot
+                    } else {
+                        samplesForPlot.map { s ->
+                            val key = s.cornerIndex to s.visitNumber
+                            val apex = apexByGroup[key]
+
+                            if (apex != null) {
+                                // Shift timestamp so 0 = apex
+                                s.copy(intervalMs = s.intervalMs - apex.apexIntervalMs)
+                            } else {
+                                s
+                            }
+                        }
+                    }
+                }
+
+
+
+
+
+
+
+
 // Neutral background color for non-corner samples
             val neutralSampleColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
 
@@ -346,17 +406,37 @@ fun EventViewerScreen(
                 )
                 Spacer(Modifier.height(8.dp))
 
-                SimpleGGPlot(
-                    samples = samplesForPlot,
-                    colorForSample = { sample ->
-                        val key = sample.cornerIndex to sample.visitNumber
 
-                        // If this sample belongs to a corner visit group, use its color
-                        cornerVisitColors[key]
-                        // Otherwise, use a neutral faint color for "background"/non-corner samples
-                            ?: neutralSampleColor
+                if (selectedFile != null && samplesForPlot.isNotEmpty()) {
+                    if (chartMode == ChartMode.GG) {
+                        Text(
+                            text = "G-G Plot (selected corner visits, color-coded):",
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Spacer(Modifier.height(8.dp))
+
+                        SimpleGGPlot(
+                            samples = samplesForPlot,
+                            colorForSample = { sample ->
+                                val key = sample.cornerIndex to sample.visitNumber
+                                cornerVisitColors[key] ?: neutralSampleColor
+                            }
+                        )
+                    } else {
+                        Text(
+                            text = "G vs Time (longitudinal & lateral):",
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Spacer(Modifier.height(8.dp))
+
+                        GTimePlot(
+                            samples = samplesForTimePlot
+                        )
+
                     }
-                )
+                }
+                }
+
 
 
                 // --- NEW: Before/After Apex window sliders (UI only, not wired yet) ---
@@ -475,7 +555,7 @@ fun EventViewerScreen(
         }
 
     }
-}
+
 
 // --- Very simple GG plot placeholder ---
 // Now takes a list of EventSample so we can use latG/longG soon.
@@ -697,6 +777,153 @@ fun SimpleGGPlot(
         )
     }
 }
+
+@Composable
+fun GTimePlot(
+    samples: List<EventSample>
+) {
+
+    val axisColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+    val longColor = MaterialTheme.colorScheme.primary
+    val latColor = MaterialTheme.colorScheme.tertiary
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(220.dp)
+            .padding(8.dp)
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            if (samples.isEmpty()) return@Canvas
+
+            val w = size.width
+            val h = size.height
+
+// --- Time range based on actual sample times ---
+            val minT = samples.minOf { it.intervalMs }.toFloat()
+            val maxT = samples.maxOf { it.intervalMs }.toFloat()
+            val spanT = (maxT - minT).coerceAtLeast(1f)
+
+// --- G range (symmetric around 0) ---
+            val rawMaxG = samples.maxOf { max(abs(it.latG), abs(it.longG)) }
+            val maxG = when {
+                rawMaxG <= 0f -> 0.5f
+                rawMaxG < 0.5f -> 0.5f
+                else -> rawMaxG * 1.1f
+            }
+
+            val midY = h / 2f
+            val gBand = h * 0.4f // 80% of height for ±maxG
+
+            fun xFor(tMs: Long): Float {
+                val t = tMs.toFloat()
+                val frac = (t - minT) / spanT    // 0 at minT, 1 at maxT
+                return frac * w
+            }
+
+
+            fun yFor(g: Float): Float {
+                val norm = (g / maxG).coerceIn(-1f, 1f)
+                return midY - norm * gBand
+            }
+
+            val stroke = 1.dp.toPx()
+
+            // --- Axes: horizontal 0g line + border ---
+            drawLine(
+                color = axisColor,
+                start = Offset(0f, midY),
+                end = Offset(w, midY),
+                strokeWidth = stroke
+            )
+
+            // Vertical edges
+            drawLine(
+                color = axisColor,
+                start = Offset(0f, 0f),
+                end = Offset(0f, h),
+                strokeWidth = stroke
+            )
+            drawLine(
+                color = axisColor,
+                start = Offset(w, 0f),
+                end = Offset(w, h),
+                strokeWidth = stroke
+            )
+
+            // Optional reference lines at ±1.0g
+            if (maxG >= 1f) {
+                val yPlus = yFor(1f)
+                val yMinus = yFor(-1f)
+                drawLine(
+                    color = axisColor.copy(alpha = 0.3f),
+                    start = Offset(0f, yPlus),
+                    end = Offset(w, yPlus),
+                    strokeWidth = stroke
+                )
+                drawLine(
+                    color = axisColor.copy(alpha = 0.3f),
+                    start = Offset(0f, yMinus),
+                    end = Offset(w, yMinus),
+                    strokeWidth = stroke
+                )
+            }
+
+            // --- Helper to draw a polyline for a given G component ---
+            fun drawSeries(selectG: (EventSample) -> Float, color: Color) {
+                var lastPoint: Offset? = null
+
+                samples.forEach { s ->
+                    val x = xFor(s.intervalMs)
+                    val y = yFor(selectG(s))
+                    val p = Offset(x, y)
+
+                    lastPoint?.let { prev ->
+                        drawLine(
+                            color = color,
+                            start = prev,
+                            end = p,
+                            strokeWidth = 2.dp.toPx()
+                        )
+                    }
+
+                    lastPoint = p
+                }
+            }
+
+            // Longitudinal first, then lateral
+            drawSeries(selectG = { it.longG }, color = longColor)
+            drawSeries(selectG = { it.latG }, color = latColor)
+        }
+
+        // --- Tiny legend anchored to top-left (not scaled with canvas) ---
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(10.dp, 3.dp)
+                    .background(longColor)
+            )
+            Spacer(Modifier.width(4.dp))
+            Text("Longitudinal", style = MaterialTheme.typography.labelSmall)
+
+            Spacer(Modifier.width(12.dp))
+
+            Box(
+                modifier = Modifier
+                    .size(10.dp, 3.dp)
+                    .background(latColor)
+            )
+            Spacer(Modifier.width(4.dp))
+            Text("Lateral", style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
 
 private data class MaxGSummary(
     val braking: Float,
