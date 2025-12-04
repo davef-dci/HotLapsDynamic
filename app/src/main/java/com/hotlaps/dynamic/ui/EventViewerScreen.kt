@@ -791,10 +791,23 @@ fun SimpleGGPlot(
 fun GTimePlot(
     samples: List<EventSample>
 ) {
-
     val axisColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
     val longColor = MaterialTheme.colorScheme.primary
     val latColor = MaterialTheme.colorScheme.tertiary
+
+    // NEW: Paint setup for the "Apex" label
+    val density = LocalDensity.current
+    val labelTextSizePx = with(density) { 10.sp.toPx() }
+    val apexLabelColor = axisColor
+    val apexLabelPaint = remember(labelTextSizePx, apexLabelColor) {
+        AndroidPaint().apply {
+            isAntiAlias = true
+            textSize = labelTextSizePx
+            color = apexLabelColor.toArgb()
+            textAlign = android.graphics.Paint.Align.CENTER
+        }
+    }
+
 
     Box(
         modifier = Modifier
@@ -837,6 +850,31 @@ fun GTimePlot(
             }
 
             val stroke = 1.dp.toPx()
+
+            val nativeCanvas = drawContext.canvas.nativeCanvas
+
+// --- NEW: Vertical line at apex (t = 0) with label ---
+            if (minT <= 0f && maxT >= 0f) {
+                val xApex = xFor(0L)
+
+                // Draw the vertical apex line
+                drawLine(
+                    color = longColor, // use longitudinal color so it stands out
+                    start = Offset(xApex, 0f),
+                    end = Offset(xApex, h),
+                    strokeWidth = (stroke * 1.5f)
+                )
+
+                // Draw "Apex" label near the top of the line
+                val labelY = 12.dp.toPx()  // a bit below the top edge
+                nativeCanvas.drawText(
+                    "Apex",
+                    xApex,
+                    labelY,
+                    apexLabelPaint
+                )
+            }
+
 
             // --- Axes: horizontal 0g line + border ---
             drawLine(
