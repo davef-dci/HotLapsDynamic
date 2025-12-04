@@ -22,6 +22,7 @@ import android.content.Intent
 object EventStorage {
 
     private const val TAG = "EventStorage"
+
     // Single lock for all event CSV file access.
     // We only write one event at a time, so a global lock is fine.
     private val fileLock = Any()
@@ -73,16 +74,13 @@ object EventStorage {
                 // If it's a brand-new file, write a header row first.
                 if (isNewFile) {
                     file.appendText(
-                        "intervalMs,utcMs,localTime,trackName,eventName," +
-                                "cornerIndex,cornerName,visitNumber,latG,longG,zG,gSum,gpsLat,gpsLon," +
-                                "closestCornerIndex,distanceToClosestCornerM," +
-                                "rawLatG,rawLongG,Apex,speed\n"
-
-
+                        "timestampMs,deltaMs,localTime,trackName,eventName," +
+                                "gpsLat,gpsLon,closestCornerIndex,distanceToClosestCornerM," +
+                                "rawLatG,rawLongG,latG,longG,gSum," +
+                                "speed," +
+                                "cornerIndex,cornerName,visitNumber,Apex\n"
                     )
                 }
-
-
 
 
                 val localTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
@@ -95,52 +93,44 @@ object EventStorage {
 
                 // Write one CSV line for this sample
                 val line = buildString {
-                    append(sample.intervalMs); append(',')
-                    append(sample.utcMs); append(',')
+                    // Time: timestampMs (UTC), deltaMs (interval)
+                    append(sample.utcMs); append(',')       // timestampMs
+                    append(sample.intervalMs); append(',')  // deltaMs
+
+                    // Local time (human-readable)
                     append(localTime); append(',')
+
+                    // Event metadata
                     append(sample.trackName); append(',')
                     append(sample.eventName); append(',')
 
-                    // cornerIndex
-                    append(sample.cornerIndex); append(',')
-
-                    // cornerName
-                    append(sample.cornerName); append(',')
-
-                    // visitNumber
-                    append(sample.visitNumber); append(',')
-
-                    // G forces
-                    append(sample.latG); append(',')
-                    append(sample.longG); append(',')
-                    append(sample.zG); append(',')
-                    append(sample.gSum); append(',')
-
-                    // GPS
+                    // Position / corner proximity
                     append(sample.gpsLat); append(',')
                     append(sample.gpsLon); append(',')
-
-// closestCornerIndex
                     append(sample.closestCornerIndex); append(',')
-
-// distanceToClosestCornerM
                     append(sample.distanceToClosestCornerM); append(',')
 
-// raw (pre-smoothing) G values
+                    // Raw G then smoothed G
                     append(sample.rawLatG); append(',')
                     append(sample.rawLongG); append(',')
+                    append(sample.latG); append(',')
+                    append(sample.longG); append(',')
+                    append(sample.gSum); append(',')
 
-// apex flag
-                    // Apex column: "True" only on the apex sample, blank otherwise
-                    append(if (sample.isApexSample) "True" else ""); append(',')
+                    // Speed
+                    append(speedStr); append(',')
 
+                    // Corner / apex metadata (apex-only, usually)
+                    append(sample.cornerIndex); append(',')
+                    append(sample.cornerName); append(',')
+                    append(sample.visitNumber); append(',')
 
-// speed (m/s)
-                    append(speedStr)
+                    // Apex column: "True" only on apex sample, blank otherwise
+                    append(if (sample.isApexSample) "True" else "")
 
                     append('\n')
-
                 }
+
 
 
 
@@ -279,7 +269,6 @@ object EventStorage {
     }
 
 
-
     fun loadSamplesFromCsv(file: File): List<EventSample> {
         val result = mutableListOf<EventSample>()
 
@@ -294,34 +283,56 @@ object EventStorage {
 
                 val parts = line.split(',')
                 // We expect the full 22-column format written by appendSample()
-                if (parts.size < 20) continue
+                if (parts.size < 19) continue
 
-                // Column indices must match appendSample's header
-                val intervalMs     = parts[0].toLongOrNull() ?: continue
-                val utcMs          = parts[1].toLongOrNull() ?: continue
-                // parts[2] = localTime (ignored here)
+                // Column indices must match the NEW header:
+// 0 timestampMs (utcMs)
+// 1 deltaMs (intervalMs)
+// 2 localTime (ignored here)
+// 3 trackName
+// 4 eventName
+// 5 gpsLat
+// 6 gpsLon
+// 7 closestCornerIndex
+// 8 distanceToClosestCornerM
+// 9 rawLatG
+// 10 rawLongG
+// 11 latG
+// 12 longG
+// 13 gSum
+// 14 speed
+// 15 cornerIndex
+// 16 cornerName
+// 17 visitNumber
+// 18 Apex ("True" or "")
 
-                val trackName      = parts[3]
-                val eventName      = parts[4]
+                val utcMs = parts[0].toLongOrNull() ?: continue
+                val intervalMs = parts[1].toLongOrNull() ?: 0L
+// parts[2] = localTime (ignored)
 
-                val cornerIdx      = parts[5].toIntOrNull() ?: 0
-                val cornerName     = parts[6]
-                val visitNum       = parts[7].toIntOrNull() ?: 0
+                val trackName = parts[3]
+                val eventName = parts[4]
 
-                val latG           = parts[8].toFloatOrNull() ?: 0f
-                val longG          = parts[9].toFloatOrNull() ?: 0f
-                val zG             = parts[10].toFloatOrNull() ?: 0f
-                val gSum           = parts[11].toFloatOrNull() ?: 0f
+                val gpsLat = parts[5].toDoubleOrNull() ?: 0.0
+                val gpsLon = parts[6].toDoubleOrNull() ?: 0.0
 
-                val gpsLat         = parts[12].toDoubleOrNull() ?: 0.0
-                val gpsLon         = parts[13].toDoubleOrNull() ?: 0.0
+                val closestCornerIndex = parts[7].toIntOrNull() ?: 0
+                val distanceToClosestCornerM = parts[8].toDoubleOrNull() ?: 0.0
 
-                val closestCornerIndex       = parts[14].toIntOrNull() ?: 0
-                val distanceToClosestCornerM = parts[15].toDoubleOrNull() ?: 0.0
-                val rawLatG                  = parts[16].toFloatOrNull() ?: 0f
-                val rawLongG                 = parts[17].toFloatOrNull() ?: 0f
-                val isApexSample             = parts[18].equals("true", ignoreCase = true)
-                val speedMps                 = parts[19].toDoubleOrNull()
+                val rawLatG = parts[9].toFloatOrNull() ?: 0f
+                val rawLongG = parts[10].toFloatOrNull() ?: 0f
+                val latG = parts[11].toFloatOrNull() ?: 0f
+                val longG = parts[12].toFloatOrNull() ?: 0f
+                val gSum = parts[13].toFloatOrNull() ?: 0f
+
+                val speedMps = parts[14].toDoubleOrNull()
+
+                val cornerIdx = parts[15].toIntOrNull() ?: 0
+                val cornerName = parts[16]
+                val visitNum = parts[17].toIntOrNull() ?: 0
+
+                val isApexSample = parts[18].equals("true", ignoreCase = true)
+
 
                 val sample = EventSample(
                     eventId = 0L,   // arbitrary when loading loose CSV
@@ -332,7 +343,7 @@ object EventStorage {
                     utcMs = utcMs,
                     longG = longG,
                     latG = latG,
-                    zG = zG,
+                    zG = 0f,  // zG is no longer stored in CSV; set to 0f or drop from model later
                     gSum = gSum,
                     trackName = trackName,
                     eventName = eventName,
@@ -346,6 +357,7 @@ object EventStorage {
                     isApexSample = isApexSample
                 )
 
+
                 result.add(sample)
             }
         } catch (e: Exception) {
@@ -355,10 +367,6 @@ object EventStorage {
 
         return result
     }
-
-
-
-
 
 
     fun renameEventFile(context: Context, eventId: Long, newName: String) {
@@ -465,11 +473,31 @@ object EventStorage {
             val lines = file.readLines()
             if (lines.size <= 1) return
 
-            val header = lines[0]
             val dataLines = lines.toMutableList()
 
             var bestLineIndex = -1
             var bestError = Long.MAX_VALUE
+
+            // NEW CSV layout (19 columns):
+            // 0  timestampMs (utcMs)
+            // 1  deltaMs
+            // 2  localTime
+            // 3  trackName
+            // 4  eventName
+            // 5  gpsLat
+            // 6  gpsLon
+            // 7  closestCornerIndex
+            // 8  distanceToClosestCornerM
+            // 9  rawLatG
+            // 10 rawLongG
+            // 11 latG
+            // 12 longG
+            // 13 gSum
+            // 14 speed
+            // 15 cornerIndex
+            // 16 cornerName
+            // 17 visitNumber
+            // 18 Apex ("True" or "")
 
             // Remember: line 0 is header, data starts at 1
             for (i in 1 until dataLines.size) {
@@ -477,10 +505,9 @@ object EventStorage {
                 if (line.isBlank()) continue
 
                 val parts = line.split(',')
-                // Expect the new 20-column format
-                if (parts.size < 20) continue
+                if (parts.size < 19) continue   // width check
 
-                val utcStr = parts[1]
+                val utcStr = parts[0]           // timestampMs is column 0
                 val utcMs = utcStr.toLongOrNull() ?: continue
 
                 val err = kotlin.math.abs(utcMs - apexUtcMs)
@@ -497,24 +524,13 @@ object EventStorage {
 
             // Update that one row
             val originalParts = dataLines[bestLineIndex].split(',').toMutableList()
-            if (originalParts.size < 20) return
+            if (originalParts.size < 19) return
 
-            // Column indices in the NEW header:
-            // 0 intervalMs
-            // 1 utcMs
-            // 2 localTime
-            // 3 trackName
-            // 4 eventName
-            // 5 cornerIndex
-            // 6 cornerName
-            // 7 visitNumber
-            // ...
-            // 18 isApexSample
-            // 19 speed
-            originalParts[5] = cornerIndex.toString()
-            originalParts[6] = cornerName
-            originalParts[7] = visitNumber.toString()
-            originalParts[18] = "true"
+            // Write the corner + visit + Apex flag into the NEW columns
+            originalParts[15] = cornerIndex.toString()  // cornerIndex
+            originalParts[16] = cornerName              // cornerName
+            originalParts[17] = visitNumber.toString()  // visitNumber
+            originalParts[18] = "True"                  // Apex column
 
             dataLines[bestLineIndex] = originalParts.joinToString(",")
 
@@ -530,7 +546,5 @@ object EventStorage {
             Log.e(TAG, "tagApexSampleInCsv: error updating CSV for eventId=$eventId", e)
         }
     }
-
-
 
 }
