@@ -335,6 +335,12 @@ fun EventViewerScreen(
                 apexVisits.associateBy { it.cornerIndex to it.visitNumber }
             }
 
+// Just the apex visits for corner/visits that are currently checked
+            val selectedApexesForTime = remember(apexVisits, selectedCornerVisits) {
+                apexVisits.filter { selectedCornerVisits.contains(it.cornerIndex to it.visitNumber) }
+            }
+
+
             // --- Filter samples based on selected corner/visit groups AND apex window ---
 // Now based purely on apex times, not on per-sample corner tags.
             val samplesForPlot =
@@ -342,13 +348,12 @@ fun EventViewerScreen(
                     val beforeMs = (beforeApexSeconds * 1000f).toLong()
                     val afterMs  = (afterApexSeconds * 1000f).toLong()
 
-                    val filtered = samplesForSelected.filter { sample ->
+                    samplesForSelected.filter { sample ->
                         // Include this sample if it falls within the [−before, +after] window
-                        // of ANY selected apex visit.
+                        // of ANY *selected* apex visit.
                         apexVisits.any { apex ->
                             val key = apex.cornerIndex to apex.visitNumber
                             if (!selectedCornerVisits.contains(key)) {
-                                // This apex group is not selected → ignore it
                                 return@any false
                             }
 
@@ -356,35 +361,39 @@ fun EventViewerScreen(
                             dt >= -beforeMs && dt <= afterMs
                         }
                     }
-
-                    if (filtered.isNotEmpty()) filtered else samplesForSelected
                 } else {
                     // No apexes or none selected → just show the whole event
                     samplesForSelected
                 }
 
 
+
             // Samples with time centered on apex (intervalMs becomes "delta ms from apex")
 // If we have no apex info, we just fall back to the original samplesForPlot.
 
+// Samples with time centered on the nearest selected apex.
+// We set intervalMs = (sample.intervalMs - apex.apexIntervalMs)
+// for whichever apex is closest in time.
             val samplesForTimePlot: List<EventSample> =
-                remember(samplesForPlot, apexByGroup) {
-                    if (apexByGroup.isEmpty()) {
+                remember(samplesForPlot, selectedApexesForTime) {
+                    if (selectedApexesForTime.isEmpty()) {
                         samplesForPlot
                     } else {
                         samplesForPlot.map { s ->
-                            val key = s.cornerIndex to s.visitNumber
-                            val apex = apexByGroup[key]
+                            val nearestApex = selectedApexesForTime.minByOrNull { apex ->
+                                kotlin.math.abs(s.intervalMs - apex.apexIntervalMs)
+                            }
 
-                            if (apex != null) {
-                                // Shift timestamp so 0 = apex
-                                s.copy(intervalMs = s.intervalMs - apex.apexIntervalMs)
+                            if (nearestApex != null) {
+                                val dt = s.intervalMs - nearestApex.apexIntervalMs
+                                s.copy(intervalMs = dt)
                             } else {
                                 s
                             }
                         }
                     }
                 }
+
 
 
 
