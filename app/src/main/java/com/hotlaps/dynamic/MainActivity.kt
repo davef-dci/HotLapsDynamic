@@ -1,78 +1,100 @@
 package com.hotlaps.dynamic
 
 import android.os.Bundle
+import android.content.pm.PackageManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.core.app.ActivityCompat
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.Divider
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.hotlaps.dynamic.model.Track
+import com.hotlaps.dynamic.ui.AddNewTrackScreen
+import com.hotlaps.dynamic.ui.CreateTrackFromCoordinatesScreen
+import com.hotlaps.dynamic.ui.DisclaimerScreen
+import com.hotlaps.dynamic.ui.EditTrackScreen
+import com.hotlaps.dynamic.ui.EventManagerScreen
+import com.hotlaps.dynamic.ui.EventViewerScreen
+import com.hotlaps.dynamic.ui.GGScreen
+import com.hotlaps.dynamic.ui.HelpAboutScreen
 import com.hotlaps.dynamic.ui.MainMenuDynamics
 import com.hotlaps.dynamic.ui.SplashDynamics
-import com.hotlaps.dynamic.ui.calibration.CalibrateScreen
-import com.hotlaps.dynamic.ui.settings.SettingsScreen
-import com.hotlaps.dynamic.ui.GGScreen
-import com.hotlaps.dynamic.ui.TrackAndCornerSetupScreen
-import com.hotlaps.dynamic.ui.AddNewTrackScreen
-import com.hotlaps.dynamic.ui.EventManagerScreen
-import com.hotlaps.dynamic.ui.CreateTrackFromCoordinatesScreen
-import com.hotlaps.dynamic.model.Track
-import com.hotlaps.dynamic.ui.TrackManagerScreen
-import androidx.lifecycle.viewmodel.compose.viewModel
-import com.hotlaps.dynamic.viewmodel.TrackSelectionViewModel
-import androidx.core.app.ActivityCompat
-import android.content.pm.PackageManager
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.Text
-import com.hotlaps.dynamic.viewmodel.DriveViewModel
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.runtime.LaunchedEffect
-import com.hotlaps.dynamic.ui.EventViewerScreen
-
-import androidx.compose.ui.Modifier
-import com.hotlaps.dynamic.ui.EditTrackScreen
-import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.rememberDrawerState
-import androidx.compose.ui.unit.dp
-import androidx.compose.runtime.rememberCoroutineScope
-import kotlinx.coroutines.launch
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
-import androidx.compose.material3.Divider
-import androidx.compose.foundation.background
-import androidx.compose.material3.Icon
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.res.painterResource
-import com.hotlaps.dynamic.ui.DisclaimerScreen
 import com.hotlaps.dynamic.ui.TeachCornersScreen
-import com.hotlaps.dynamic.ui.HelpAboutScreen
-
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.ui.unit.sp
+import com.hotlaps.dynamic.ui.TrackAndCornerSetupScreen
+import com.hotlaps.dynamic.ui.TrackManagerScreen
+import com.hotlaps.dynamic.ui.calibration.CalibrateScreen
 import com.hotlaps.dynamic.ui.help.HelpQuickStartScreen
 import com.hotlaps.dynamic.ui.help.HelpScreen
+import com.hotlaps.dynamic.ui.settings.SettingsScreen
+import com.hotlaps.dynamic.viewmodel.DriveViewModel
+import com.hotlaps.dynamic.viewmodel.TrackSelectionViewModel
+import kotlinx.coroutines.launch
 
+// ---------------------------------------------------------------------
+// Reusable drawer navigation item with bigger hit area & larger text
+// ---------------------------------------------------------------------
+@Composable
+fun DrawerNavItem(
+    label: String,
+    iconResId: Int,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(vertical = 14.dp, horizontal = 4.dp),  // bigger tap target
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            painter = painterResource(id = iconResId),
+            contentDescription = label,
+            tint = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.size(28.dp)   // bigger icon for in-car use
+        )
 
+        Spacer(Modifier.width(20.dp))
 
+        Text(
+            text = label,
+            fontSize = 22.sp,                // larger text for readability
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+    }
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-// Ask for GPS permission if not granted
-        if (ActivityCompat.checkSelfPermission(
+        // Ask for GPS permission if not granted
+        if (
+            ActivityCompat.checkSelfPermission(
                 this,
                 android.Manifest.permission.ACCESS_FINE_LOCATION
-            )
-            != PackageManager.PERMISSION_GRANTED
+            ) != PackageManager.PERMISSION_GRANTED
         ) {
             ActivityCompat.requestPermissions(
                 this,
@@ -81,18 +103,14 @@ class MainActivity : ComponentActivity() {
             )
         }
 
-
         setContent {
             HotLapsDynamicTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-
-                    // STEP 1: simple drawer state (we won't open it yet)
                     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
                     val scope = rememberCoroutineScope()
-
                     val nav = rememberNavController()
 
                     ModalNavigationDrawer(
@@ -104,7 +122,6 @@ class MainActivity : ComponentActivity() {
                                     .statusBarsPadding()
                                     .padding(24.dp)
                             ) {
-
                                 Text(
                                     text = "NAVIGATE",
                                     style = MaterialTheme.typography.labelLarge,
@@ -114,104 +131,49 @@ class MainActivity : ComponentActivity() {
                                 Divider()
                                 Spacer(modifier = Modifier.height(12.dp))
 
-
-                                Row(
-                                    modifier = Modifier
-                                        .clickable {
-                                            scope.launch {
-                                                drawerState.close()
-                                                nav.navigate("drive") {
-                                                    launchSingleTop = true
-                                                }
-                                            }
-                                        }
-                                        .padding(vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                // G-Force Map
+                                DrawerNavItem(
+                                    label = "G-Force Map",
+                                    iconResId = R.drawable.ggmap
                                 ) {
-                                    Icon(
-                                        painter = painterResource(id = R.drawable.ggmap),
-                                        contentDescription = "G-Force Map",
-                                        tint = MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-
-                                    Spacer(modifier = Modifier.width(16.dp))
-
-                                    Text(
-                                        text = "G-Force Map",
-                                        fontSize = 20.sp,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
+                                    scope.launch {
+                                        drawerState.close()
+                                        nav.navigate("drive") {
+                                            launchSingleTop = true
+                                        }
+                                    }
                                 }
 
-
-                                Row(
-                                    modifier = Modifier
-                                        .clickable {
-                                            scope.launch {
-                                                drawerState.close()
-                                                nav.navigate("trackSetup") {
-                                                    launchSingleTop = true
-                                                }
-                                            }
-                                        }
-                                        .padding(vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                // Tracks
+                                DrawerNavItem(
+                                    label = "Tracks",
+                                    iconResId = R.drawable.track
                                 ) {
-                                    Icon(
-                                        painter = painterResource(id = R.drawable.track),
-                                        contentDescription = "Tracks",
-                                        tint = MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-
-                                    Spacer(modifier = Modifier.width(16.dp))
-
-                                    Text(
-                                        text = "Tracks",
-                                        fontSize = 20.sp,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
+                                    scope.launch {
+                                        drawerState.close()
+                                        nav.navigate("trackSetup") {
+                                            launchSingleTop = true
+                                        }
+                                    }
                                 }
 
-
-                                Row(
-                                    modifier = Modifier
-                                        .clickable {
-                                            scope.launch {
-                                                drawerState.close()
-                                                nav.navigate("eventManager") {
-                                                    launchSingleTop = true
-                                                }
-                                            }
-                                        }
-                                        .padding(vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                // Events
+                                DrawerNavItem(
+                                    label = "Events",
+                                    iconResId = R.drawable.event
                                 ) {
-                                    Icon(
-                                        painter = painterResource(id = R.drawable.event),
-                                        contentDescription = "Events",
-                                        tint = MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-
-                                    Spacer(modifier = Modifier.width(16.dp))
-
-                                    Text(
-                                        text = "Events",
-                                        fontSize = 20.sp,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
+                                    scope.launch {
+                                        drawerState.close()
+                                        nav.navigate("eventManager") {
+                                            launchSingleTop = true
+                                        }
+                                    }
                                 }
 
-                                Text(
-                                    text = "Calibrate accelerometers",
-                                    fontSize = 20.sp,
-                                    style = MaterialTheme.typography.bodyLarge,
+                                // Calibrate (shortened label, bigger tap target)
+                                Row(
                                     modifier = Modifier
+                                        .fillMaxWidth()
                                         .clickable {
                                             scope.launch {
                                                 drawerState.close()
@@ -220,21 +182,28 @@ class MainActivity : ComponentActivity() {
                                                 }
                                             }
                                         }
-                                        .padding(vertical = 8.dp)
-                                )
+                                        .padding(vertical = 14.dp, horizontal = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Calibrate",
+                                        fontSize = 22.sp,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
 
-                                // --- NEW DIVIDER ---
+                                // Divider between primary nav and help
                                 Divider(
                                     modifier = Modifier
                                         .padding(vertical = 8.dp),
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
                                 )
 
-                                Text(
-                                    text = "Help",
-                                    fontSize = 20.sp,
-                                    style = MaterialTheme.typography.bodyLarge,
+                                // Help (also larger)
+                                Row(
                                     modifier = Modifier
+                                        .fillMaxWidth()
                                         .clickable {
                                             scope.launch {
                                                 drawerState.close()
@@ -243,21 +212,23 @@ class MainActivity : ComponentActivity() {
                                                 }
                                             }
                                         }
-                                        .padding(vertical = 8.dp)
-                                )
-
-
-
+                                        .padding(vertical = 14.dp, horizontal = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Help",
+                                        fontSize = 22.sp,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
                             }
                         }
-
                     ) {
-
-
                         // Create ONE shared ViewModel for the whole app
                         val trackSelectionViewModel: TrackSelectionViewModel = viewModel()
 
-                        // ViewModel that manages event recording & GPS/corner logic (later)
+                        // ViewModel that manages event recording & GPS/corner logic
                         val driveViewModel: DriveViewModel = viewModel()
 
                         val context = LocalContext.current
@@ -266,9 +237,7 @@ class MainActivity : ComponentActivity() {
                             driveViewModel.setAppContext(context)
                         }
 
-
                         NavHost(navController = nav, startDestination = "splash") {
-
                             composable("splash") {
                                 SplashDynamics(
                                     onFinished = {
@@ -289,28 +258,20 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
 
-
                             composable("menu") {
-
-                                val context = LocalContext.current
-
                                 MainMenuDynamics(
                                     onOpenDrawer = {
                                         scope.launch {
                                             drawerState.open()
                                         }
                                     },
-                                    onDrive = {
-                                        nav.navigate("drive")
-                                    },
+                                    onDrive = { nav.navigate("drive") },
                                     onTrackManager = { nav.navigate("trackSetup") },
                                     onEventManager = { nav.navigate("eventManager") },
                                     onCalibrate = { nav.navigate("calib") },
                                     onSettings = { nav.navigate("settings") }
                                 )
                             }
-
-
 
                             composable("drive") {
                                 GGScreen(
@@ -330,7 +291,6 @@ class MainActivity : ComponentActivity() {
                                             }
                                         }
                                     },
-
                                     onOpenCalibrate = {
                                         scope.launch {
                                             drawerState.close()
@@ -339,16 +299,13 @@ class MainActivity : ComponentActivity() {
                                             }
                                         }
                                     }
-
                                 )
                             }
 
-
-
-// Track menu
+                            // Track menu
                             composable("trackSetup") {
                                 TrackAndCornerSetupScreen(
-                                    onBack = { nav.popBackStack() },   // still here, even though we’re not using it now
+                                    onBack = { nav.popBackStack() },
                                     onAddNewTrack = { nav.navigate("addTrack") },
                                     onManageTracks = { nav.navigate("trackManager") },
                                     onOpenDrawer = {
@@ -367,18 +324,13 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
 
-
-
-
                             composable("addTrack") {
                                 AddNewTrackScreen(
                                     onBack = { nav.popBackStack() },
                                     onCreateFromCoordinates = {
-                                        // Navigate to our screen where we enter coords manually
                                         nav.navigate("createTrackFromCoordinates")
                                     },
                                     onTeachCorners = {
-                                        // 🚗 New: navigate to our Teach Corners screen (to be created next)
                                         nav.navigate("teachCorners")
                                     }
                                 )
@@ -397,12 +349,9 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
 
-
-
-
                             composable("eventManager") {
                                 EventManagerScreen(
-                                    onBack = { nav.popBackStack() },  // still here if we decide to use it later
+                                    onBack = { nav.popBackStack() },
                                     onViewEvents = { nav.navigate("eventViewer") },
                                     onOpenDrawer = {
                                         scope.launch {
@@ -420,15 +369,11 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
 
-
-
                             composable("eventViewer") {
                                 EventViewerScreen(
                                     onBack = { nav.popBackStack() }
                                 )
                             }
-
-
 
                             composable("calib") {
                                 CalibrateScreen(onBack = { nav.popBackStack() })
@@ -442,7 +387,7 @@ class MainActivity : ComponentActivity() {
                                 TrackManagerScreen(
                                     trackSelectionViewModel = trackSelectionViewModel,
                                     onBack = { nav.popBackStack() },
-                                    onUseTrack = { track: Track ->
+                                    onUseTrack = { _: Track ->
                                         nav.navigate("drive")
                                     },
                                     onEditTrack = { track: Track ->
@@ -465,13 +410,11 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
 
-
                             composable("editTrack") {
                                 val trackToEdit = trackSelectionViewModel.trackBeingEdited
 
                                 if (trackToEdit == null) {
-                                    // Failsafe: shouldn’t normally happen, but don’t pop again
-                                    androidx.compose.material3.Text("No track selected for editing.")
+                                    Text("No track selected for editing.")
                                 } else {
                                     EditTrackScreen(
                                         track = trackToEdit,
@@ -487,7 +430,6 @@ class MainActivity : ComponentActivity() {
                                 HelpAboutScreen()
                             }
 
-
                             composable("help") {
                                 HelpScreen(
                                     onBack = { nav.popBackStack() },
@@ -499,15 +441,11 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
 
-
                             composable("helpQuickStart") {
                                 HelpQuickStartScreen(
                                     onBack = { nav.popBackStack() }
                                 )
                             }
-
-
-
                         }
                     }
                 }
