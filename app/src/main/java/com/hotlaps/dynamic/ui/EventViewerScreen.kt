@@ -340,6 +340,9 @@ fun EventViewerScreen(
             }
 
 
+
+
+
             // --- Filter samples based on selected corner/visit groups AND apex window ---
 // Now based purely on apex times, not on per-sample corner tags.
             val samplesForPlot =
@@ -365,15 +368,9 @@ fun EventViewerScreen(
                     samplesForSelected
                 }
 
-
-
-            // Samples with time centered on apex (intervalMs becomes "delta ms from apex")
-// If we have no apex info, we just fall back to the original samplesForPlot.
-
-// Samples with time centered on the nearest selected apex.
-// We set intervalMs = (sample.intervalMs - apex.apexIntervalMs)
-// for whichever apex is closest in time.
-            val samplesForTimePlot: List<EventSample> =
+// Give each sample a (cornerIndex, visitNumber) based on the nearest selected apex.
+// This lets the plot logic know which visit each point belongs to.
+            val samplesForPlotGrouped: List<EventSample> =
                 remember(samplesForPlot, selectedApexesForTime) {
                     if (selectedApexesForTime.isEmpty()) {
                         samplesForPlot
@@ -384,7 +381,40 @@ fun EventViewerScreen(
                             }
 
                             if (nearestApex != null) {
-                                val dt = s.intervalMs - nearestApex.apexIntervalMs
+                                s.copy(
+                                    cornerIndex = nearestApex.cornerIndex,
+                                    visitNumber = nearestApex.visitNumber,
+                                    cornerName = nearestApex.cornerName.ifBlank {
+                                        "Corner ${nearestApex.cornerIndex}"
+                                    }
+                                )
+                            } else {
+                                s
+                            }
+                        }
+                    }
+                }
+
+
+
+
+            // Samples with time centered on apex (intervalMs becomes "delta ms from apex")
+// If we have no apex info, we just fall back to the original samplesForPlot.
+
+// Samples with time centered on the nearest selected apex.
+// We set intervalMs = (sample.intervalMs - apex.apexIntervalMs)
+// for whichever apex is closest in time.
+            val samplesForTimePlot: List<EventSample> =
+                remember(samplesForPlotGrouped, apexByGroup) {
+                    if (apexByGroup.isEmpty()) {
+                        samplesForPlotGrouped
+                    } else {
+                        samplesForPlotGrouped.map { s ->
+                            val key = s.cornerIndex to s.visitNumber
+                            val apex = apexByGroup[key]
+
+                            if (apex != null) {
+                                val dt = s.intervalMs - apex.apexIntervalMs
                                 s.copy(intervalMs = dt)
                             } else {
                                 s
@@ -424,7 +454,7 @@ fun EventViewerScreen(
                         Spacer(Modifier.height(8.dp))
 
                         SimpleGGPlot(
-                            samples = samplesForPlot,
+                            samples = samplesForPlotGrouped,
                             colorForSample = { sample ->
                                 val key = sample.cornerIndex to sample.visitNumber
                                 cornerVisitColors[key] ?: neutralSampleColor
@@ -1044,24 +1074,29 @@ fun GTimePlot(
             // --- Helper to draw a polyline for a given G component ---
             fun drawSeries(selectG: (EventSample) -> Float, color: Color) {
                 var lastPoint: Offset? = null
+                var lastKey: Pair<Int, Int>? = null   // (cornerIndex, visitNumber)
 
                 samples.forEach { s ->
                     val x = xFor(s.intervalMs)
                     val y = yFor(selectG(s))
                     val p = Offset(x, y)
 
-                    lastPoint?.let { prev ->
+                    val key = s.cornerIndex to s.visitNumber
+
+                    if (lastPoint != null && lastKey == key) {
                         drawLine(
                             color = color,
-                            start = prev,
+                            start = lastPoint!!,
                             end = p,
                             strokeWidth = 2.dp.toPx()
                         )
                     }
 
                     lastPoint = p
+                    lastKey = key
                 }
             }
+
 
             // Longitudinal first, then lateral
             drawSeries(selectG = { it.longG }, color = longColor)
