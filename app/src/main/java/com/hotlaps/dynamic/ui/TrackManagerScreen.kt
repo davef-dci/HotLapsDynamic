@@ -1,32 +1,30 @@
 package com.hotlaps.dynamic.ui
 
+import android.util.Log
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import android.util.Log
 import com.hotlaps.dynamic.data.TrackStorage
 import com.hotlaps.dynamic.data.TrackStorage.TrackWithFile
 import com.hotlaps.dynamic.model.Track
 import com.hotlaps.dynamic.viewmodel.TrackSelectionViewModel
-import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.Settings
-
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TrackManagerScreen(
-    trackSelectionViewModel: TrackSelectionViewModel,
+    trackSelectionViewModel: TrackSelectionViewModel, // currently unused, kept to avoid breaking callers
     modifier: Modifier = Modifier,
     onBack: () -> Unit,
-    onUseTrack: (Track) -> Unit,
+    onUseTrack: (Track) -> Unit,                      // currently unused, kept to avoid breaking callers
     onEditTrack: (Track) -> Unit,
     onOpenDrawer: () -> Unit,
     onOpenSettings: () -> Unit
@@ -55,7 +53,7 @@ fun TrackManagerScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Track Manager") },
+                title = { Text("Manage Tracks") },
                 navigationIcon = {
                     IconButton(onClick = onOpenDrawer) {
                         Icon(
@@ -73,7 +71,6 @@ fun TrackManagerScreen(
                     }
                 }
             )
-
         }
     ) { innerPadding ->
         Box(
@@ -106,8 +103,6 @@ fun TrackManagerScreen(
                         items(tracks, key = { it.id }) { trackWithFile ->
                             TrackRow(
                                 trackWithFile = trackWithFile,
-                                trackSelectionViewModel = trackSelectionViewModel,
-                                onUseTrack = onUseTrack,
                                 onEditTrack = onEditTrack,
                                 onDelete = {
                                     trackToDelete = trackWithFile
@@ -146,9 +141,6 @@ fun TrackManagerScreen(
                     }
                 )
             }
-
-
-
         }
     }
 }
@@ -156,8 +148,6 @@ fun TrackManagerScreen(
 @Composable
 private fun TrackRow(
     trackWithFile: TrackWithFile,
-    trackSelectionViewModel: TrackSelectionViewModel,
-    onUseTrack: (Track) -> Unit,
     onEditTrack: (Track) -> Unit,
     onDelete: () -> Unit
 ) {
@@ -187,29 +177,15 @@ private fun TrackRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-
-
-                Button(
-                    onClick = {
-                        // STEP A: save the selected track globally
-                        trackSelectionViewModel.selectTrack(trackWithFile.track)
-
-                        // STEP B: notify MainActivity (it will navigate to Drive)
-                        onUseTrack(trackWithFile.track)
-                    }
-                ) {
-                    Text("Use Track")
-                }
-
-
-
-
+                // Edit button
                 OutlinedButton(
                     onClick = { onEditTrack(track) },
                     modifier = Modifier.weight(1f)
                 ) {
                     Text("Edit")
                 }
+
+                // Delete button
                 TextButton(
                     onClick = onDelete,
                     modifier = Modifier.weight(1f)

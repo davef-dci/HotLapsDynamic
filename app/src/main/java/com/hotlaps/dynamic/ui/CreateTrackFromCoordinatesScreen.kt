@@ -231,47 +231,6 @@ fun CreateTrackFromCoordinatesScreen(
             }
             Spacer(Modifier.height(16.dp))
 
-// --- Delete all saved tracks (debug) ---
-            Button(
-                onClick = {
-                    try {
-                        val tracksDir = File(context.getExternalFilesDir(null), "tracks")
-                        if (!tracksDir.exists()) {
-                            Toast.makeText(context, "No tracks directory found", Toast.LENGTH_SHORT).show()
-                            println("DeleteTracks: tracks directory does not exist")
-                            return@Button
-                        }
-
-                        val files = tracksDir.listFiles()?.toList().orEmpty()
-                        if (files.isEmpty()) {
-                            Toast.makeText(context, "No saved tracks to delete", Toast.LENGTH_SHORT).show()
-                            println("DeleteTracks: no files found in ${tracksDir.absolutePath}")
-                            return@Button
-                        }
-
-                        var deletedCount = 0
-                        files.forEach { f ->
-                            println("DeleteTracks: deleting ${f.absolutePath}")
-                            if (f.delete()) {
-                                deletedCount++
-                            } else {
-                                println("DeleteTracks: FAILED to delete ${f.absolutePath}")
-                            }
-                        }
-
-                        Toast.makeText(context, "Deleted $deletedCount track file(s)", Toast.LENGTH_SHORT).show()
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                        Toast.makeText(context, "Error deleting tracks", Toast.LENGTH_SHORT).show()
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Delete All Saved Tracks (Debug)")
-            }
-
-            Spacer(Modifier.height(24.dp))
-
             Text(
                 text = "Tracks are saved under Android/data/com.hotlaps.dynamic/files/tracks on your device.",
                 style = MaterialTheme.typography.bodySmall
