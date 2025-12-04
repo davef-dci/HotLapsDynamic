@@ -321,12 +321,20 @@ fun GGScreen(
         val listener = LocationListener { loc: Location ->
             val lat = loc.latitude
             val lon = loc.longitude
+            val speedMps: Double? =
+                if (loc.hasSpeed()) loc.speed.toDouble() else null
 
-            gpsLat = lat      // keep UI copy for now
+            gpsLat = lat   // UI only
             gpsLon = lon
 
-            driveViewModel.updateGps(lat, lon)   // send to ViewModel
+            // Send all 3 to the ViewModel
+            driveViewModel.updateGps(
+                lat = lat,
+                lon = lon,
+                speedMps = speedMps
+            )
         }
+
 
         try {
             if (

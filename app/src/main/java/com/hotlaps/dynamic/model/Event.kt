@@ -54,6 +54,9 @@ data class EventSample(
     val gpsLat: Double = 0.0,
     val gpsLon: Double = 0.0,
 
+    // NEW: forward speed in meters/second (may be null for old data / missing GPS)
+    val speedMps: Double? = null,
+
     // Nearest corner at this instant (by index and distance)
     val closestCornerIndex: Int = 0,
     val distanceToClosestCornerM: Double = 0.0,

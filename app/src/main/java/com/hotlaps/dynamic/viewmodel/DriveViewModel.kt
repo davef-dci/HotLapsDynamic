@@ -310,6 +310,11 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
         cornerVisitCounts.clear()
         cornerVisits.clear()
         perCornerState.clear()
+
+        // NEW: reset distance-based apex state as well
+        geoVisitStates.clear()
+        activeCornerDistanceSamples.clear()
+        lastDistanceSampledM = null
     }
 
 
@@ -325,6 +330,11 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
     activeVisitEndUtcMs = 0L
     perCornerState.clear()
         currentTrack = null
+
+        // NEW: also clear geo/apex state on stop, just to be safe
+        geoVisitStates.clear()
+        activeCornerDistanceSamples.clear()
+        lastDistanceSampledM = null
 
     }
 
@@ -365,10 +375,28 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
     private val _gpsLon = MutableStateFlow(0.0)
     val gpsLon: StateFlow<Double> get() = _gpsLon
 
+    // Forward speed in m/s (smoothed)
+    private val _speedMps = MutableStateFlow(0.0)
+    val speedMps: StateFlow<Double> get() = _speedMps
+
+    // Optionally keep the most recent raw GPS speed (for debugging if you like)
+    // private val _rawSpeedMps = MutableStateFlow<Double?>(null)
+
+
     // Called when GGScreen receives a new GPS update
-    fun updateGps(lat: Double, lon: Double) {
+    fun updateGps(lat: Double, lon: Double, speedMps: Double? = null) {
         _gpsLat.value = lat
         _gpsLon.value = lon
+
+        if (speedMps != null && speedMps >= 0.0) {
+            val alpha = 0.4  // EMA smoothing factor
+            val prev = _speedMps.value
+            val smoothed =
+                if (prev <= 0.0) speedMps
+                else alpha * speedMps + (1.0 - alpha) * prev
+
+            _speedMps.value = smoothed
+        }
     }
 
     // ------------------------
@@ -593,14 +621,16 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
             eventName = eventNameForSample,
             gpsLat = gpsLat.value,
             gpsLon = gpsLon.value,
+            speedMps = _speedMps.value,   // <- NEW: smoothed speed in m/s
             closestCornerIndex = closestCornerIndex,
             distanceToClosestCornerM = distanceToClosestCornerM,
             rawLatG = rawLat,
             rawLongG = rawLong,
-                    // New fields – for now all samples start as non-apex, no relative time
+            // New fields – for now all samples start as non-apex, no relative time
             isApexSample = false,
             timeFromApexMs = null
         )
+
 
         if (::appContext.isInitialized) {
             EventStorage.appendSample(

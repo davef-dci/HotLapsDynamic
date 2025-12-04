@@ -76,7 +76,7 @@ object EventStorage {
                         "intervalMs,utcMs,localTime,trackName,eventName," +
                                 "cornerIndex,cornerName,visitNumber,latG,longG,zG,gSum,gpsLat,gpsLon," +
                                 "insideCornerTrigger,closestCornerIndex,distanceToClosestCornerM," +
-                                "rawLatG,rawLongG,isApexSample,timeFromApexMs\n"
+                                "rawLatG,rawLongG,isApexSample,timeFromApexMs,speed\n"
                     )
                 }
 
@@ -98,6 +98,9 @@ object EventStorage {
                     } else {
                         "No"
                     }
+
+                val speedStr = sample.speedMps?.toString() ?: ""
+
 
                 // Write one CSV line for this sample
                 val line = buildString {
@@ -141,7 +144,10 @@ object EventStorage {
 
                     // NEW: apex flags/relative time
                     append(sample.isApexSample); append(',')
-                    append(sample.timeFromApexMs ?: "")
+                    append(sample.timeFromApexMs ?: ""); append(',')
+
+                    // speed (m/s)
+                    append(speedStr)
 
                     append('\n')
                 }
@@ -297,8 +303,8 @@ object EventStorage {
                 if (line.isBlank()) continue
 
                 val parts = line.split(',')
-                // We expect the full 21-column format written by appendSample()
-                if (parts.size < 21) continue
+                // We expect the full 22-column format written by appendSample()
+                if (parts.size < 22) continue
 
                 // Column indices must match appendSample's header
                 val intervalMs     = parts[0].toLongOrNull() ?: continue
@@ -332,6 +338,7 @@ object EventStorage {
 
                 val isApexSample   = parts[19].equals("true", ignoreCase = true)
                 val timeFromApexMs = parts[20].toLongOrNull()
+                val speedMps       = parts[21].toDoubleOrNull()
 
                 val sample = EventSample(
                     eventId = 0L,   // arbitrary when loading loose CSV
@@ -348,6 +355,7 @@ object EventStorage {
                     eventName = eventName,
                     gpsLat = gpsLat,
                     gpsLon = gpsLon,
+                    speedMps = speedMps,
                     closestCornerIndex = closestCornerIndex,
                     distanceToClosestCornerM = distanceToClosestCornerM,
                     rawLatG = rawLatG,
