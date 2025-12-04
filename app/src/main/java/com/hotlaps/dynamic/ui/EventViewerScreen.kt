@@ -59,8 +59,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.sp
 import com.hotlaps.dynamic.ui.ChartMode
-
-
+import kotlin.math.ceil
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -808,6 +807,16 @@ fun GTimePlot(
         }
     }
 
+    val axisLabelPaint = remember(labelTextSizePx, axisColor) {
+        AndroidPaint().apply {
+            isAntiAlias = true
+            textSize = labelTextSizePx
+            color = axisColor.toArgb()
+            textAlign = android.graphics.Paint.Align.LEFT    // we’ll change this as needed
+        }
+    }
+
+
 
     Box(
         modifier = Modifier
@@ -826,16 +835,31 @@ fun GTimePlot(
             val maxT = samples.maxOf { it.intervalMs }.toFloat()
             val spanT = (maxT - minT).coerceAtLeast(1f)
 
+
+
+
+
 // --- G range (symmetric around 0) ---
+
+
+// --- G range (symmetric around 0), auto-scaled in 0.25G steps ---
             val rawMaxG = samples.maxOf { max(abs(it.latG), abs(it.longG)) }
-            val maxG = when {
-                rawMaxG <= 0f -> 0.5f
-                rawMaxG < 0.5f -> 0.5f
-                else -> rawMaxG * 1.1f
+            val step = 0.25f
+
+            val maxG = if (rawMaxG <= 0f) {
+                step                    // fall back to ±0.25G if everything is basically zero
+            } else {
+                val steps = ceil(rawMaxG / step.toDouble()).toFloat()
+                steps * step            // e.g. 0.15 -> 0.25, 0.62 -> 0.75, 0.91 -> 1.0
             }
 
             val midY = h / 2f
-            val gBand = h * 0.4f // 80% of height for ±maxG
+            val gBand = h * 0.45f // 90% of height (±0.45h)
+
+
+
+
+
 
             fun xFor(tMs: Long): Float {
                 val t = tMs.toFloat()
@@ -850,6 +874,28 @@ fun GTimePlot(
             }
 
             val stroke = 1.dp.toPx()
+
+
+            val xLabelInset = 4.dp.toPx()
+            val bottomInset = 2.dp.toPx()
+
+// --- Horizontal Grid Lines Every 0.25G ---
+            val stepG = 0.25f
+            val numSteps = (maxG / stepG).toInt()
+
+            for (i in -numSteps..numSteps) {
+                val gVal = i * stepG
+                val y = yFor(gVal)
+
+                // Light horizontal line
+                drawLine(
+                    color = axisColor.copy(alpha = 0.2f),
+                    start = Offset(0f, y),
+                    end = Offset(size.width, y),
+                    strokeWidth = stroke
+                )
+            }
+
 
             val nativeCanvas = drawContext.canvas.nativeCanvas
 
@@ -897,6 +943,85 @@ fun GTimePlot(
                 end = Offset(w, h),
                 strokeWidth = stroke
             )
+
+            // --- Y-axis labels at +maxG, 0, -maxG ---
+            axisLabelPaint.textAlign = AndroidPaint.Align.LEFT
+
+            val yMax = yFor(maxG)
+            val yZero = yFor(0f)
+            val yMin = yFor(-maxG)
+
+// Light grid lines at ±maxG
+            drawLine(
+                color = axisColor.copy(alpha = 0.3f),
+                start = Offset(0f, yMax),
+                end = Offset(size.width, yMax),
+                strokeWidth = stroke
+            )
+            drawLine(
+                color = axisColor.copy(alpha = 0.3f),
+                start = Offset(0f, yMin),
+                end = Offset(size.width, yMin),
+                strokeWidth = stroke
+            )
+
+// Numeric labels on the left
+            nativeCanvas.drawText(
+                String.format("%.2fG", maxG),
+                xLabelInset,
+                yMax - 2.dp.toPx(),
+                axisLabelPaint
+            )
+            nativeCanvas.drawText(
+                "0",
+                xLabelInset,
+                yZero - 2.dp.toPx(),
+                axisLabelPaint
+            )
+            nativeCanvas.drawText(
+                String.format("-%.2fG", maxG),
+                xLabelInset,
+                yMin - 2.dp.toPx(),
+                axisLabelPaint
+            )
+
+
+            // --- X-axis labels at left, 0 (if in range), right ---
+            axisLabelPaint.textAlign = AndroidPaint.Align.CENTER
+
+            val minSec = minT / 1000f
+            val maxSec = maxT / 1000f
+
+// Left edge (start of window)
+            val xMin = xFor(minT.toLong())
+            nativeCanvas.drawText(
+                String.format("%.1f", minSec),
+                xMin,
+                size.height - bottomInset,
+                axisLabelPaint
+            )
+
+// 0s (apex) if it lies within the current window
+            if (minT <= 0f && maxT >= 0f) {
+                val xZero = xFor(0L)
+                nativeCanvas.drawText(
+                    "0",
+                    xZero,
+                    size.height - bottomInset,
+                    axisLabelPaint
+                )
+            }
+
+// Right edge (end of window)
+            val xMax = xFor(maxT.toLong())
+            nativeCanvas.drawText(
+                String.format("%.1f", maxSec),
+                xMax,
+                size.height - bottomInset,
+                axisLabelPaint
+            )
+
+
 
             // Optional reference lines at ±1.0g
             if (maxG >= 1f) {
