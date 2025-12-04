@@ -15,9 +15,6 @@ data class Corner(
     val lat: Double,
     val lon: Double,
 
-    // Capture window around the apex, in milliseconds
-    val captureBeforeMs: Int,
-    val captureAfterMs: Int
 )
 
 // Represents an entire track (Road America, Blackhawk, etc.)

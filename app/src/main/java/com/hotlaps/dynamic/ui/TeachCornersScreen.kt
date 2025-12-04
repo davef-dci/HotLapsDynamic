@@ -34,9 +34,6 @@ fun TeachCornersScreen(
     // --- Track-level state ---
     var trackName by remember { mutableStateOf("") }
 
-    // Capture window settings (ms) – editable by the user
-    var captureBeforeMsText by remember { mutableStateOf("5000") }
-    var captureAfterMsText by remember { mutableStateOf("5000") }
 
     // List of corners recorded so far in this session
     val corners = remember { mutableStateListOf<Corner>() }
@@ -100,18 +97,13 @@ fun TeachCornersScreen(
 
         val nextIndex = corners.size + 1
 
-        // Parse capture windows, falling back to sensible defaults if bad input
-        val beforeMs = captureBeforeMsText.toIntOrNull() ?: 5000
-        val afterMs = captureAfterMsText.toIntOrNull() ?: 5000
 
         corners += Corner(
             index = nextIndex,
             officialNumber = null,
             name = null,
             lat = lat,
-            lon = lon,
-            captureBeforeMs = beforeMs,
-            captureAfterMs = afterMs
+            lon = lon
         )
 
         Toast.makeText(context, "Recorded Corner $nextIndex", Toast.LENGTH_SHORT).show()
@@ -195,32 +187,6 @@ fun TeachCornersScreen(
 
             Spacer(Modifier.height(24.dp))
 
-            // --- CAPTURE WINDOW SETTINGS ---
-            Text(
-                text = "Capture window around apex (milliseconds):",
-                style = MaterialTheme.typography.titleSmall
-            )
-            Spacer(Modifier.height(8.dp))
-
-            OutlinedTextField(
-                value = captureBeforeMsText,
-                onValueChange = { captureBeforeMsText = it },
-                label = { Text("Capture BEFORE apex (ms)") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(Modifier.height(12.dp))
-
-            OutlinedTextField(
-                value = captureAfterMsText,
-                onValueChange = { captureAfterMsText = it },
-                label = { Text("Capture AFTER apex (ms)") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(Modifier.height(24.dp))
 
             // --- CURRENT GPS ---
             Text(
@@ -257,9 +223,10 @@ fun TeachCornersScreen(
                 val cLon = String.format("%.6f", corner.lon)
 
                 Text(
-                    text = "Corner ${corner.index}:  $cLat, $cLon  (before=${corner.captureBeforeMs}ms, after=${corner.captureAfterMs}ms)",
+                    text = "Corner ${corner.index}:  $cLat, $cLon",
                     style = MaterialTheme.typography.bodySmall
                 )
+
                 Spacer(Modifier.height(6.dp))
             }
 

@@ -151,8 +151,6 @@ object TrackStorage {
             }
             c.put("lat", corner.lat)
             c.put("lon", corner.lon)
-            c.put("captureBeforeMs", corner.captureBeforeMs)
-            c.put("captureAfterMs", corner.captureAfterMs)
             cornersArray.put(c)
         }
         root.put("corners", cornersArray)
@@ -193,9 +191,7 @@ object TrackStorage {
                 officialNumber = officialNumber,
                 name = cornerName,
                 lat = lat,
-                lon = lon,
-                captureBeforeMs = beforeMs,
-                captureAfterMs = afterMs
+                lon = lon
             )
         }
 

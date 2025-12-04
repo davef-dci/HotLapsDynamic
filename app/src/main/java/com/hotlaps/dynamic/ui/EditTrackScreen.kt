@@ -36,8 +36,6 @@ fun EditTrackScreen(
 
 {
     val context = LocalContext.current
-    val cornerOverrides = remember {
-        mutableStateMapOf<Int, Pair<Int, Int>>()}
 
     val latLonOverrides = remember {
         mutableStateMapOf<Int, Pair<Double, Double>>()
@@ -66,18 +64,11 @@ fun EditTrackScreen(
                         onClick = {
                             // Build new list of corners using overrides where present
                             val updatedCorners = track.corners.map { corner ->
-                                val override = cornerOverrides[corner.index]
                                 val latLonOverride = latLonOverrides[corner.index]
                                 val nameOverride = nameOverrides[corner.index]
 
                                 var updated = corner
 
-                                if (override != null) {
-                                    updated = updated.copy(
-                                        captureBeforeMs = override.first,
-                                        captureAfterMs = override.second
-                                    )
-                                }
 
                                 if (latLonOverride != null) {
                                     updated = updated.copy(
@@ -132,20 +123,14 @@ fun EditTrackScreen(
                 modifier = Modifier.fillMaxSize()
             ) {
                 items(track.corners) { corner ->
-                    val override = cornerOverrides[corner.index]
                     val latLonOverride = latLonOverrides[corner.index]
                     val nameOverride = nameOverrides[corner.index]
 
                     CornerSummaryCard(
                         corner = corner,
-                        overrideBeforeMs = override?.first,
-                        overrideAfterMs = override?.second,
                         overrideLat = latLonOverride?.first,
                         overrideLon = latLonOverride?.second,
                         overrideName = nameOverride,
-                        onValuesChange = { beforeMs, afterMs ->
-                            cornerOverrides[corner.index] = beforeMs to afterMs
-                        },
                         onLatLonChange = { lat, lon ->
                             latLonOverrides[corner.index] = lat to lon
                         },
@@ -153,6 +138,7 @@ fun EditTrackScreen(
                             nameOverrides[corner.index] = newName
                         }
                     )
+
                 }
 
 
@@ -166,35 +152,18 @@ fun EditTrackScreen(
 @Composable
 private fun CornerSummaryCard(
     corner: Corner,
-    overrideBeforeMs: Int?,
-    overrideAfterMs: Int?,
     overrideLat: Double?,
     overrideLon: Double?,
-    overrideName: String?,                // ← ADD THIS LINE
-    onValuesChange: (beforeMs: Int, afterMs: Int) -> Unit,
+    overrideName: String?,
     onLatLonChange: (lat: Double, lon: Double) -> Unit,
     onNameChange: (name: String) -> Unit
 )
 
 
 {
-    var beforeText by remember(
-        corner.index,
-        overrideBeforeMs
-    ) {
-        mutableStateOf(
-            (overrideBeforeMs ?: corner.captureBeforeMs).toString()
-        )
-    }
 
-    var afterText by remember(
-        corner.index,
-        overrideAfterMs
-    ) {
-        mutableStateOf(
-            (overrideAfterMs ?: corner.captureAfterMs).toString()
-        )
-    }
+
+
 
     var latText by remember(
         corner.index,
@@ -217,9 +186,7 @@ private fun CornerSummaryCard(
 
 
 
-    // Safely parse the text into Ints (or fall back to the original values)
-    val beforeMs: Int = beforeText.toIntOrNull() ?: corner.captureBeforeMs
-    val afterMs: Int = afterText.toIntOrNull() ?: corner.captureAfterMs
+
 
     val latValue: Double = latText.toDoubleOrNull() ?: corner.lat
     val lonValue: Double = lonText.toDoubleOrNull() ?: corner.lon
@@ -301,37 +268,9 @@ private fun CornerSummaryCard(
             Spacer(Modifier.height(8.dp))
 
 
-            OutlinedTextField(
-                value = beforeText,
-                onValueChange = { newText ->
-                    beforeText = newText
-                    val beforeMs = newText.toIntOrNull()
-                    val afterMs = afterText.toIntOrNull()
-                    if (beforeMs != null && afterMs != null) {
-                        onValuesChange(beforeMs, afterMs)
-                    }
-                },
-                label = { Text("Capture Before (ms)") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
 
             Spacer(Modifier.height(8.dp))
 
-            OutlinedTextField(
-                value = afterText,
-                onValueChange = { newText ->
-                    afterText = newText
-                    val beforeMs = beforeText.toIntOrNull()
-                    val afterMs = newText.toIntOrNull()
-                    if (beforeMs != null && afterMs != null) {
-                        onValuesChange(beforeMs, afterMs)
-                    }
-                },
-                label = { Text("Capture After (ms)") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
         }
     }
 }

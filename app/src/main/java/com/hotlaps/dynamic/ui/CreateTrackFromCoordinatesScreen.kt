@@ -26,13 +26,12 @@ import com.hotlaps.dynamic.data.TrackStorage
 // Local UI-only state holder for one corner row in the form.
 // We keep everything as strings for now; we'll parse to numbers on Save.
 private data class CornerFormState(
-    val index: Int,           // 1, 2, 3, ...
+    val index: Int,
     val name: String = "",
     val latText: String = "",
-    val lonText: String = "",
-    val beforeMsText: String = "2000",
-    val afterMsText: String = "1000"
+    val lonText: String = ""
 )
+
 
 
 
@@ -156,31 +155,11 @@ fun CreateTrackFromCoordinatesScreen(
 
                 Spacer(Modifier.height(12.dp))
 
-                // Capture window BEFORE apex (ms)
-                OutlinedTextField(
-                    value = cornerForm.beforeMsText,
-                    onValueChange = { newBefore ->
-                        cornerForms[idx] = cornerForm.copy(beforeMsText = newBefore)
-                    },
-                    label = { Text("Capture Window Before Apex (ms)") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth()
-                )
+
 
                 Spacer(Modifier.height(12.dp))
 
-                // Capture window AFTER apex (ms)
-                OutlinedTextField(
-                    value = cornerForm.afterMsText,
-                    onValueChange = { newAfter ->
-                        cornerForms[idx] = cornerForm.copy(afterMsText = newAfter)
-                    },
-                    label = { Text("Capture Window After Apex (ms)") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth()
-                )
+
 
                 Spacer(Modifier.height(24.dp))
             }
@@ -210,10 +189,9 @@ fun CreateTrackFromCoordinatesScreen(
                     val corners = cornerForms.mapNotNull { form ->
                         val lat = form.latText.toDoubleOrNull()
                         val lon = form.lonText.toDoubleOrNull()
-                        val beforeMs = form.beforeMsText.toIntOrNull()
-                        val afterMs = form.afterMsText.toIntOrNull()
 
-                        if (lat == null || lon == null || beforeMs == null || afterMs == null) {
+
+                        if (lat == null || lon == null) {
                             println("SaveTrack: Skipping corner ${form.index} due to invalid data")
                             null
                         } else {
@@ -223,8 +201,6 @@ fun CreateTrackFromCoordinatesScreen(
                                 name = form.name.ifBlank { null },
                                 lat = lat,
                                 lon = lon,
-                                captureBeforeMs = beforeMs,
-                                captureAfterMs = afterMs
                             )
                         }
                     }
