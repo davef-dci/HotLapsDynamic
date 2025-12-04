@@ -22,6 +22,8 @@ import android.content.Intent
 object EventStorage {
 
     private const val TAG = "EventStorage"
+    private val speedInterpolator = SpeedInterpolator()
+
 
     // Single lock for all event CSV file access.
     // We only write one event at a time, so a global lock is fine.
@@ -88,7 +90,18 @@ object EventStorage {
                     .format(Date(sample.utcMs))
 
 
-                val speedStr = sample.speedMps?.toString() ?: ""
+// Interpolation input: GPS gives new speed only on GPS updates
+                val rawSpeed = sample.speedMps
+
+                if (rawSpeed != null) {
+                    // Only GPS fix updates should call this
+                    speedInterpolator.registerGpsFix(sample.utcMs, rawSpeed)
+                }
+
+// Interpolated smoothed speed
+                val interpSpeed = speedInterpolator.interpolateSpeed(sample.utcMs) ?: rawSpeed
+                val speedStr = interpSpeed?.toString() ?: ""
+
 
 
                 // Write one CSV line for this sample
@@ -547,4 +560,42 @@ object EventStorage {
         }
     }
 
+}
+
+
+class SpeedInterpolator {
+
+    private var lastGpsUtc: Long? = null
+    private var lastGpsSpeed: Double? = null
+
+    private var nextGpsUtc: Long? = null
+    private var nextGpsSpeed: Double? = null
+
+    fun registerGpsFix(utc: Long, speed: Double) {
+        // Move next → last
+        if (nextGpsUtc != null) {
+            lastGpsUtc = nextGpsUtc
+            lastGpsSpeed = nextGpsSpeed
+        }
+
+        nextGpsUtc = utc
+        nextGpsSpeed = speed
+    }
+
+    fun interpolateSpeed(sampleUtc: Long): Double? {
+        val t0 = lastGpsUtc
+        val v0 = lastGpsSpeed
+        val t1 = nextGpsUtc
+        val v1 = nextGpsSpeed
+
+        if (t0 == null || v0 == null || t1 == null || v1 == null) {
+            // Not enough anchors to interpolate
+            return v1
+        }
+
+        if (t1 == t0) return v1
+
+        val t = (sampleUtc - t0).toDouble() / (t1 - t0).toDouble()
+        return v0 + t * (v1 - v0)
+    }
 }
