@@ -183,8 +183,6 @@ object TrackStorage {
 
             val lat = c.getDouble("lat")
             val lon = c.getDouble("lon")
-            val beforeMs = c.getInt("captureBeforeMs")
-            val afterMs = c.getInt("captureAfterMs")
 
             corners += Corner(
                 index = index,
