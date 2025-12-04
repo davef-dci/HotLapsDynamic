@@ -121,6 +121,17 @@ import com.hotlaps.dynamic.data.SmoothingLevel
 import com.hotlaps.dynamic.util.GForceSmoother
 import com.hotlaps.dynamic.util.GSmoothedSample
 
+enum class GGScaleMode(val label: String, val fixedMaxG: Float?) {
+    Auto("Auto scale", null),
+    G_0_25("0.25 G", 0.25f),
+    G_0_5("0.5 G", 0.5f),
+    G_0_75("0.75 G", 0.75f),
+    G_1_0("1.0 G", 1.0f),
+    G_1_25("1.25 G", 1.25f),
+    G_1_5("1.5 G", 1.5f),
+    G_1_75("1.75 G", 1.75f),
+    G_2_0("2.0 G", 2.0f),
+}
 
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -158,6 +169,44 @@ fun GGScreen(
     // Smoothing level from settings (0 = Off, 1 = Low, 2 = Medium, 3 = Heavy)
     val smoothingIndex by repo.smoothingLevel.collectAsStateWithLifecycle(initialValue = 1)
     val smoothingLevel = SmoothingLevel.entries.getOrElse(smoothingIndex) { SmoothingLevel.Low }
+
+    // === G-G scale mode (Auto vs fixed) ===
+    var scaleMode by remember { mutableStateOf(GGScaleMode.Auto) }
+
+    // Auto-scale state
+    var autoMaxG by remember { mutableStateOf(0.5f) }   // start small
+    var observedPeakG by remember { mutableStateOf(0f) }
+
+    fun updateAutoScaleFromPeaks(
+        longMax: Float,
+        longBrakeMax: Float,
+        rightMax: Float,
+        leftMax: Float
+    ) {
+        // Peak magnitude across all directions in this window
+        val peak = maxOf(longMax, longBrakeMax, rightMax, leftMax)
+        if (peak <= 0f) return
+
+        // Only grow the scale for now (we can add shrink logic later if you want)
+        if (peak <= observedPeakG) return
+
+        observedPeakG = peak
+
+        // Snap up to the next "nice" scale
+        val target = when {
+            peak <= 0.25f -> 0.25f
+            peak <= 0.5f  -> 0.5f
+            peak <= 0.75f -> 0.75f
+            peak <= 1.0f  -> 1.0f
+            peak <= 1.25f -> 1.25f
+            peak <= 1.5f  -> 1.5f
+            peak <= 1.75f -> 1.75f
+            else          -> 2.0f
+        }
+        autoMaxG = target
+    }
+
+
 
     // === Shared G-force smoother (EMA + MA) ===
     // UI starts with whatever the current preset says
@@ -704,8 +753,15 @@ fun GGScreen(
                                             .verticalScroll(rememberScrollState())
                                             .padding(horizontal = 4.dp)
                                     ) {
+// Decide what max G to use based on the dropdown
+                                        val effectiveMaxG =
+                                            when (scaleMode) {
+                                                GGScaleMode.Auto -> autoMaxG
+                                                else             -> scaleMode.fixedMaxG ?: ggMaxG
+                                            }
+
                                         GGPlot(
-                                            maxAbsG = ggMaxG,
+                                            maxAbsG = effectiveMaxG,
                                             latG = latG,
                                             longG = longG,
                                             trailSeconds = ggTrailWindow,
@@ -714,7 +770,29 @@ fun GGScreen(
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .aspectRatio(1f),
+                                            onPeaks = { longMax, longBrakeMax, rightMax, leftMax ->
+                                                if (scaleMode == GGScaleMode.Auto) {
+                                                    updateAutoScaleFromPeaks(longMax, longBrakeMax, rightMax, leftMax)
+                                                }
+                                            }
                                         )
+
+                                        Spacer(Modifier.height(4.dp))
+
+                                        ScaleSelectorRow(
+                                            scaleMode = scaleMode,
+                                            onScaleModeChange = { mode ->
+                                                scaleMode = mode
+                                                if (mode == GGScaleMode.Auto) {
+                                                    // Reset auto scaling when switching back to Auto
+                                                    observedPeakG = 0f
+                                                    autoMaxG = 0.5f
+                                                }
+                                            },
+                                            currentAutoMaxG = autoMaxG
+                                        )
+
+
 
                                         Spacer(Modifier.height(8.dp))
 
@@ -1196,14 +1274,41 @@ fun GGScreen(
             drawLine(Color.Gray, Offset(cx - radius, cy), Offset(cx + radius, cy), 2f)
             drawLine(Color.Gray, Offset(cx, cy - radius), Offset(cx, cy + radius), 2f)
 
-            // Tick rings at 0.5 G intervals up to maxAbsG
-            val tickStep = 0.5f
-            var tick = tickStep
-            while (tick < maxAbsG) {
-                val r = radius * (tick / maxAbsG)
-                drawCircle(Color.DarkGray, r, Offset(cx, cy), style = Stroke(1f))
-                tick += tickStep
+// Light concentric rings at 0.1 G intervals, plus stronger 0.5 G rings
+// Minor rings: 0.1 G
+            val minorStep = 0.1f
+            var minor = minorStep
+            while (minor < maxAbsG) {
+                val r = radius * (minor / maxAbsG)
+
+                // Skip where a major (0.5 G) ring will be drawn: 0.5 / 0.1 = every 5th step
+                val isMajor = ((minor * 10).toInt() % 5) == 0
+                if (!isMajor) {
+                    drawCircle(
+                        color = Color.Gray.copy(alpha = 0.2f),
+                        radius = r,
+                        center = Offset(cx, cy),
+                        style = Stroke(1.5f)
+                    )
+                }
+
+                minor += minorStep
             }
+
+// Major rings: 0.25 G
+            val majorStep = 0.5f
+            var major = majorStep
+            while (major < maxAbsG) {
+                val r = radius * (major / maxAbsG)
+                drawCircle(
+                    color = Color.Gray.copy(alpha = 0.5f),
+                    radius = r,
+                    center = Offset(cx, cy),
+                    style = Stroke(3.0f)
+                )
+                major += majorStep
+            }
+
 
             // Center dot
             // drawCircle(Color.White.copy(alpha = 0.7f), 5f, Offset(cx, cy))
@@ -1784,6 +1889,64 @@ fun GGScreen(
             }
         }
     }
+
+@Composable
+fun ScaleSelectorRow(
+    scaleMode: GGScaleMode,
+    onScaleModeChange: (GGScaleMode) -> Unit,
+    currentAutoMaxG: Float
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val options = GGScaleMode.values().toList()
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = if (scaleMode == GGScaleMode.Auto)
+                "Scale: Auto (${String.format("%.2f", currentAutoMaxG)} G)"
+            else
+                "Scale: ${scaleMode.label}",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(end = 8.dp)
+        )
+
+        Box {
+            OutlinedButton(
+                onClick = { expanded = true },
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    text = if (scaleMode == GGScaleMode.Auto) "Auto" else scaleMode.label,
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Icon(
+                    imageVector = Icons.Default.ArrowDropDown,
+                    contentDescription = null
+                )
+            }
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false }
+            ) {
+                options.forEach { option ->
+                    DropdownMenuItem(
+                        text = { Text(option.label) },
+                        onClick = {
+                            expanded = false
+                            onScaleModeChange(option)
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
 
 
 
