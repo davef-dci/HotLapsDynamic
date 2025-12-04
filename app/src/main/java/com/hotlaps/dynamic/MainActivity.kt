@@ -46,6 +46,7 @@ import com.hotlaps.dynamic.ui.TrackManagerScreen
 import com.hotlaps.dynamic.ui.calibration.CalibrateScreen
 import com.hotlaps.dynamic.ui.help.HelpQuickStartScreen
 import com.hotlaps.dynamic.ui.help.HelpScreen
+import com.hotlaps.dynamic.ui.help.UnderstandingCalibrationScreen
 import com.hotlaps.dynamic.ui.settings.SettingsScreen
 import com.hotlaps.dynamic.viewmodel.DriveViewModel
 import com.hotlaps.dynamic.viewmodel.TrackSelectionViewModel
@@ -437,15 +438,30 @@ class MainActivity : ComponentActivity() {
                                         nav.navigate("helpQuickStart") {
                                             launchSingleTop = true
                                         }
+                                    },
+                                    onCalibrationClick = {
+                                        nav.navigate("helpCalibration") {
+                                            launchSingleTop = true
+                                        }
                                     }
                                 )
                             }
+
+
 
                             composable("helpQuickStart") {
                                 HelpQuickStartScreen(
                                     onBack = { nav.popBackStack() }
                                 )
                             }
+
+                            composable("helpCalibration") {
+                                UnderstandingCalibrationScreen(
+                                    onBack = { nav.popBackStack() }
+                                )
+                            }
+
+
                         }
                     }
                 }

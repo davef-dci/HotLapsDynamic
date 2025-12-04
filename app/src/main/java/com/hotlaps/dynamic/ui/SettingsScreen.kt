@@ -36,10 +36,6 @@ fun SettingsScreen(onBack: () -> Unit) {
     var trailText by remember(trailBrakeG) { mutableStateOf(trailBrakeG.toString()) }
     var status by remember { mutableStateOf(" ") }
 
-    // G-G Max scale (G)
-    val ggMaxG by repo.ggMaxG.collectAsState(initial = 1.25f)
-    var ggMaxText by remember(ggMaxG) { mutableStateOf("%.1f".format(ggMaxG)) }
-
     // G-G trail window (seconds)
     val ggTrailWindowS by repo.ggTrailWindowS.collectAsState(initial = 3.0f)
     var ggTrailText by remember(ggTrailWindowS) { mutableStateOf("%.1f".format(ggTrailWindowS)) }
@@ -111,38 +107,6 @@ fun SettingsScreen(onBack: () -> Unit) {
 
             Divider()
 
-            Text("G-G Max scale (G)")
-            OutlinedTextField(
-                value = ggMaxText,
-                onValueChange = { ggMaxText = it },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                modifier = Modifier.fillMaxWidth(),
-                supportingText = { Text("Enter 0.1 to 2.0 G (e.g., 1.3)") }
-            )
-
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = {
-                    val v = ggMaxText.toFloatOrNull()
-                    if (v == null) {
-                        status = "Please enter a valid number"
-                    } else {
-                        val clamped = v.coerceIn(0.1f, 2.0f)
-                        ggMaxText = "%.1f".format(clamped)
-                        scope.launch {
-                            repo.updateGgMaxG(clamped)
-                            status = "Saved ✓  (G-G Max = ${"%.1f".format(clamped)} G)"
-                        }
-                    }
-                }) { Text("Save") }
-
-                OutlinedButton(onClick = {
-                    ggMaxText = "%.1f".format(ggMaxG)
-                    status = "Reverted to saved value"
-                }) { Text("Revert") }
-            }
-
-            Divider()
 
             Text("G-G trail window (seconds)")
             OutlinedTextField(
