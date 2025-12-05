@@ -494,11 +494,10 @@ fun EventViewerScreen(
                     Spacer(Modifier.height(4.dp))
                     MaxGSummaryRow(label = "Event", summary = overallSummary)
                 } else {
-                    val samplesForSummary = samplesForSelected.filter { sample ->
-                        selectedCornerVisits.contains(
-                            sample.cornerIndex to sample.visitNumber
-                        )
+                    val samplesForSummary = samplesForPlotGrouped.filter { sample ->
+                        selectedCornerVisits.contains(sample.cornerIndex to sample.visitNumber)
                     }
+
 
                     if (samplesForSummary.isEmpty()) {
                         Text(
