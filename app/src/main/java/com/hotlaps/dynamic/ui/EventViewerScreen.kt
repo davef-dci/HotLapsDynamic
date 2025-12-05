@@ -49,6 +49,12 @@ import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.max
 
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.text.style.TextAlign
+
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EventViewerScreen(
@@ -437,8 +443,8 @@ fun EventViewerScreen(
             }
 
             // -------------------------
-            // Apex window sliders
-            // -------------------------
+// Apex window sliders (dual slider UI)
+// -------------------------
             Spacer(Modifier.height(16.dp))
 
             Text(
@@ -447,30 +453,133 @@ fun EventViewerScreen(
             )
             Spacer(Modifier.height(8.dp))
 
-            Column {
-                Text(
-                    text = "Before apex: ${"%.1f".format(beforeApexSeconds)} s",
-                    style = MaterialTheme.typography.bodySmall
-                )
-                Slider(
-                    value = beforeApexSeconds,
-                    onValueChange = { beforeApexSeconds = it },
-                    valueRange = 0f..7.5f,
-                    steps = 0
-                )
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // --- Top labels: Before | Apex | After ---
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Before",
+                            style = MaterialTheme.typography.bodySmall,
+                            textAlign = TextAlign.Center
+                        )
+                    }
 
-                Spacer(Modifier.height(8.dp))
+                    Box(
+                        modifier = Modifier.width(40.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Apex",
+                            style = MaterialTheme.typography.bodySmall,
+                            textAlign = TextAlign.Center
+                        )
+                    }
 
-                Text(
-                    text = "After apex: ${"%.1f".format(afterApexSeconds)} s",
-                    style = MaterialTheme.typography.bodySmall
-                )
-                Slider(
-                    value = afterApexSeconds,
-                    onValueChange = { afterApexSeconds = it },
-                    valueRange = 0f..7.5f,
-                    steps = 0
-                )
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "After",
+                            style = MaterialTheme.typography.bodySmall,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(4.dp))
+
+                // --- Dual sliders with center apex line ---
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // BEFORE slider (fills from center → left)
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CompositionLocalProvider(
+                            LocalLayoutDirection provides LayoutDirection.Rtl
+                        ) {
+                            Slider(
+                                value = beforeApexSeconds,
+                                onValueChange = { beforeApexSeconds = it },
+                                valueRange = 0f..7.5f,
+                                steps = 0,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+
+                    // Center apex line
+                    Box(
+                        modifier = Modifier
+                            .width(4.dp)
+                            .height(32.dp)
+                            .background(MaterialTheme.colorScheme.primary)
+                    )
+
+                    // AFTER slider (fills from center → right)
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Slider(
+                            value = afterApexSeconds,
+                            onValueChange = { afterApexSeconds = it },
+                            valueRange = 0f..7.5f,
+                            steps = 0,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(4.dp))
+
+                // --- Numeric values under sliders ---
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "${"%.1f".format(beforeApexSeconds)} s",
+                            style = MaterialTheme.typography.bodySmall,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier.width(40.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        // optional: leave blank or show "±"
+                    }
+
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "${"%.1f".format(afterApexSeconds)} s",
+                            style = MaterialTheme.typography.bodySmall,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
             }
 
             // -------------------------
