@@ -133,8 +133,16 @@ fun EventViewerScreen(
 
             // Which corner/visit groups are selected for plotting
             var selectedCornerVisits by remember(cornerVisitGroups) {
-                mutableStateOf(cornerVisitGroups.toSet())
+                mutableStateOf(
+                    if (cornerVisitGroups.isNotEmpty()) {
+                        // Select ONLY the first (cornerIndex, visitNumber)
+                        setOf(cornerVisitGroups.first())
+                    } else {
+                        emptySet()
+                    }
+                )
             }
+
 
             // Apex window around apex (seconds)
             var beforeApexSeconds by remember { mutableStateOf(3f) }
@@ -395,7 +403,6 @@ fun EventViewerScreen(
                     style = MaterialTheme.typography.titleSmall
                 )
                 Spacer(Modifier.height(8.dp))
-
                 if (chartMode == ChartMode.GG) {
                     SimpleGGPlot(
                         samples = samplesForPlotGrouped,
@@ -404,11 +411,19 @@ fun EventViewerScreen(
                             cornerVisitColors[key] ?: neutralSampleColor
                         }
                     )
+
+                    Spacer(Modifier.height(8.dp))
+
+                    GGVisitLegend(
+                        selectedCornerVisits = selectedCornerVisits,
+                        cornerVisitColors = cornerVisitColors
+                    )
                 } else {
                     GTimePlot(
                         samples = samplesForTimePlot
                     )
                 }
+
             }
 
             // -------------------------
@@ -1039,6 +1054,62 @@ private fun MaxGSummaryHeaderRow() {
         )
     }
 }
+
+@Composable
+private fun GGVisitLegend(
+    selectedCornerVisits: Set<Pair<Int, Int>>,
+    cornerVisitColors: Map<Pair<Int, Int>, Color>
+) {
+    if (selectedCornerVisits.isEmpty()) {
+        Text(
+            text = "No corner visits selected – toggle checkboxes above to see traces.",
+            style = MaterialTheme.typography.bodySmall
+        )
+        return
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(
+            text = "Legend:",
+            style = MaterialTheme.typography.bodySmall
+        )
+        Spacer(Modifier.height(4.dp))
+
+        // Sort by corner, then visit for a predictable list
+        val sortedKeys = selectedCornerVisits
+            .sortedWith(compareBy<Pair<Int, Int>> { it.first }.thenBy { it.second })
+
+        sortedKeys.forEach { (cornerIdx, visitNum) ->
+            val color = cornerVisitColors[cornerIdx to visitNum]
+                ?: MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 2.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(12.dp)
+                        .background(color)
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                )
+
+                Spacer(Modifier.width(8.dp))
+
+                Text(
+                    text = "Corner $cornerIdx – Visit $visitNum",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+    }
+}
+
+
 
 @Composable
 private fun MaxGSummaryRow(
