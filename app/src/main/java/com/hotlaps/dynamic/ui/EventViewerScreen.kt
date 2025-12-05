@@ -98,6 +98,10 @@ fun EventViewerScreen(
             // Chart mode toggle
             var chartMode by remember { mutableStateOf(ChartMode.GG) }
 
+            // Replay progress for "virtual slider" (0f = start of window, 1f = end)
+            var replayProgress by remember { mutableStateOf(0f) }
+
+
             // Samples for selected event
             val samplesForSelected = remember(selectedFile) {
                 selectedFile?.let { file ->
@@ -425,6 +429,16 @@ fun EventViewerScreen(
                         }
                     )
 
+                    // NEW: replay slider for G-G plot
+                    Slider(
+                        value = replayProgress,
+                        onValueChange = { replayProgress = it },
+                        valueRange = 0f..1f,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+
+
                     Spacer(Modifier.height(8.dp))
 
                     GGVisitLegend(
@@ -439,6 +453,14 @@ fun EventViewerScreen(
                     )
 
                     Spacer(Modifier.height(8.dp))
+
+                    // NEW: replay slider for G-vs-time plot
+                    Slider(
+                        value = replayProgress,
+                        onValueChange = { replayProgress = it },
+                        valueRange = 0f..1f,
+                        modifier = Modifier.fillMaxWidth()
+                    )
 
                     TimePlotLegend(
                         selectedCornerVisits = selectedCornerVisits,
