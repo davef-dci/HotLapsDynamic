@@ -29,8 +29,8 @@ fun SplashDynamics(onFinished: () -> Unit) {
         contentAlignment = Alignment.Center
     ) {
         Image(
-            painter = painterResource(id = R.drawable.splash_hotlaps_dynamics),
-            contentDescription = "Hotlaps Dynamics",
+            painter = painterResource(id = R.drawable.splash_apex_dynamics),
+            contentDescription = "Apex Dynamics",
             // Fill width to feel “full size” on tablets too
             contentScale = ContentScale.Fit,
             modifier = Modifier
