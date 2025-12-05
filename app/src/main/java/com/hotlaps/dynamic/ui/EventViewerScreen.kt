@@ -7,6 +7,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -53,6 +54,10 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.text.style.TextAlign
+
+
+
+
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -224,7 +229,7 @@ fun EventViewerScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(180.dp) // adjust as needed so the plot is still visible
+                    .height(100.dp) // adjust as needed so the plot is still visible
                     .border(1.dp, MaterialTheme.colorScheme.outlineVariant)
             ) {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -265,7 +270,7 @@ fun EventViewerScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(180.dp) // adjust as needed
+                            .height(100.dp) // adjust as needed
                             .border(1.dp, MaterialTheme.colorScheme.outlineVariant)
                     ) {
                         LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -286,25 +291,27 @@ fun EventViewerScreen(
                                                     selectedCornerVisits + groupKey
                                                 }
                                         }
-                                        .padding(vertical = 2.dp, horizontal = 4.dp)
+                                        .padding(vertical = 0.dp, horizontal = 4.dp)
                                 ) {
-                                    Checkbox(
+                                    TinyCheckbox(
                                         checked = isChecked,
                                         onCheckedChange = { checked ->
                                             selectedCornerVisits =
-                                                if (checked) {
-                                                    selectedCornerVisits + groupKey
-                                                } else {
-                                                    selectedCornerVisits - groupKey
-                                                }
+                                                if (checked) selectedCornerVisits + groupKey
+                                                else selectedCornerVisits - groupKey
                                         }
                                     )
+
+
 
                                     Text(
                                         text = "Corner $cornerIdx – Visit $visitNum",
                                         style = MaterialTheme.typography.bodySmall
                                     )
+
                                 }
+                                // 🔹 thin spacing between rows
+                                Spacer(modifier = Modifier.height(4.dp))
                             }
                         }
                     }
@@ -1387,3 +1394,23 @@ data class ApexVisit(
     val apexIntervalMs: Long,
     val apexUtcMs: Long
 )
+
+
+@Composable
+fun TinyCheckbox(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(20.dp)   // MUCH smaller than Material Checkbox
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            .background(
+                if (checked) MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                else Color.Transparent
+            )
+            .clickable { onCheckedChange(!checked) }
+
+
+    )
+}

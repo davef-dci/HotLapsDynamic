@@ -88,7 +88,7 @@ fun EventManagerScreen(
             Spacer(Modifier.height(16.dp))
 
             BigButton(
-                text = "View Events",
+                text = "Analyze Events",
                 onClick = onViewEvents,
                 enabled = true
             )
