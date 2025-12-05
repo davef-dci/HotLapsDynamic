@@ -51,6 +51,8 @@ import com.hotlaps.dynamic.ui.settings.SettingsScreen
 import com.hotlaps.dynamic.viewmodel.DriveViewModel
 import com.hotlaps.dynamic.viewmodel.TrackSelectionViewModel
 import kotlinx.coroutines.launch
+import com.hotlaps.dynamic.ui.TrackPickerScreen
+
 
 // ---------------------------------------------------------------------
 // Reusable drawer navigation item with bigger hit area & larger text
@@ -278,7 +280,7 @@ class MainActivity : ComponentActivity() {
                                 GGScreen(
                                     trackSelectionViewModel = trackSelectionViewModel,
                                     driveViewModel = driveViewModel,
-                                    onSelectTrack = { nav.navigate("trackManager") },
+                                    onSelectTrack = { nav.navigate("pickTrack") },
                                     onOpenDrawer = {
                                         scope.launch {
                                             drawerState.open()
@@ -410,6 +412,18 @@ class MainActivity : ComponentActivity() {
                                     }
                                 )
                             }
+
+                            composable("pickTrack") {
+                                TrackPickerScreen(
+                                    trackSelectionViewModel = trackSelectionViewModel,
+                                    onBack = { nav.popBackStack() },
+                                    onTrackChosen = {
+                                        // After selecting a track, just go back to GGScreen
+                                        nav.popBackStack()
+                                    }
+                                )
+                            }
+
 
                             composable("editTrack") {
                                 val trackToEdit = trackSelectionViewModel.trackBeingEdited
