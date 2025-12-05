@@ -420,9 +420,19 @@ fun EventViewerScreen(
                     )
                 } else {
                     GTimePlot(
-                        samples = samplesForTimePlot
+                        samples = samplesForTimePlot,
+                        selectedCornerVisits = selectedCornerVisits,
+                        cornerVisitColors = cornerVisitColors
+                    )
+
+                    Spacer(Modifier.height(8.dp))
+
+                    TimePlotLegend(
+                        selectedCornerVisits = selectedCornerVisits,
+                        cornerVisitColors = cornerVisitColors
                     )
                 }
+
 
             }
 
@@ -720,20 +730,20 @@ fun SimpleGGPlot(
 
 @Composable
 fun GTimePlot(
-    samples: List<EventSample>
+    samples: List<EventSample>,
+    selectedCornerVisits: Set<Pair<Int, Int>>,
+    cornerVisitColors: Map<Pair<Int, Int>, Color>
 ) {
     val axisColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
-    val longColor = MaterialTheme.colorScheme.primary
-    val latColor = MaterialTheme.colorScheme.tertiary
 
     val density = LocalDensity.current
     val labelTextSizePx = with(density) { 10.sp.toPx() }
-    val apexLabelColor = axisColor
-    val apexLabelPaint = remember(labelTextSizePx, apexLabelColor) {
+
+    val apexLabelPaint = remember(labelTextSizePx, axisColor) {
         AndroidPaint().apply {
             isAntiAlias = true
             textSize = labelTextSizePx
-            color = apexLabelColor.toArgb()
+            color = axisColor.toArgb()
             textAlign = AndroidPaint.Align.CENTER
         }
     }
@@ -747,30 +757,100 @@ fun GTimePlot(
         }
     }
 
+    if (samples.isEmpty()) {
+        Text(
+            text = "No samples to display for this event.",
+            style = MaterialTheme.typography.bodySmall
+        )
+        return
+    }
+
+    // Shared time + G scaling for both plots
+    val minT = samples.minOf { it.intervalMs }.toFloat()
+    val maxT = samples.maxOf { it.intervalMs }.toFloat()
+    val spanT = (maxT - minT).coerceAtLeast(1f)
+
+    val rawMaxG = samples.maxOf { max(abs(it.latG), abs(it.longG)) }
+    val step = 0.25f
+    val maxG = if (rawMaxG <= 0f) {
+        step
+    } else {
+        val steps = ceil(rawMaxG / step.toDouble()).toFloat()
+        steps * step
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(8.dp)
+    ) {
+        // ---- Longitudinal plot ----
+        TimeSubPlot(
+            label = "Longitudinal (Accel / Brake)",
+            samples = samples,
+            minT = minT,
+            maxT = maxT,
+            spanT = spanT,
+            maxG = maxG,
+            axisColor = axisColor,
+            apexLabelPaint = apexLabelPaint,
+            axisLabelPaint = axisLabelPaint,
+            selectG = { it.longG },
+            selectedCornerVisits = selectedCornerVisits,
+            cornerVisitColors = cornerVisitColors,
+            showTimeAxisLabels = false
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        // ---- Lateral plot ----
+        TimeSubPlot(
+            label = "Lateral (Left / Right)",
+            samples = samples,
+            minT = minT,
+            maxT = maxT,
+            spanT = spanT,
+            maxG = maxG,
+            axisColor = axisColor,
+            apexLabelPaint = apexLabelPaint,
+            axisLabelPaint = axisLabelPaint,
+            selectG = { it.latG },
+            selectedCornerVisits = selectedCornerVisits,
+            cornerVisitColors = cornerVisitColors,
+            showTimeAxisLabels = true   // only bottom plot shows time labels
+        )
+    }
+}
+
+@Composable
+private fun TimeSubPlot(
+    label: String,
+    samples: List<EventSample>,
+    minT: Float,
+    maxT: Float,
+    spanT: Float,
+    maxG: Float,
+    axisColor: Color,
+    apexLabelPaint: AndroidPaint,
+    axisLabelPaint: AndroidPaint,
+    selectG: (EventSample) -> Float,
+    selectedCornerVisits: Set<Pair<Int, Int>>,
+    cornerVisitColors: Map<Pair<Int, Int>, Color>,
+    showTimeAxisLabels: Boolean
+) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(220.dp)
-            .padding(8.dp)
+            .height(180.dp)
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
-            if (samples.isEmpty()) return@Canvas
+            // ✅ safe to use toPx() here (Canvas = DrawScope = Density)
+            val stroke = 1.dp.toPx()
+            val xLabelInset = 4.dp.toPx()
+            val bottomInset = 2.dp.toPx()
 
             val w = size.width
             val h = size.height
-
-            val minT = samples.minOf { it.intervalMs }.toFloat()
-            val maxT = samples.maxOf { it.intervalMs }.toFloat()
-            val spanT = (maxT - minT).coerceAtLeast(1f)
-
-            val rawMaxG = samples.maxOf { max(abs(it.latG), abs(it.longG)) }
-            val step = 0.25f
-            val maxG = if (rawMaxG <= 0f) {
-                step
-            } else {
-                val steps = ceil(rawMaxG / step.toDouble()).toFloat()
-                steps * step
-            }
 
             val midY = h / 2f
             val gBand = h * 0.45f
@@ -786,13 +866,11 @@ fun GTimePlot(
                 return midY - norm * gBand
             }
 
-            val stroke = 1.dp.toPx()
-            val xLabelInset = 4.dp.toPx()
-            val bottomInset = 2.dp.toPx()
+            val nativeCanvas = drawContext.canvas.nativeCanvas
 
+            // Horizontal grid lines at ±0.25G steps
             val stepG = 0.25f
             val numSteps = (maxG / stepG).toInt()
-
             for (i in -numSteps..numSteps) {
                 val gVal = i * stepG
                 val y = yFor(gVal)
@@ -805,13 +883,11 @@ fun GTimePlot(
                 )
             }
 
-            val nativeCanvas = drawContext.canvas.nativeCanvas
-
+            // Vertical line at apex (t = 0)
             if (minT <= 0f && maxT >= 0f) {
                 val xApex = xFor(0L)
-
                 drawLine(
-                    color = longColor,
+                    color = axisColor,
                     start = Offset(xApex, 0f),
                     end = Offset(xApex, h),
                     strokeWidth = (stroke * 1.5f)
@@ -826,6 +902,7 @@ fun GTimePlot(
                 )
             }
 
+            // 0G baseline
             drawLine(
                 color = axisColor,
                 start = Offset(0f, midY),
@@ -833,6 +910,7 @@ fun GTimePlot(
                 strokeWidth = stroke
             )
 
+            // Outer frame verticals
             drawLine(
                 color = axisColor,
                 start = Offset(0f, 0f),
@@ -846,6 +924,7 @@ fun GTimePlot(
                 strokeWidth = stroke
             )
 
+            // Y-axis labels: +maxG, 0, -maxG
             axisLabelPaint.textAlign = AndroidPaint.Align.LEFT
 
             val yMax = yFor(maxG)
@@ -884,37 +963,7 @@ fun GTimePlot(
                 axisLabelPaint
             )
 
-            axisLabelPaint.textAlign = AndroidPaint.Align.CENTER
-
-            val minSec = minT / 1000f
-            val maxSec = maxT / 1000f
-
-            val xMin = xFor(minT.toLong())
-            nativeCanvas.drawText(
-                String.format("%.1f", minSec),
-                xMin,
-                size.height - bottomInset,
-                axisLabelPaint
-            )
-
-            if (minT <= 0f && maxT >= 0f) {
-                val xZero = xFor(0L)
-                nativeCanvas.drawText(
-                    "0",
-                    xZero,
-                    size.height - bottomInset,
-                    axisLabelPaint
-                )
-            }
-
-            val xMax = xFor(maxT.toLong())
-            nativeCanvas.drawText(
-                String.format("%.1f", maxSec),
-                xMax,
-                size.height - bottomInset,
-                axisLabelPaint
-            )
-
+            // Highlight ±1G if relevant
             if (maxG >= 1f) {
                 val yPlus = yFor(1f)
                 val yMinus = yFor(-1f)
@@ -932,60 +981,81 @@ fun GTimePlot(
                 )
             }
 
-            fun drawSeries(selectG: (EventSample) -> Float, color: Color) {
-                var lastPoint: Offset? = null
-                var lastKey: Pair<Int, Int>? = null
+            // X-axis time labels (only on bottom subplot)
+            if (showTimeAxisLabels) {
+                axisLabelPaint.textAlign = AndroidPaint.Align.CENTER
 
-                samples.forEach { s ->
-                    val x = xFor(s.intervalMs)
-                    val y = yFor(selectG(s))
-                    val p = Offset(x, y)
-                    val key = s.cornerIndex to s.visitNumber
+                val minSec = minT / 1000f
+                val maxSec = maxT / 1000f
 
-                    if (lastPoint != null && lastKey == key) {
-                        drawLine(
-                            color = color,
-                            start = lastPoint!!,
-                            end = p,
-                            strokeWidth = 2.dp.toPx()
-                        )
-                    }
+                val xMin = xFor(minT.toLong())
+                nativeCanvas.drawText(
+                    String.format("%.1f", minSec),
+                    xMin,
+                    size.height - bottomInset,
+                    axisLabelPaint
+                )
 
-                    lastPoint = p
-                    lastKey = key
+                if (minT <= 0f && maxT >= 0f) {
+                    val xZero = xFor(0L)
+                    nativeCanvas.drawText(
+                        "0",
+                        xZero,
+                        size.height - bottomInset,
+                        axisLabelPaint
+                    )
                 }
+
+                val xMax = xFor(maxT.toLong())
+                nativeCanvas.drawText(
+                    String.format("%.1f", maxSec),
+                    xMax,
+                    size.height - bottomInset,
+                    axisLabelPaint
+                )
             }
 
-            drawSeries(selectG = { it.longG }, color = longColor)
-            drawSeries(selectG = { it.latG }, color = latColor)
+            // Draw the series, colored per corner/visit
+            var lastPoint: Offset? = null
+            var lastKey: Pair<Int, Int>? = null
+
+            samples.forEach { s ->
+                val key = s.cornerIndex to s.visitNumber
+                if (!selectedCornerVisits.contains(key)) return@forEach
+
+                val x = xFor(s.intervalMs)
+                val y = yFor(selectG(s))
+                val p = Offset(x, y)
+
+                val color = cornerVisitColors[key]
+                    ?: axisColor.copy(alpha = 0.6f)
+
+                if (lastPoint != null && lastKey == key) {
+                    drawLine(
+                        color = color,
+                        start = lastPoint!!,
+                        end = p,
+                        strokeWidth = 2.dp.toPx()
+                    )
+                }
+
+                lastPoint = p
+                lastKey = key
+            }
         }
 
-        Row(
+        // Label for this subplot (top-left overlay)
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .padding(4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(10.dp, 3.dp)
-                    .background(longColor)
-            )
-            Spacer(Modifier.width(4.dp))
-            Text("Longitudinal", style = MaterialTheme.typography.labelSmall)
-
-            Spacer(Modifier.width(12.dp))
-
-            Box(
-                modifier = Modifier
-                    .size(10.dp, 3.dp)
-                    .background(latColor)
-            )
-            Spacer(Modifier.width(4.dp))
-            Text("Lateral", style = MaterialTheme.typography.labelSmall)
-        }
+                .padding(4.dp)
+        )
     }
 }
+
+
 
 private data class MaxGSummary(
     val braking: Float,
@@ -1148,6 +1218,59 @@ private fun MaxGSummaryRow(
         )
     }
 }
+
+@Composable
+private fun TimePlotLegend(
+    selectedCornerVisits: Set<Pair<Int, Int>>,
+    cornerVisitColors: Map<Pair<Int, Int>, Color>
+) {
+    if (selectedCornerVisits.isEmpty()) {
+        Text(
+            text = "No corner visits selected – toggle checkboxes above to see traces.",
+            style = MaterialTheme.typography.bodySmall
+        )
+        return
+    }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "Legend:",
+            style = MaterialTheme.typography.bodySmall
+        )
+        Spacer(Modifier.height(4.dp))
+
+        val sortedKeys = selectedCornerVisits
+            .sortedWith(compareBy<Pair<Int, Int>> { it.first }.thenBy { it.second })
+
+        sortedKeys.forEach { (cornerIdx, visitNum) ->
+            val color = cornerVisitColors[cornerIdx to visitNum]
+                ?: MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 2.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(12.dp)
+                        .background(color)
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                )
+
+                Spacer(Modifier.width(8.dp))
+
+                Text(
+                    text = "Corner $cornerIdx – Visit $visitNum",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+    }
+}
+
+
 
 data class ApexVisit(
     val cornerIndex: Int,
