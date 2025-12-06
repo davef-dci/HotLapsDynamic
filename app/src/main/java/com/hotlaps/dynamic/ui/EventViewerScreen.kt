@@ -91,6 +91,8 @@ fun EventViewerScreen(
         ) {
             val context = LocalContext.current
 
+
+
             // All events on disk
             val eventFiles = remember { EventStorage.listEventFiles(context) }
 
@@ -420,10 +422,16 @@ fun EventViewerScreen(
 // NEW: For the G-G plot, pick one sample per selected corner/visit
             val replaySamplesForGG: List<EventSample> =
                 remember(samplesForPlotGrouped, selectedCornerVisits, replayProgress) {
-                    if (samplesForPlotGrouped.isEmpty() || selectedCornerVisits.isEmpty()) {
+                    if (samplesForPlotGrouped.isEmpty()) {
                         emptyList()
+                    } else if (selectedCornerVisits.isEmpty()) {
+                        // No corner visits: treat the entire apex-window samples as one sequence
+                        val idx = ((samplesForPlotGrouped.size - 1) * replayProgress)
+                            .roundToInt()
+                            .coerceIn(0, samplesForPlotGrouped.size - 1)
+                        listOf(samplesForPlotGrouped[idx])
                     } else {
-                        // Group samples by (cornerIndex, visitNumber)
+                        // Corner visits present: pick one sample per selected corner/visit
                         val byGroup = samplesForPlotGrouped
                             .filter { selectedCornerVisits.contains(it.cornerIndex to it.visitNumber) }
                             .groupBy { it.cornerIndex to it.visitNumber }
@@ -440,6 +448,14 @@ fun EventViewerScreen(
                         }
                     }
                 }
+
+
+            // Map from (corner, visit) -> current replay sample for that group
+            val replaySamplesByGroup: Map<Pair<Int, Int>, EventSample> =
+                replaySamplesForGG.associateBy { it.cornerIndex to it.visitNumber }
+
+
+
 
 // The corresponding sample used for the time plot (with intervalMs shifted around apex)
             val replaySampleForTime: EventSample? =
@@ -491,8 +507,10 @@ fun EventViewerScreen(
 
                     GGVisitLegend(
                         selectedCornerVisits = selectedCornerVisits,
-                        cornerVisitColors = cornerVisitColors
+                        cornerVisitColors = cornerVisitColors,
+                        replaySamplesByGroup = replaySamplesByGroup
                     )
+
                 } else {
                     GTimePlot(
                         samples = samplesForTimePlot,
@@ -736,6 +754,7 @@ fun SimpleGGPlot(
 ) {
     val axisColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
     val highlightColor = MaterialTheme.colorScheme.primary
+    val limeGreen = Color(0xFF00E676)
 
     val density = LocalDensity.current
     val labelTextSizePx = with(density) { 10.sp.toPx() }
@@ -924,11 +943,14 @@ fun SimpleGGPlot(
                             val py = cy - lon * scalePerG
                             val clamped = clampToCircle(px, py)
 
+                            val isNoCornerEvent = rs.cornerIndex <= 0 || rs.visitNumber <= 0
+
                             drawCircle(
-                                color = colorForSample(rs),   // match line color
+                                color = if (isNoCornerEvent) Color(0xFF00E676) else colorForSample(rs),
                                 radius = 4.dp.toPx(),
                                 center = clamped
                             )
+
                         }
                     }
 
@@ -1371,8 +1393,10 @@ private fun MaxGSummaryHeaderRow() {
 @Composable
 private fun GGVisitLegend(
     selectedCornerVisits: Set<Pair<Int, Int>>,
-    cornerVisitColors: Map<Pair<Int, Int>, Color>
+    cornerVisitColors: Map<Pair<Int, Int>, Color>,
+    replaySamplesByGroup: Map<Pair<Int, Int>, EventSample> = emptyMap()
 ) {
+
     if (selectedCornerVisits.isEmpty()) {
         Text(
             text = "No corner visits selected – toggle checkboxes above to see traces.",
@@ -1413,10 +1437,23 @@ private fun GGVisitLegend(
 
                 Spacer(Modifier.width(8.dp))
 
+                val baseLabel = "Corner $cornerIdx – Visit $visitNum"
+                val replaySample = replaySamplesByGroup[cornerIdx to visitNum]
+
+                val labelWithG = if (replaySample != null) {
+                    val lat = replaySample.latG
+                    val lon = replaySample.longG
+                    // e.g. "Corner 1 – Visit 2  (Lat: 0.23G, Long: -0.45G)"
+                    "$baseLabel  (Lat: ${"%.2f".format(lat)}G, Long: ${"%.2f".format(lon)}G)"
+                } else {
+                    baseLabel
+                }
+
                 Text(
-                    text = "Corner $cornerIdx – Visit $visitNum",
+                    text = labelWithG,
                     style = MaterialTheme.typography.bodySmall
                 )
+
             }
         }
     }
