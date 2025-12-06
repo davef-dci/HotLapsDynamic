@@ -387,25 +387,46 @@ object EventStorage {
         val oldFile = File(dir, "event_${eventId}.csv")
 
         if (!oldFile.exists()) {
-            Log.w(TAG, "renameEventFile: old file not found for eventId=$eventId")
+            Log.w(TAG, "renameEventFile: old file not found for eventId=$eventId at ${oldFile.absolutePath}")
             return
         }
 
-        // Turn the name into a filesystem-safe filename
-        val safe = newName
+        // 1) Turn the user-entered name into a filesystem-safe base
+        val safeBase = newName
             .replace("[^A-Za-z0-9 _-]".toRegex(), "_")
             .replace(" +".toRegex(), " ")
             .trim()
+            .ifBlank { "Event" }
 
-        val newFile = File(dir, "${safe}_$eventId.csv")
+        // 2) Use the eventId (which we created from System.currentTimeMillis()) as the timestamp
+        val formatter = SimpleDateFormat("yyyy-MM-dd HH-mm-ss", Locale.getDefault())
+        val timestamp = formatter.format(Date(eventId))
+
+        // 3) Build the target filename: "<safeBase> - 2025-12-05 22-31-15.csv"
+        var targetName = "$safeBase - $timestamp.csv"
+        var newFile = File(dir, targetName)
+
+        // 4) If a file with that name somehow already exists, add a numeric suffix
+        var suffix = 2
+        while (newFile.exists()) {
+            targetName = "$safeBase - $timestamp ($suffix).csv"
+            newFile = File(dir, targetName)
+            suffix++
+        }
 
         try {
-            oldFile.renameTo(newFile)
-            Log.d(TAG, "renameEventFile: renamed to ${newFile.name}")
+            val ok = oldFile.renameTo(newFile)
+            if (ok) {
+                Log.d(TAG, "renameEventFile: renamed to ${newFile.name}")
+            } else {
+                Log.e(TAG, "renameEventFile: renameTo() returned false from ${oldFile.name} to ${newFile.name}")
+            }
         } catch (e: Exception) {
             Log.e(TAG, "renameEventFile: error renaming file", e)
         }
     }
+
+
 
     fun deleteEvents(context: Context, filesToDelete: List<File>): Int {
         val dir = eventsDir(context) ?: return 0

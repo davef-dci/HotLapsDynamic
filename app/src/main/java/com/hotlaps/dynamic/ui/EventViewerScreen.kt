@@ -94,7 +94,9 @@ fun EventViewerScreen(
 
 
             // All events on disk
-            val eventFiles = remember { EventStorage.listEventFiles(context) }
+
+            // All events on disk – always read current list from disk
+            val eventFiles = EventStorage.listEventFiles(context)
 
             // Which event is selected
             var selectedFile by remember { mutableStateOf<File?>(null) }
