@@ -413,8 +413,12 @@ class MainActivity : ComponentActivity() {
                             }
 
                             composable("settings") {
-                                SettingsScreen(onBack = { nav.popBackStack() })
+                                SettingsScreen(
+                                    onBack = { nav.popBackStack() },
+                                    navController = nav
+                                )
                             }
+
 
                             composable("trackManager") {
                                 TrackManagerScreen(
@@ -570,6 +574,14 @@ class MainActivity : ComponentActivity() {
                                     onBack = { nav.popBackStack() }
                                 )
                             }
+
+                            composable("helpSettings_trailBrake") {
+                                HelpSettingsScreen(
+                                    onBack = { nav.popBackStack() },
+                                    highlight = "trailBrake"
+                                )
+                            }
+
 
 
 

@@ -1,6 +1,7 @@
 // app/src/main/java/com/hotlaps/dynamic/ui/settings/SettingsScreen.kt
 package com.hotlaps.dynamic.ui.settings
 
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -19,12 +20,16 @@ import com.hotlaps.dynamic.data.SettingsRepo
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.ui.Alignment
+import androidx.navigation.NavController
 import com.hotlaps.dynamic.data.SmoothingLevel
 
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+fun SettingsScreen(onBack: () -> Unit, navController: NavController)
+ {
     val context = LocalContext.current
     val repo = remember(context) { SettingsRepo(context) }
     val scope = rememberCoroutineScope()
@@ -75,7 +80,23 @@ fun SettingsScreen(onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // --- Control 1: Trail Brake Threshold (G)
-            Text("Trail Brake Threshold (G)")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Trail Brake Threshold (G)")
+
+                Spacer(Modifier.width(6.dp))
+
+                Icon(
+                    imageVector = Icons.Default.Info,
+                    contentDescription = "What is Trail Braking Threshold?",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .size(20.dp)
+                        .clickable {
+                            navController.navigate("helpSettings_trailBrake")
+                        }
+                )
+            }
+
             OutlinedTextField(
                 value = trailText,
                 onValueChange = { trailText = it },

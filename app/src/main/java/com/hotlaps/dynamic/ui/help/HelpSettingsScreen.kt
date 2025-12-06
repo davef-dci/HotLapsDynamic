@@ -13,9 +13,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+
+
 @Composable
 fun HelpSettingsScreen(
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    highlight: String? = null
 ) {
     HelpScaffold(
         title = "Settings",
@@ -93,10 +102,17 @@ fun HelpSettingsScreen(
             Spacer(Modifier.height(16.dp))
 
             // Trail braking threshold
+            val isHighlighted = (highlight == "trailBrake")
+
             Text(
                 text = "Trail braking threshold (G)",
-                style = MaterialTheme.typography.titleSmall
+                style = if (isHighlighted)
+                    MaterialTheme.typography.titleSmall.copy(color = MaterialTheme.colorScheme.primary)
+                else
+                    MaterialTheme.typography.titleSmall
             )
+
+
             Spacer(Modifier.height(4.dp))
             Text(
                 text = "Controls when the app considers you to be “trail braking.” This value is a G-force " +
