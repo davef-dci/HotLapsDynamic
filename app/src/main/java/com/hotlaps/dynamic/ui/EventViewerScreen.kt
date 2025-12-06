@@ -515,7 +515,8 @@ fun EventViewerScreen(
                     GTimePlot(
                         samples = samplesForTimePlot,
                         selectedCornerVisits = selectedCornerVisits,
-                        cornerVisitColors = cornerVisitColors
+                        cornerVisitColors = cornerVisitColors,
+                        replaySample = replaySampleForTime    // 👈 NEW
                     )
 
                     Spacer(Modifier.height(8.dp))
@@ -997,7 +998,8 @@ fun SimpleGGPlot(
 fun GTimePlot(
     samples: List<EventSample>,
     selectedCornerVisits: Set<Pair<Int, Int>>,
-    cornerVisitColors: Map<Pair<Int, Int>, Color>
+    cornerVisitColors: Map<Pair<Int, Int>, Color>,
+    replaySample: EventSample? = null
 ) {
     val axisColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
 
@@ -1063,7 +1065,8 @@ fun GTimePlot(
             selectG = { it.longG },
             selectedCornerVisits = selectedCornerVisits,
             cornerVisitColors = cornerVisitColors,
-            showTimeAxisLabels = false
+            showTimeAxisLabels = false,
+            replaySample = replaySample
         )
 
         Spacer(Modifier.height(12.dp))
@@ -1082,7 +1085,8 @@ fun GTimePlot(
             selectG = { it.latG },
             selectedCornerVisits = selectedCornerVisits,
             cornerVisitColors = cornerVisitColors,
-            showTimeAxisLabels = true   // only bottom plot shows time labels
+            showTimeAxisLabels = true,   // only bottom plot shows time labels
+            replaySample = replaySample
         )
     }
 }
@@ -1101,8 +1105,12 @@ private fun TimeSubPlot(
     selectG: (EventSample) -> Float,
     selectedCornerVisits: Set<Pair<Int, Int>>,
     cornerVisitColors: Map<Pair<Int, Int>, Color>,
-    showTimeAxisLabels: Boolean
+    showTimeAxisLabels: Boolean,
+    replaySample: EventSample? = null
 ) {
+
+    val replayLineColor = MaterialTheme.colorScheme.primary
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -1166,6 +1174,22 @@ private fun TimeSubPlot(
                     apexLabelPaint
                 )
             }
+
+            // Moving vertical line at the current replay sample time
+            replaySample?.let { rs ->
+                val t = rs.intervalMs.toFloat()
+                if (t in minT..maxT) {
+                    val xReplay = xFor(rs.intervalMs)
+                    drawLine(
+                        color = replayLineColor,
+                        start = Offset(xReplay, 0f),
+                        end = Offset(xReplay, h),
+                        strokeWidth = stroke * 1.5f
+                    )
+                }
+            }
+
+
 
             // 0G baseline
             drawLine(
