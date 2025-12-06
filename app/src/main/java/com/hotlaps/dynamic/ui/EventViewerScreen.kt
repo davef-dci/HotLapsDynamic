@@ -412,16 +412,7 @@ fun EventViewerScreen(
                     }
                 }
 
-// Map replayProgress (0f..1f) to an index into the current apex-window samples
-            val replayIndex = remember(samplesForPlotGrouped, replayProgress) {
-                if (samplesForPlotGrouped.isEmpty()) {
-                    -1
-                } else {
-                    ((samplesForPlotGrouped.size - 1) * replayProgress)
-                        .roundToInt()
-                        .coerceIn(0, samplesForPlotGrouped.size - 1)
-                }
-            }
+
 
 // NEW: For the G-G plot, pick one sample per selected corner/visit
             val replaySamplesForGG: List<EventSample> =
@@ -461,12 +452,23 @@ fun EventViewerScreen(
 
 
 
-// The corresponding sample used for the time plot (with intervalMs shifted around apex)
+// NEW: Map replayProgress (0f..1f) to a target time in the visible window,
+// then pick the sample whose time is closest to that.
             val replaySampleForTime: EventSample? =
-                if (replayIndex in samplesForTimePlot.indices) {
-                    samplesForTimePlot[replayIndex]
-                } else {
-                    null
+                remember(samplesForTimePlot, replayProgress) {
+                    if (samplesForTimePlot.isEmpty()) {
+                        null
+                    } else {
+                        val minT = samplesForTimePlot.minOf { it.intervalMs }
+                        val maxT = samplesForTimePlot.maxOf { it.intervalMs }
+                        val spanT = (maxT - minT).coerceAtLeast(1L)
+
+                        val targetT = minT + (spanT * replayProgress).toLong()
+
+                        samplesForTimePlot.minByOrNull { sample ->
+                            kotlin.math.abs(sample.intervalMs - targetT)
+                        }
+                    }
                 }
 
 
