@@ -531,7 +531,8 @@ fun EventViewerScreen(
 
                     TimePlotLegend(
                         selectedCornerVisits = selectedCornerVisits,
-                        cornerVisitColors = cornerVisitColors
+                        cornerVisitColors = cornerVisitColors,
+                        replaySamplesByGroup = replaySamplesByGroup
                     )
                 }
 
@@ -1308,9 +1309,14 @@ private fun TimeSubPlot(
             var lastPoint: Offset? = null
             var lastKey: Pair<Int, Int>? = null
 
+            val hasSelection = selectedCornerVisits.isNotEmpty()
+
             samples.forEach { s ->
                 val key = s.cornerIndex to s.visitNumber
-                if (!selectedCornerVisits.contains(key)) return@forEach
+
+                // If there ARE selected visits, filter by them.
+                // If there are NO selected visits (no corners), draw everything.
+                if (hasSelection && !selectedCornerVisits.contains(key)) return@forEach
 
                 val x = xFor(s.intervalMs)
                 val y = yFor(selectG(s))
@@ -1331,6 +1337,7 @@ private fun TimeSubPlot(
                 lastPoint = p
                 lastKey = key
             }
+
         }
 
         // Label for this subplot (top-left overlay)
@@ -1526,7 +1533,8 @@ private fun MaxGSummaryRow(
 @Composable
 private fun TimePlotLegend(
     selectedCornerVisits: Set<Pair<Int, Int>>,
-    cornerVisitColors: Map<Pair<Int, Int>, Color>
+    cornerVisitColors: Map<Pair<Int, Int>, Color>,
+    replaySamplesByGroup: Map<Pair<Int, Int>, EventSample> = emptyMap()
 ) {
     if (selectedCornerVisits.isEmpty()) {
         Text(
@@ -1565,10 +1573,22 @@ private fun TimePlotLegend(
 
                 Spacer(Modifier.width(8.dp))
 
+                val baseLabel = "Corner $cornerIdx – Visit $visitNum"
+                val replaySample = replaySamplesByGroup[cornerIdx to visitNum]
+
+                val labelWithG = if (replaySample != null) {
+                    val lat = replaySample.latG
+                    val lon = replaySample.longG
+                    "$baseLabel  (Lat: ${"%.2f".format(lat)}G, Long: ${"%.2f".format(lon)}G)"
+                } else {
+                    baseLabel
+                }
+
                 Text(
-                    text = "Corner $cornerIdx – Visit $visitNum",
+                    text = labelWithG,
                     style = MaterialTheme.typography.bodySmall
                 )
+
             }
         }
     }
