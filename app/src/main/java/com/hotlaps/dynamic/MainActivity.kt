@@ -52,6 +52,10 @@ import com.hotlaps.dynamic.viewmodel.DriveViewModel
 import com.hotlaps.dynamic.viewmodel.TrackSelectionViewModel
 import kotlinx.coroutines.launch
 import com.hotlaps.dynamic.ui.TrackPickerScreen
+import com.hotlaps.dynamic.ui.help.HelpGForceMapScreen
+import com.hotlaps.dynamic.ui.help.HelpTracksScreen
+import com.hotlaps.dynamic.ui.help.HelpEventsScreen
+import com.hotlaps.dynamic.ui.help.HelpSettingsScreen
 
 
 // ---------------------------------------------------------------------
@@ -442,24 +446,84 @@ class MainActivity : ComponentActivity() {
                             }
 
                             composable("helpAbout") {
-                                HelpAboutScreen()
+                                HelpAboutScreen(
+                                    onBack = { nav.popBackStack() }
+                                )
                             }
+
+                            composable("helpTracks") {
+                                HelpTracksScreen(
+                                    onBack = { nav.popBackStack() }
+                                )
+                            }
+
+                            composable("helpEvents") {
+                                HelpEventsScreen(
+                                    onBack = { nav.popBackStack() }
+                                )
+                            }
+
+                            composable("helpSettings") {
+                                HelpSettingsScreen(
+                                    onBack = { nav.popBackStack() }
+                                )
+                            }
+
+
+
 
                             composable("help") {
                                 HelpScreen(
                                     onBack = { nav.popBackStack() },
+
                                     onQuickStartClick = {
                                         nav.navigate("helpQuickStart") {
                                             launchSingleTop = true
                                         }
                                     },
+
                                     onCalibrationClick = {
                                         nav.navigate("helpCalibration") {
                                             launchSingleTop = true
                                         }
+                                    },
+
+
+
+
+                                    onAboutClick = {
+                                        nav.navigate("helpAbout") {
+                                            launchSingleTop = true
+                                        }
+                                    },
+
+                                    onGForceMapClick = {
+                                        nav.navigate("helpGForceMap") {
+                                            launchSingleTop = true
+                                        }
+                                    },
+
+                                            onTracksClick = {
+                                        nav.navigate("helpTracks") {
+                                            launchSingleTop = true
+                                        }
+                                    },
+
+                                    onEventsClick = {
+                                        nav.navigate("helpEvents") {
+                                            launchSingleTop = true
+                                        }
+                                    },
+
+                                    onSettingsClick = {
+                                        nav.navigate("helpSettings") {
+                                            launchSingleTop = true
+                                        }
                                     }
+
                                 )
                             }
+
 
 
 
@@ -474,6 +538,13 @@ class MainActivity : ComponentActivity() {
                                     onBack = { nav.popBackStack() }
                                 )
                             }
+
+                            composable("helpGForceMap") {
+                                HelpGForceMapScreen(
+                                    onBack = { nav.popBackStack() }
+                                )
+                            }
+
 
 
                         }

@@ -10,51 +10,51 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.hotlaps.dynamic.ui.help.HelpScaffold
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 
 @Composable
-fun HelpAboutScreen() {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp)
-    ) {
-        // --- About section ---
-        Text(
-            text = "About HotLaps Dynamic",
-            style = MaterialTheme.typography.headlineSmall
-        )
+fun HelpAboutScreen(
+    onBack: () -> Unit
+) {
+    HelpScaffold(
+        title = "About Apex Dynamics",
+        onBack = onBack
+    ) { innerPadding ->
 
-        Spacer(Modifier.height(8.dp))
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState())
+        ) {
+            Text(
+                text = "About Apex Dynamics",
+                style = MaterialTheme.typography.headlineSmall
+            )
 
-        Text(
-            text = "HotLaps Dynamic helps you understand your car's performance " +
-                    "by plotting G-forces and organizing data by track and corner.",
-            style = MaterialTheme.typography.bodyMedium
-        )
+            Spacer(Modifier.height(12.dp))
 
-        Spacer(Modifier.height(24.dp))
+            Text(
+                text = """
+Apex Dynamics is a precision motorsports telemetry tool that helps drivers understand performance using G-force, GPS, and corner-based analysis. It is designed for autocross, HPDE, track days, karting, and club racing.
 
-        // --- Version info (for now just hard-coded text; we can improve later) ---
-        Text(
-            text = "Version: 0.1.0",
-            style = MaterialTheme.typography.bodySmall
-        )
+KEY FEATURES
+• Dynamic G-Force Map with live G-circle visualization
+• Lateral & longitudinal G-force vs. time charts
+• Automatic corner visit detection
+• Apex alignment for lap-to-lap comparison
+• Track creation & corner management
+• CSV export for coaching or advanced analysis
 
-        Spacer(Modifier.height(32.dp))
+Apex Dynamics provides clear, data-driven insight into braking, corner entry, trail braking, acceleration, and apex execution—helping drivers improve consistency and speed.
 
-        // --- Help section ---
-        Text(
-            text = "Quick Help",
-            style = MaterialTheme.typography.titleMedium
-        )
-
-        Spacer(Modifier.height(8.dp))
-
-        Text(
-            text = "• Drive: Select a track, start recording, and watch the G-G plot update in real time.\n" +
-                    "• Tracks: Define your tracks and corners so the app can group data by corner.\n" +
-                    "• Events: After a session, review and export events as CSV for deeper analysis.",
-            style = MaterialTheme.typography.bodyMedium
-        )
+No external hardware required. For safety, do not interact with the app while driving.
+""".trimIndent(),
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
     }
 }

@@ -21,6 +21,12 @@ fun HelpScreen(
     onBack: () -> Unit,
     onQuickStartClick: () -> Unit = {},
     onCalibrationClick: () -> Unit = {},
+    onAboutClick: () -> Unit = {},
+    onGForceMapClick: () -> Unit = {},
+    onTracksClick: () -> Unit = {},
+    onEventsClick: () -> Unit = {},
+    onSettingsClick: () -> Unit = {},
+
     modifier: Modifier = Modifier
 ) {
     HelpScaffold(
@@ -36,62 +42,86 @@ fun HelpScreen(
             contentPadding = PaddingValues(bottom = 24.dp)
         ) {
 
-            // Quick Start Guide row
+            // About Apex Dynamics
             item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp)
-                        .clickable { onQuickStartClick() },
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp)
-                    ) {
-                        Text(
-                            text = "Quick Start Guide",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                    }
-                }
-            }
-
-            // Understanding Calibration row – now clickable
-            item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp)
-                        .clickable { onCalibrationClick() },
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp)
-                    ) {
-                        Text(
-                            text = "Understanding Calibration",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                    }
-                }
-            }
-
-            // Other topics listed normally (non-clickable for now)
-            items(
-                listOf(
-                    "G-Force Map",
-                    "Tracks",
-                    "Events",
-                    "Settings",
-                    "Troubleshooting"
+                HelpCardRow(
+                    title = "About Apex Dynamics",
+                    onClick = onAboutClick
                 )
-            ) { topic ->
-                HelpTopicRow(topic)
             }
+
+            // Quick Start Guide
+            item {
+                HelpCardRow(
+                    title = "Quick Start Guide",
+                    onClick = onQuickStartClick
+                )
+            }
+
+            // Understanding Calibration
+            item {
+                HelpCardRow(
+                    title = "Understanding Calibration",
+                    onClick = onCalibrationClick
+                )
+            }
+
+            // G-Force Map
+            item {
+                HelpCardRow(
+                    title = "G-Force Map",
+                    onClick = onGForceMapClick
+                )
+            }
+
+            // Tracks
+            item {
+                HelpCardRow(
+                    title = "Tracks",
+                    onClick = onTracksClick
+                )
+            }
+
+            // Events
+            item {
+                HelpCardRow(
+                    title = "Events",
+                    onClick = onEventsClick
+                )
+            }
+
+            // Settings
+            item {
+                HelpCardRow(
+                    title = "Settings",
+                    onClick = onSettingsClick
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HelpCardRow(
+    title: String,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .clickable { onClick() },
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium
+            )
         }
     }
 }
@@ -102,7 +132,6 @@ private fun HelpTopicRow(topic: String) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp)
-            // Still disabled for now; we can enable these later.
             .clickable(enabled = false) { },
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
