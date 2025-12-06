@@ -174,7 +174,7 @@ fun GGScreen(
     var scaleMode by remember { mutableStateOf(GGScaleMode.Auto) }
 
     // Auto-scale state
-    var autoMaxG by remember { mutableStateOf(0.5f) }   // start small
+    var autoMaxG by remember { mutableStateOf(0.25f) }   // start small
     var observedPeakG by remember { mutableStateOf(0f) }
 
     fun updateAutoScaleFromPeaks(
@@ -786,7 +786,7 @@ fun GGScreen(
                                                 if (mode == GGScaleMode.Auto) {
                                                     // Reset auto scaling when switching back to Auto
                                                     observedPeakG = 0f
-                                                    autoMaxG = 0.5f
+                                                    autoMaxG = 0.25f
                                                 }
                                             },
                                             currentAutoMaxG = autoMaxG
