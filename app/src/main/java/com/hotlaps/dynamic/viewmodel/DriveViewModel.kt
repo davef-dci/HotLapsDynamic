@@ -1411,9 +1411,9 @@ fun updateCornerCaptureState(
 
 
     /**
-     * Debug-only: replay simulation.csv which has a truncated schema:
+     * Debug-only: replay simulation2.csv which has schema:
      *
-     *   intervalMs,gpsLat,gpsLon,rawLatG,rawLongG
+     *   deltaMs,gpsLat,gpsLon,speed,rawLatG,rawLongG
      *
      * This will:
      *  - create a new simulated event (if none exists)
@@ -1426,8 +1426,7 @@ fun updateCornerCaptureState(
         playbackSpeed: Double = 1.0,
         emaTauMs: Float? = null,
         maWindowSize: Int = 1
-    )
- {
+    ) {
         val currentTrack = track
         if (currentTrack == null) {
             Log.w("DebugSim", "startSimulationFromTruncatedCsv called with null track")
@@ -1442,32 +1441,40 @@ fun updateCornerCaptureState(
 
         val event = _currentEvent.value
         if (event == null) {
-            Log.w("DebugSim", "No current event after startManualEvent; aborting truncated simulation")
+            Log.w(
+                "DebugSim",
+                "No current event after startManualEvent; aborting truncated simulation"
+            )
             isDeskSimulationRunning = false
             return
         }
 
-     // Use the same smoothing behaviour as the live app
-     val simTauMs = emaTauMs
-     val simMaWindow = maWindowSize.coerceAtLeast(1)
-     val simSmoother = com.hotlaps.dynamic.util.GForceSmoother(
-         tauMs = simTauMs,
-         maWindowSize = simMaWindow
-     )
+        // Use the same smoothing behaviour as the live app
+        val simTauMs = emaTauMs
+        val simMaWindow = maWindowSize.coerceAtLeast(1)
+        val simSmoother = com.hotlaps.dynamic.util.GForceSmoother(
+            tauMs = simTauMs,
+            maWindowSize = simMaWindow
+        )
 
-
-
-     viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 val eventsDir = FileHelper.appEventsDir(context)
                 if (eventsDir == null || !eventsDir.exists()) {
-                    Log.w("DebugSim", "appEventsDir not available; cannot load simulation.csv")
+                    Log.w(
+                        "DebugSim",
+                        "appEventsDir not available; cannot load simulation2.csv"
+                    )
                     return@launch
                 }
 
-                val simFile = java.io.File(eventsDir, "simulation.csv")
+                // 👇 NEW: use simulation2.csv
+                val simFile = java.io.File(eventsDir, "simulation2.csv")
                 if (!simFile.exists()) {
-                    Log.w("DebugSim", "simulation.csv not found at ${simFile.absolutePath}")
+                    Log.w(
+                        "DebugSim",
+                        "simulation2.csv not found at ${simFile.absolutePath}"
+                    )
                     return@launch
                 }
 
@@ -1476,29 +1483,33 @@ fun updateCornerCaptureState(
                         .map { it.trim() }
                         .filter { it.isNotEmpty() }
                 } catch (e: Exception) {
-                    Log.e("DebugSim", "Error reading simulation.csv", e)
+                    Log.e("DebugSim", "Error reading simulation2.csv", e)
                     return@launch
                 }
 
                 if (allLines.isEmpty()) {
-                    Log.w("DebugSim", "simulation.csv is empty")
+                    Log.w("DebugSim", "simulation2.csv is empty")
                     return@launch
                 }
 
-                val dataLines = if (allLines.first().startsWith("intervalMs", ignoreCase = true)) {
-                    allLines.drop(1)
-                } else {
-                    allLines
-                }
+                // Strip header row if present (intervalMs OR deltaMs)
+                val dataLines =
+                    if (allLines.first().startsWith("intervalMs", ignoreCase = true) ||
+                        allLines.first().startsWith("deltaMs", ignoreCase = true)
+                    ) {
+                        allLines.drop(1)
+                    } else {
+                        allLines
+                    }
 
                 if (dataLines.isEmpty()) {
-                    Log.w("DebugSim", "simulation.csv has no data rows")
+                    Log.w("DebugSim", "simulation2.csv has no data rows")
                     return@launch
                 }
 
                 Log.d(
                     "DebugSim",
-                    "Starting truncated simulation from simulation.csv with ${dataLines.size} rows " +
+                    "Starting truncated simulation from simulation2.csv with ${dataLines.size} rows " +
                             "into eventId=${event.id}, track=${currentTrack.name}, playbackSpeed=$playbackSpeed"
                 )
 
@@ -1506,19 +1517,27 @@ fun updateCornerCaptureState(
 
                 for (line in dataLines) {
                     val parts = line.split(',')
-                    if (parts.size < 5) {
-                        Log.w("DebugSim", "Skipping malformed line in simulation.csv: '$line'")
+                    if (parts.size < 6) {
+                        Log.w(
+                            "DebugSim",
+                            "Skipping malformed line (expected 6 columns): '$line'"
+                        )
                         continue
                     }
 
+                    // 0: deltaMs / intervalMs
                     val intervalMs = parts[0].toLongOrNull()
+                    // 1–2: GPS position
                     val gpsLat = parts[1].toDoubleOrNull()
                     val gpsLon = parts[2].toDoubleOrNull()
-                    val rawLat = parts[3].toFloatOrNull()
-                    val rawLong = parts[4].toFloatOrNull()
+                    // 3: speed in m/s  👈 NEW
+                    val gpsSpeed = parts[3].toDoubleOrNull()
+                    // 4–5: raw G's
+                    val rawLat = parts[4].toFloatOrNull()
+                    val rawLong = parts[5].toFloatOrNull()
 
                     if (intervalMs == null || gpsLat == null || gpsLon == null ||
-                        rawLat == null || rawLong == null
+                        gpsSpeed == null || rawLat == null || rawLong == null
                     ) {
                         Log.w("DebugSim", "Skipping line with parse error: '$line'")
                         continue
@@ -1540,23 +1559,24 @@ fun updateCornerCaptureState(
                     }
                     lastIntervalMs = intervalMs
 
-                    // Simulated UTC time for this sample (same base as your intervalMs fix)
+                    // Simulated UTC time for this sample
                     val simUtc = event.createdUtcMs + intervalMs
 
-// Run raw Gs through the same EMA + MA pipeline as live driving
+                    // Run raw Gs through the same EMA + MA pipeline as live driving
                     val smoothedSample = simSmoother.addSample(
                         rawLatG = rawLat,
                         rawLongG = rawLong,
                         sampleTimeMs = simUtc
                     )
 
-// Feed GPS into VM
+                    // 👇 NEW: feed GPS *with speed* into VM
                     updateGps(
                         lat = gpsLat,
-                        lon = gpsLon
+                        lon = gpsLon,
+                        speedMps = gpsSpeed
                     )
 
-// Feed smoothed + raw G-forces into VM
+                    // Feed smoothed + raw G-forces into VM
                     updateGForces(
                         smoothedLat = smoothedSample.latG,
                         smoothedLong = smoothedSample.longG,
@@ -1564,10 +1584,6 @@ fun updateCornerCaptureState(
                         rawLong = smoothedSample.rawLongG,
                         z = 0f
                     )
-
-
-// Simulated UTC timeline: event start + intervalMs from CSV
-
 
                     // Corner FSM using simulated time
                     updateCornerCaptureState(
@@ -1584,7 +1600,7 @@ fun updateCornerCaptureState(
 
                 Log.d(
                     "DebugSim",
-                    "Finished truncated simulation from simulation.csv into eventId=${event.id}"
+                    "Finished truncated simulation from simulation2.csv into eventId=${event.id}"
                 )
 
                 stopEvent()
@@ -1594,8 +1610,6 @@ fun updateCornerCaptureState(
             }
         }
     }
-
-
 
 
 
