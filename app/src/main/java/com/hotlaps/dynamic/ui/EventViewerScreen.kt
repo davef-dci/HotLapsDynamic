@@ -57,6 +57,9 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.text.style.TextAlign
 
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
 
 
 
@@ -209,25 +212,24 @@ fun EventViewerScreen(
             Spacer(Modifier.height(12.dp))
 
             // Chart mode buttons
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
+            SingleChoiceSegmentedButtonRow(
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Button(
+                SegmentedButton(
+                    selected = chartMode == ChartMode.GG,
                     onClick = { chartMode = ChartMode.GG },
-                    enabled = chartMode != ChartMode.GG
-                ) {
-                    Text("G-G Plot")
-                }
+                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                    label = { Text("G-G Plot") }
+                )
 
-                Button(
+                SegmentedButton(
+                    selected = chartMode == ChartMode.G_VS_TIME,
                     onClick = { chartMode = ChartMode.G_VS_TIME },
-                    enabled = chartMode != ChartMode.G_VS_TIME
-                ) {
-                    Text("G vs Time")
-                }
+                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                    label = { Text("G vs Time") }
+                )
             }
+
 
             Spacer(Modifier.height(16.dp))
 
