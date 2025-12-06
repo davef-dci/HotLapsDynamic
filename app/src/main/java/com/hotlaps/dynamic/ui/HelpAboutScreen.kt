@@ -5,19 +5,24 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.hotlaps.dynamic.sendFeedbackEmail
 import com.hotlaps.dynamic.ui.help.HelpScaffold
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 
 @Composable
 fun HelpAboutScreen(
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
+
     HelpScaffold(
         title = "About Apex Dynamics",
         onBack = onBack
@@ -55,6 +60,16 @@ No external hardware required. For safety, do not interact with the app while dr
 """.trimIndent(),
                 style = MaterialTheme.typography.bodyMedium
             )
+
+            Spacer(Modifier.height(24.dp))
+
+            Button(
+                onClick = {
+                    context.sendFeedbackEmail(currentScreen = "Help & About")
+                }
+            ) {
+                Text("Send Feedback")
+            }
         }
     }
 }

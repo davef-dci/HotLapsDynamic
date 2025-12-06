@@ -119,6 +119,8 @@ class MainActivity : ComponentActivity() {
                     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
                     val scope = rememberCoroutineScope()
                     val nav = rememberNavController()
+                    val context = LocalContext.current
+
 
                     ModalNavigationDrawer(
                         drawerState = drawerState,
@@ -223,12 +225,36 @@ class MainActivity : ComponentActivity() {
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = "Help",
+                                        text = "Help and About",
                                         fontSize = 22.sp,
                                         style = MaterialTheme.typography.bodyLarge,
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
                                 }
+                                // Send Feedback
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            scope.launch {
+                                                drawerState.close()
+                                                // Launch email feedback
+                                                context.sendFeedbackEmail(currentScreen = "Main Drawer")
+                                            }
+                                        }
+                                        .padding(vertical = 14.dp, horizontal = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Send Feedback",
+                                        fontSize = 22.sp,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+
+
+
                             }
                         }
                     ) {
