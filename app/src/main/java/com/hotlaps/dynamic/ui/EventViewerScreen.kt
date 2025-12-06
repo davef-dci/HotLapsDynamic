@@ -49,6 +49,8 @@ import java.io.File
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.max
+import kotlin.math.roundToInt
+
 
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -404,6 +406,51 @@ fun EventViewerScreen(
                     }
                 }
 
+// Map replayProgress (0f..1f) to an index into the current apex-window samples
+            val replayIndex = remember(samplesForPlotGrouped, replayProgress) {
+                if (samplesForPlotGrouped.isEmpty()) {
+                    -1
+                } else {
+                    ((samplesForPlotGrouped.size - 1) * replayProgress)
+                        .roundToInt()
+                        .coerceIn(0, samplesForPlotGrouped.size - 1)
+                }
+            }
+
+// NEW: For the G-G plot, pick one sample per selected corner/visit
+            val replaySamplesForGG: List<EventSample> =
+                remember(samplesForPlotGrouped, selectedCornerVisits, replayProgress) {
+                    if (samplesForPlotGrouped.isEmpty() || selectedCornerVisits.isEmpty()) {
+                        emptyList()
+                    } else {
+                        // Group samples by (cornerIndex, visitNumber)
+                        val byGroup = samplesForPlotGrouped
+                            .filter { selectedCornerVisits.contains(it.cornerIndex to it.visitNumber) }
+                            .groupBy { it.cornerIndex to it.visitNumber }
+
+                        byGroup.values.flatMap { list ->
+                            if (list.isEmpty()) {
+                                emptyList()
+                            } else {
+                                val idx = ((list.size - 1) * replayProgress)
+                                    .roundToInt()
+                                    .coerceIn(0, list.size - 1)
+                                listOf(list[idx])
+                            }
+                        }
+                    }
+                }
+
+// The corresponding sample used for the time plot (with intervalMs shifted around apex)
+            val replaySampleForTime: EventSample? =
+                if (replayIndex in samplesForTimePlot.indices) {
+                    samplesForTimePlot[replayIndex]
+                } else {
+                    null
+                }
+
+
+
             val neutralSampleColor =
                 MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
 
@@ -423,6 +470,7 @@ fun EventViewerScreen(
                 if (chartMode == ChartMode.GG) {
                     SimpleGGPlot(
                         samples = samplesForPlotGrouped,
+                        replaySamples = replaySamplesForGG,
                         colorForSample = { sample ->
                             val key = sample.cornerIndex to sample.visitNumber
                             cornerVisitColors[key] ?: neutralSampleColor
@@ -683,9 +731,11 @@ fun EventViewerScreen(
 @Composable
 fun SimpleGGPlot(
     samples: List<EventSample>,
+    replaySamples: List<EventSample> = emptyList(),
     colorForSample: (EventSample) -> Color
 ) {
     val axisColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+    val highlightColor = MaterialTheme.colorScheme.primary
 
     val density = LocalDensity.current
     val labelTextSizePx = with(density) { 10.sp.toPx() }
@@ -830,7 +880,63 @@ fun SimpleGGPlot(
                         lastPoint = clamped
                         lastKey = key
                     }
+
+// NEW — Highlight the replay sample
+                    if (samples.isNotEmpty()) {
+                        val scalePerG = (radius * 0.95f) / maxG
+                        var lastPoint: Offset? = null
+                        var lastKey: Pair<Int, Int>? = null
+
+                        samples.forEach { sample ->
+                            val lat = sample.latG
+                            val lon = sample.longG
+                            val px = cx + lat * scalePerG
+                            val py = cy - lon * scalePerG
+                            val clamped = clampToCircle(px, py)
+
+                            val color = colorForSample(sample)
+                            val key = sample.cornerIndex to sample.visitNumber
+
+                            if (lastPoint != null && lastKey == key) {
+                                drawLine(
+                                    color = color,
+                                    start = lastPoint!!,
+                                    end = clamped,
+                                    strokeWidth = 1.dp.toPx()
+                                )
+                            }
+
+                            drawCircle(
+                                color = color,
+                                radius = 1.dp.toPx(),
+                                center = clamped
+                            )
+
+                            lastPoint = clamped
+                            lastKey = key
+                        }
+
+                        // NEW: draw a highlight dot for each replay sample
+                        replaySamples.forEach { rs ->
+                            val lat = rs.latG
+                            val lon = rs.longG
+                            val px = cx + lat * scalePerG
+                            val py = cy - lon * scalePerG
+                            val clamped = clampToCircle(px, py)
+
+                            drawCircle(
+                                color = colorForSample(rs),   // match line color
+                                radius = 4.dp.toPx(),
+                                center = clamped
+                            )
+                        }
+                    }
+
                 }
+
+
+
+
             }
         }
 
