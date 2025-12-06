@@ -12,7 +12,6 @@ import java.util.TimeZone
 import androidx.core.content.FileProvider
 import android.content.Intent
 
-
 /**
  * Responsible for saving and loading Event sessions.
  *
@@ -22,8 +21,9 @@ import android.content.Intent
 object EventStorage {
 
     private const val TAG = "EventStorage"
+    // speedInterpolator is no longer used in appendSample, but we can keep
+    // the class around if we want to reuse it later.
     private val speedInterpolator = SpeedInterpolator()
-
 
     // Single lock for all event CSV file access.
     // We only write one event at a time, so a global lock is fine.
@@ -34,7 +34,6 @@ object EventStorage {
     // -----------------------
     private fun eventsDir(context: Context): File? =
         FileHelper.eventsDir(context)
-
 
     // -----------------------
     // Event creation
@@ -48,17 +47,16 @@ object EventStorage {
             name = name,
             trackId = trackId,
             trackName = trackName,
-            startTime = now,          // 👈 NEW: event start time
-            displayName = name,       // 👈 NEW: human-friendly name (same as name for now)
+            startTime = now,          // event start time
+            displayName = name,       // human-friendly name (same as name for now)
             createdUtcMs = now,       // when event began
             notes = null
         )
     }
 
-
     // -----------------------
-// Append a sample (CSV per event)
-// -----------------------
+    // Append a sample (CSV per event)
+    // -----------------------
     fun appendSample(
         context: Context,
         sample: EventSample,
@@ -84,25 +82,13 @@ object EventStorage {
                     )
                 }
 
-
                 val localTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
                     .apply { timeZone = TimeZone.getDefault() }
                     .format(Date(sample.utcMs))
 
-
-// Interpolation input: GPS gives new speed only on GPS updates
-                val rawSpeed = sample.speedMps
-
-                if (rawSpeed != null) {
-                    // Only GPS fix updates should call this
-                    speedInterpolator.registerGpsFix(sample.utcMs, rawSpeed)
-                }
-
-// Interpolated smoothed speed
-                val interpSpeed = speedInterpolator.interpolateSpeed(sample.utcMs) ?: rawSpeed
-                val speedStr = interpSpeed?.toString() ?: ""
-
-
+                // For now, just write whatever speed was present in the sample.
+                // (Offline interpolation pass will refine this later.)
+                val speedStr = sample.speedMps?.toString() ?: ""
 
                 // Write one CSV line for this sample
                 val line = buildString {
@@ -144,18 +130,12 @@ object EventStorage {
                     append('\n')
                 }
 
-
-
-
-
-
                 file.appendText(line)
             } catch (e: Exception) {
                 Log.e(TAG, "appendSample: error writing sample for event ${sample.eventId}", e)
             }
         }
     }
-
 
     // -----------------------
     // (Future) Load an event file
@@ -164,7 +144,6 @@ object EventStorage {
         // Implementation comes later
         return emptyList()
     }
-
 
     // -----------------------
     // Housekeeping helpers
@@ -221,7 +200,6 @@ object EventStorage {
         return copied
     }
 
-
     fun updateEventNameInCsv(context: Context, eventId: Long, newName: String) {
         val dir = eventsDir(context) ?: return
         val file = File(dir, "event_${eventId}.csv")
@@ -239,8 +217,8 @@ object EventStorage {
             updatedLines.add(header)
 
             // We know header is:
-            // intervalMs,utcMs,trackName,eventName,cornerIndex,visitNumber,latG,longG,zG,gSum
-            val EVENT_NAME_INDEX = 3
+            // timestampMs,deltaMs,localTime,trackName,eventName,...
+            val EVENT_NAME_INDEX = 4  // NOTE: index in our new header if needed
 
             for (i in 1 until lines.size) {
                 val line = lines[i]
@@ -261,16 +239,14 @@ object EventStorage {
                 updatedLines.add(mutable.joinToString(","))
             }
 
-            file.writeText(lines.joinToString("\n") + "\n")
+            file.writeText(updatedLines.joinToString("\n") + "\n")
             Log.d(TAG, "updateEventNameInCsv: updated eventName for eventId=$eventId")
         } catch (e: Exception) {
             Log.e(TAG, "updateEventNameInCsv: error updating CSV for eventId=$eventId", e)
         }
     }
 
-
     // listing files to see what events exist
-
     fun listEventFiles(context: Context): List<File> {
         val dir = eventsDir(context) ?: return emptyList()
         val files = dir.listFiles() ?: return emptyList()
@@ -278,9 +254,7 @@ object EventStorage {
         return files.filter { file ->
             file.isFile && file.name.endsWith(".csv", ignoreCase = true)
         }.sortedBy { it.name.lowercase(Locale.getDefault()) }
-
     }
-
 
     fun loadSamplesFromCsv(file: File): List<EventSample> {
         val result = mutableListOf<EventSample>()
@@ -295,33 +269,33 @@ object EventStorage {
                 if (line.isBlank()) continue
 
                 val parts = line.split(',')
-                // We expect the full 22-column format written by appendSample()
+                // We expect the full 19-column format written by appendSample()
                 if (parts.size < 19) continue
 
-                // Column indices must match the NEW header:
-// 0 timestampMs (utcMs)
-// 1 deltaMs (intervalMs)
-// 2 localTime (ignored here)
-// 3 trackName
-// 4 eventName
-// 5 gpsLat
-// 6 gpsLon
-// 7 closestCornerIndex
-// 8 distanceToClosestCornerM
-// 9 rawLatG
-// 10 rawLongG
-// 11 latG
-// 12 longG
-// 13 gSum
-// 14 speed
-// 15 cornerIndex
-// 16 cornerName
-// 17 visitNumber
-// 18 Apex ("True" or "")
+                // Column indices must match the header:
+                // 0 timestampMs (utcMs)
+                // 1 deltaMs (intervalMs)
+                // 2 localTime (ignored here)
+                // 3 trackName
+                // 4 eventName
+                // 5 gpsLat
+                // 6 gpsLon
+                // 7 closestCornerIndex
+                // 8 distanceToClosestCornerM
+                // 9 rawLatG
+                // 10 rawLongG
+                // 11 latG
+                // 12 longG
+                // 13 gSum
+                // 14 speed
+                // 15 cornerIndex
+                // 16 cornerName
+                // 17 visitNumber
+                // 18 Apex ("True" or "")
 
                 val utcMs = parts[0].toLongOrNull() ?: continue
                 val intervalMs = parts[1].toLongOrNull() ?: 0L
-// parts[2] = localTime (ignored)
+                // parts[2] = localTime (ignored)
 
                 val trackName = parts[3]
                 val eventName = parts[4]
@@ -346,7 +320,6 @@ object EventStorage {
 
                 val isApexSample = parts[18].equals("true", ignoreCase = true)
 
-
                 val sample = EventSample(
                     eventId = 0L,   // arbitrary when loading loose CSV
                     cornerIndex = cornerIdx,
@@ -370,7 +343,6 @@ object EventStorage {
                     isApexSample = isApexSample
                 )
 
-
                 result.add(sample)
             }
         } catch (e: Exception) {
@@ -381,13 +353,15 @@ object EventStorage {
         return result
     }
 
-
     fun renameEventFile(context: Context, eventId: Long, newName: String) {
         val dir = eventsDir(context) ?: return
         val oldFile = File(dir, "event_${eventId}.csv")
 
         if (!oldFile.exists()) {
-            Log.w(TAG, "renameEventFile: old file not found for eventId=$eventId at ${oldFile.absolutePath}")
+            Log.w(
+                TAG,
+                "renameEventFile: old file not found for eventId=$eventId at ${oldFile.absolutePath}"
+            )
             return
         }
 
@@ -419,14 +393,15 @@ object EventStorage {
             if (ok) {
                 Log.d(TAG, "renameEventFile: renamed to ${newFile.name}")
             } else {
-                Log.e(TAG, "renameEventFile: renameTo() returned false from ${oldFile.name} to ${newFile.name}")
+                Log.e(
+                    TAG,
+                    "renameEventFile: renameTo() returned false from ${oldFile.name} to ${newFile.name}"
+                )
             }
         } catch (e: Exception) {
             Log.e(TAG, "renameEventFile: error renaming file", e)
         }
     }
-
-
 
     fun deleteEvents(context: Context, filesToDelete: List<File>): Int {
         val dir = eventsDir(context) ?: return 0
@@ -459,7 +434,6 @@ object EventStorage {
         context.startActivity(
             Intent.createChooser(intent, "Share CSV")
         )
-
     }
 
     fun shareMultipleEventCsv(context: Context, files: List<File>) {
@@ -487,7 +461,6 @@ object EventStorage {
         )
     }
 
-
     fun tagApexSampleInCsv(
         context: Context,
         eventId: Long,
@@ -512,7 +485,7 @@ object EventStorage {
             var bestLineIndex = -1
             var bestError = Long.MAX_VALUE
 
-            // NEW CSV layout (19 columns):
+            // CSV layout (19 columns):
             // 0  timestampMs (utcMs)
             // 1  deltaMs
             // 2  localTime
@@ -560,7 +533,7 @@ object EventStorage {
             val originalParts = dataLines[bestLineIndex].split(',').toMutableList()
             if (originalParts.size < 19) return
 
-            // Write the corner + visit + Apex flag into the NEW columns
+            // Write the corner + visit + Apex flag into the columns
             originalParts[15] = cornerIndex.toString()  // cornerIndex
             originalParts[16] = cornerName              // cornerName
             originalParts[17] = visitNumber.toString()  // visitNumber
@@ -581,9 +554,200 @@ object EventStorage {
         }
     }
 
+    /**
+     * Offline pass: recompute the `speed` column in an event CSV so that it is
+     * linearly interpolated between "anchor" speeds (rows where speed changes).
+     *
+     * This operates directly on the CSV file:
+     *   - reads all lines
+     *   - finds spans between speed changes
+     *   - rewrites the speed column (index 14) for each row in those spans
+     *
+     * Returns true on success, false on any error.
+     */
+    /**
+     * Offline pass: recompute the `speed` column in an event CSV so that it is
+     * linearly interpolated between GPS "anchor" points.
+     *
+     * We treat each change in (gpsLat,gpsLon) as an anchor. For each consecutive
+     * pair of anchors [i0, i1], we linearly interpolate speed for ALL rows in
+     * the inclusive range i0..i1 based on their timestamps.
+     *
+     * Returns true on success, false on any error.
+     */
+    fun recomputeInterpolatedSpeedForEvent(context: Context, eventId: Long): Boolean {
+        val dir = eventsDir(context) ?: return false
+        val file = File(dir, "event_${eventId}.csv")
+        if (!file.exists()) {
+            Log.w(TAG, "recomputeInterpolatedSpeedForEvent: no CSV found for eventId=$eventId")
+            return false
+        }
+
+        try {
+            val lines = file.readLines()
+            if (lines.size <= 1) {
+                Log.w(TAG, "recomputeInterpolatedSpeedForEvent: file has no data rows")
+                return false
+            }
+
+            val header = lines[0]
+            val dataLines = lines.subList(1, lines.size)
+
+            // Parse data rows into mutable token lists so we can overwrite speed.
+            val rows = mutableListOf<MutableList<String>>()
+            val timestamps = mutableListOf<Long>()
+            val speeds = mutableListOf<Double?>()
+            val gpsLat = mutableListOf<Double?>()
+            val gpsLon = mutableListOf<Double?>()
+
+            // Column indices (must match header written by appendSample)
+            val IDX_TIMESTAMP = 0
+            val IDX_GPS_LAT = 5
+            val IDX_GPS_LON = 6
+            val IDX_SPEED = 14
+
+            for (line in dataLines) {
+                if (line.isBlank()) continue
+
+                val parts = line.split(',').toMutableList()
+                if (parts.size <= IDX_SPEED) {
+                    // Malformed row, keep as-is and skip from interpolation
+                    rows.add(parts)
+                    timestamps.add(0L)
+                    speeds.add(null)
+                    gpsLat.add(null)
+                    gpsLon.add(null)
+                    continue
+                }
+
+                val utcMs = parts[IDX_TIMESTAMP].toLongOrNull()
+                val lat = parts[IDX_GPS_LAT].toDoubleOrNull()
+                val lon = parts[IDX_GPS_LON].toDoubleOrNull()
+                val speed = parts[IDX_SPEED].toDoubleOrNull()
+
+                rows.add(parts)
+                timestamps.add(utcMs ?: 0L)
+                speeds.add(speed)
+                gpsLat.add(lat)
+                gpsLon.add(lon)
+            }
+
+            if (rows.isEmpty()) {
+                Log.w(TAG, "recomputeInterpolatedSpeedForEvent: no parsable rows")
+                return false
+            }
+
+            // Helper: compare doubles with small tolerance
+            fun approxEqual(a: Double?, b: Double?, eps: Double = 1e-9): Boolean {
+                if (a == null && b == null) return true
+                if (a == null || b == null) return false
+                return kotlin.math.abs(a - b) <= eps
+            }
+
+            // 1) Build list of "anchor" indices where GPS changes
+            val anchorIndices = mutableListOf<Int>()
+
+            // Always treat the first row as an anchor if it has a GPS fix
+            if (gpsLat[0] != null && gpsLon[0] != null) {
+                anchorIndices.add(0)
+            }
+
+            for (i in 1 until rows.size) {
+                val latPrev = gpsLat[i - 1]
+                val lonPrev = gpsLon[i - 1]
+                val latCur = gpsLat[i]
+                val lonCur = gpsLon[i]
+
+                // If GPS is missing, skip
+                if (latCur == null || lonCur == null) continue
+                if (latPrev == null || lonPrev == null) {
+                    // First valid GPS after a gap -> new anchor
+                    anchorIndices.add(i)
+                    continue
+                }
+
+                // If either lat or lon changed beyond epsilon, treat as new anchor
+                val latChanged = !approxEqual(latCur, latPrev)
+                val lonChanged = !approxEqual(lonCur, lonPrev)
+
+                if (latChanged || lonChanged) {
+                    anchorIndices.add(i)
+                }
+            }
+
+            if (anchorIndices.size < 2) {
+                // Not enough distinct GPS points to interpolate between; nothing to do.
+                Log.w(
+                    TAG,
+                    "recomputeInterpolatedSpeedForEvent: only ${anchorIndices.size} GPS anchor(s); skipping"
+                )
+                return false
+            }
+
+            // Make sure the last row is included as an anchor if it has GPS
+            val lastIdx = rows.lastIndex
+            if (!anchorIndices.contains(lastIdx) &&
+                gpsLat[lastIdx] != null && gpsLon[lastIdx] != null
+            ) {
+                anchorIndices.add(lastIdx)
+            }
+
+            // 2) Interpolate speed between each consecutive pair of anchors
+            val newSpeeds = speeds.toMutableList()
+
+            for (a in 0 until anchorIndices.size - 1) {
+                val i0 = anchorIndices[a]
+                val i1 = anchorIndices[a + 1]
+                if (i0 < 0 || i1 <= i0 || i1 >= rows.size) continue
+
+                val v0 = speeds[i0]
+                val v1 = speeds[i1]
+                val t0 = timestamps[i0].toDouble()
+                val t1 = timestamps[i1].toDouble()
+
+                if (v0 == null || v1 == null) {
+                    // Can't interpolate this span; leave it as-is
+                    continue
+                }
+                if (t1 <= t0) {
+                    // Degenerate / out-of-order timestamps; skip this span
+                    continue
+                }
+
+                val denom = t1 - t0
+                for (i in i0..i1) {
+                    val ti = timestamps[i].toDouble()
+                    val u = ((ti - t0) / denom).coerceIn(0.0, 1.0)
+                    newSpeeds[i] = v0 + (v1 - v0) * u
+                }
+            }
+
+            // 3) Write interpolated speeds back into the rows.
+            for (i in rows.indices) {
+                val s = newSpeeds[i]
+                rows[i][IDX_SPEED] = s?.toString() ?: ""
+            }
+
+            // 4) Rebuild file with header + updated data rows.
+            val newContent = buildString {
+                append(header); append('\n')
+                for (row in rows) {
+                    append(row.joinToString(",")); append('\n')
+                }
+            }
+
+            file.writeText(newContent)
+            Log.d(TAG, "recomputeInterpolatedSpeedForEvent: updated speeds for eventId=$eventId")
+            return true
+        } catch (e: Exception) {
+            Log.e(TAG, "recomputeInterpolatedSpeedForEvent: error processing CSV for eventId=$eventId", e)
+            return false
+        }
+    }
+
 }
 
-
+// Simple helper class; currently unused by EventStorage, but kept for future use.
 class SpeedInterpolator {
 
     private var lastGpsUtc: Long? = null
@@ -617,6 +781,6 @@ class SpeedInterpolator {
         if (t1 == t0) return v1
 
         val t = (sampleUtc - t0).toDouble() / (t1 - t0).toDouble()
-        return v0 + t * (v1 - v0)
+        return v0 + t * (v1 - t0)
     }
 }

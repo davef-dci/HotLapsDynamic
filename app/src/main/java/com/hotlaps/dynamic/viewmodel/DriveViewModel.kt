@@ -283,23 +283,38 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
 
 
     fun stopEvent() {
-    _currentEvent.value = null
-    cornerCaptureState = CornerCaptureState.Idle
-    // NEW: not recording anymore
-    _recordingState.value = RecordingState.Idle
-    activeCornerIndex = null
-    activeVisitNumber = 0
-    activeVisitStartUtcMs = 0L
-    activeVisitEndUtcMs = 0L
-    perCornerState.clear()
+        // Capture the current event (if any) before we clear it
+        val event = _currentEvent.value
+
+        // Clear event & recording state
+        _currentEvent.value = null
+        cornerCaptureState = CornerCaptureState.Idle
+        _recordingState.value = RecordingState.Idle
+
+        activeCornerIndex = null
+        activeVisitNumber = 0
+        activeVisitStartUtcMs = 0L
+        activeVisitEndUtcMs = 0L
+
+        perCornerState.clear()
         currentTrack = null
 
-        // NEW: also clear geo/apex state on stop, just to be safe
+        // Also clear geo/apex state on stop, just to be safe
         geoVisitStates.clear()
         activeCornerDistanceSamples.clear()
         lastDistanceSampledM = null
 
+        // 🔧 NEW: run offline speed interpolation for this event's CSV
+        if (event != null && ::appContext.isInitialized) {
+            viewModelScope.launch(Dispatchers.IO) {
+                EventStorage.recomputeInterpolatedSpeedForEvent(
+                    appContext,
+                    event.id
+                )
+            }
+        }
     }
+
 
     fun pauseRecording() {
         if (_recordingState.value == RecordingState.Recording) {
