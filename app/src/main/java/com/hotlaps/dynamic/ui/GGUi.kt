@@ -1227,7 +1227,7 @@ fun GGScreen(
         ticks: Long,
         brakeThreshG: Float,
         modifier: Modifier = Modifier,
-        onPeaks: (longMax: Float, longBrakeMax: Float, rightMax: Float, leftMax: Float) -> Unit = { _, _, _, _ -> }
+        onPeaks: (Float, Float, Float, Float) -> Unit
     ) {
         var peaksSinceMs by remember { mutableStateOf(android.os.SystemClock.elapsedRealtime()) }
 
@@ -1479,6 +1479,13 @@ fun GGScreen(
                 val peakRightAccel = z(maxRight)
                 val peakLeftAccel = z(maxLeft)
 
+                // ✅ NEW: notify the caller so Auto mode can update its scale
+                onPeaks(
+                    peakLongAccel,
+                    peakLongBrake,
+                    peakRightAccel,
+                    peakLeftAccel
+                )
 
             }
 
