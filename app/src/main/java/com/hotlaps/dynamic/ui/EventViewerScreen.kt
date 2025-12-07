@@ -60,6 +60,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
+import com.hotlaps.dynamic.data.SettingsRepo
+import androidx.compose.runtime.collectAsState
 
 
 
@@ -93,6 +95,8 @@ fun EventViewerScreen(
                 .verticalScroll(rememberScrollState())
         ) {
             val context = LocalContext.current
+            val repo = remember(context) { SettingsRepo(context) }
+            val breakawayG by repo.breakawayG.collectAsState(initial = 1.00f)
 
 
 
@@ -496,7 +500,8 @@ fun EventViewerScreen(
                         colorForSample = { sample ->
                             val key = sample.cornerIndex to sample.visitNumber
                             cornerVisitColors[key] ?: neutralSampleColor
-                        }
+                        },
+                        breakawayG = breakawayG
                     )
 
                     // NEW: replay slider for G-G plot
@@ -758,7 +763,8 @@ fun EventViewerScreen(
 fun SimpleGGPlot(
     samples: List<EventSample>,
     replaySamples: List<EventSample> = emptyList(),
-    colorForSample: (EventSample) -> Color
+    colorForSample: (EventSample) -> Color,
+    breakawayG: Float? = null
 ) {
     val axisColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
     val highlightColor = MaterialTheme.colorScheme.primary
@@ -811,6 +817,25 @@ fun SimpleGGPlot(
             val cy = h / 2f
             val center = Offset(cx, cy)
             val radius = size.minDimension * 0.48f
+
+// --- Breakaway G circle (red) ---
+            breakawayG?.let { bG ->
+                if (bG > 0f) {
+                    val frac = (bG / maxG).coerceIn(0f, 1f)
+                    if (frac > 0f) {
+                        val br = radius * frac
+                        drawCircle(
+                            color = Color(0xFFEF4444),
+                            radius = br,
+                            center = center,
+                            style = Stroke(width = 2.dp.toPx())
+                        )
+                    }
+                }
+            }
+
+
+
 
             fun clampToCircle(xIn: Float, yIn: Float): Offset {
                 var x = xIn

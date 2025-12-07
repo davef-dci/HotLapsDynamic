@@ -55,8 +55,13 @@ fun SettingsScreen(onBack: () -> Unit, navController: NavController)
         mutableStateOf(SmoothingLevel.entries[smoothingIndex])
     }
 
+     // Tire grip limit (Breakaway G)
+     val breakawayG by repo.breakawayG.collectAsState(initial = 1.00f)
+     var breakawayText by remember(breakawayG) { mutableStateOf("%.2f".format(breakawayG)) }
 
-    Scaffold(
+
+
+     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Settings") },
@@ -123,6 +128,38 @@ fun SettingsScreen(onBack: () -> Unit, navController: NavController)
                     // Reset the text field from the persisted value
                     trailText = trailBrakeG.toString()
                     status = "Reverted to saved value"
+                }) { Text("Revert") }
+            }
+
+            Divider()
+// --- Control 2: Tire Grip Limit (Breakaway G)
+            Text("Tire Grip Limit (Breakaway G)")
+
+            OutlinedTextField(
+                value = breakawayText,
+                onValueChange = { breakawayText = it },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth(),
+                supportingText = { Text("Approximate peak G before the car slides (e.g., 0.90 – 1.20)") }
+            )
+
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(onClick = {
+                    val v = breakawayText.toFloatOrNull()
+                    if (v == null) {
+                        status = "Please enter a valid number"
+                    } else {
+                        scope.launch {
+                            repo.updateBreakawayG(v)
+                            status = "Saved ✓  (Breakaway = ${"%.2f".format(v)} G)"
+                        }
+                    }
+                }) { Text("Save") }
+
+                OutlinedButton(onClick = {
+                    breakawayText = "%.2f".format(breakawayG)
+                    status = "Reverted to saved Breakaway G"
                 }) { Text("Revert") }
             }
 

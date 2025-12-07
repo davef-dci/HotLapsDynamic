@@ -169,6 +169,7 @@ fun GGScreen(
     // Smoothing level from settings (0 = Off, 1 = Low, 2 = Medium, 3 = Heavy)
     val smoothingIndex by repo.smoothingLevel.collectAsStateWithLifecycle(initialValue = 1)
     val smoothingLevel = SmoothingLevel.entries.getOrElse(smoothingIndex) { SmoothingLevel.Low }
+    val breakawayG by repo.breakawayG.collectAsStateWithLifecycle(initialValue = 1.00f)
 
     // === G-G scale mode (Auto vs fixed) ===
     var scaleMode by remember { mutableStateOf(GGScaleMode.Auto) }
@@ -767,6 +768,7 @@ fun GGScreen(
                                             trailSeconds = ggTrailWindow,
                                             ticks = ticks,
                                             brakeThreshG = trailBrakeG,
+                                            breakawayG = breakawayG,
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .aspectRatio(1f),
@@ -1226,6 +1228,7 @@ fun GGScreen(
         trailSeconds: Float,
         ticks: Long,
         brakeThreshG: Float,
+        breakawayG: Float,
         modifier: Modifier = Modifier,
         onPeaks: (Float, Float, Float, Float) -> Unit
     ) {
@@ -1307,6 +1310,20 @@ fun GGScreen(
                     style = Stroke(3.0f)
                 )
                 major += majorStep
+            }
+
+            // --- Breakaway G circle (red) ---
+            if (breakawayG > 0f) {
+                val frac = (breakawayG / maxAbsG).coerceIn(0f, 1f)
+                if (frac > 0f) {
+                    val br = radius * frac
+                    drawCircle(
+                        color = Color(0xFFEF4444), // bright red
+                        radius = br,
+                        center = Offset(cx, cy),
+                        style = Stroke(width = 4f)
+                    )
+                }
             }
 
 

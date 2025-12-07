@@ -31,6 +31,9 @@ class SettingsRepo(private val context: Context) {
         val CORNER_TRIGGER_RADIUS_M = floatPreferencesKey("corner_trigger_radius_m")
 
         val SMOOTHING_LEVEL = intPreferencesKey("smoothing_level")
+
+        // 6) Tire grip limit / Breakaway G
+        val BREAKAWAY_G = floatPreferencesKey("breakaway_g")
     }
 
     // --- Defaults (tweak as you like)
@@ -41,6 +44,7 @@ class SettingsRepo(private val context: Context) {
         const val GG_UPDATE_RATE_HZ = 10  // 2–50 Hz supported
         const val CORNER_TRIGGER_RADIUS_M = 30f
         const val SMOOTHING_LEVEL = 1  // 0=Off, 1=Low, 2=Medium, 3=Heavy
+        const val BREAKAWAY_G = 1.00f
 
     }
 
@@ -67,6 +71,12 @@ class SettingsRepo(private val context: Context) {
         context.settingsDataStore.data.map {
             it[K.SMOOTHING_LEVEL] ?: D.SMOOTHING_LEVEL
         }
+
+    val breakawayG: Flow<Float> =
+        context.settingsDataStore.data.map {
+            it[K.BREAKAWAY_G] ?: D.BREAKAWAY_G
+        }
+
     // --- Updaters
     suspend fun updateTrailBrakeG(v: Float) {
         context.settingsDataStore.edit { it[K.TRAIL_BRAKE_G] = v.coerceIn(0f, 3f) }
@@ -94,6 +104,15 @@ class SettingsRepo(private val context: Context) {
         context.settingsDataStore.edit { prefs ->
             // 0 = Off, 1 = Low, 2 = Medium, 3 = Heavy
             prefs[K.SMOOTHING_LEVEL] = level.coerceIn(0, 3)
+        }
+    }
+
+
+    suspend fun updateBreakawayG(v: Float) {
+        context.settingsDataStore.edit { prefs ->
+            // Clamp to a sensible range, e.g. 0.2G–3.0G
+            val clamped = v.coerceIn(0.2f, 3.0f)
+            prefs[K.BREAKAWAY_G] = clamped
         }
     }
 
