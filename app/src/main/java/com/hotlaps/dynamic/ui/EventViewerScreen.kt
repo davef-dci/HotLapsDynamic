@@ -818,21 +818,7 @@ fun SimpleGGPlot(
             val center = Offset(cx, cy)
             val radius = size.minDimension * 0.48f
 
-// --- Breakaway G circle (red) ---
-            breakawayG?.let { bG ->
-                if (bG > 0f) {
-                    val frac = (bG / maxG).coerceIn(0f, 1f)
-                    if (frac > 0f) {
-                        val br = radius * frac
-                        drawCircle(
-                            color = Color(0xFFEF4444),
-                            radius = br,
-                            center = center,
-                            style = Stroke(width = 2.dp.toPx())
-                        )
-                    }
-                }
-            }
+
 
 
 
@@ -855,6 +841,10 @@ fun SimpleGGPlot(
                 translate(userOffset.x, userOffset.y)
                 scale(userScale, userScale, pivot = center)
             }) {
+                // FIRST: declare nativeCanvas at the top
+                val nativeCanvas = drawContext.canvas.nativeCanvas
+
+                // Outer circle
                 drawCircle(
                     color = axisColor,
                     radius = radius,
@@ -862,6 +852,7 @@ fun SimpleGGPlot(
                     style = Stroke(width = 2.dp.toPx())
                 )
 
+                // Axes
                 drawLine(
                     color = axisColor,
                     start = Offset(cx - radius, cy),
@@ -875,9 +866,38 @@ fun SimpleGGPlot(
                     strokeWidth = 1.dp.toPx()
                 )
 
+                // --- Breakaway circle ---
+                breakawayG?.let { bG ->
+                    if (bG > 0f) {
+                        val frac = (bG / maxG).coerceIn(0f, 1f)
+                        val br = radius * frac
+                        drawCircle(
+                            color = Color(0xFFEF4444),
+                            radius = br,
+                            center = center,
+                            style = Stroke(width = 2.dp.toPx())
+                        )
+                    }
+                }
+
+                // --- Direction labels ---
+                labelPaint.textAlign = AndroidPaint.Align.CENTER
+
+                nativeCanvas.drawText("Accel", cx, cy - radius - labelGapPx, labelPaint)
+                nativeCanvas.drawText("Brake", cx, cy + radius + labelTextSizePx + labelGapPx, labelPaint)
+                nativeCanvas.drawText("Left",  cx - radius - labelGapPx, cy + labelTextSizePx/2f, labelPaint)
+                nativeCanvas.drawText("Right", cx + radius + labelGapPx, cy + labelTextSizePx/2f, labelPaint)
+
+                labelPaint.textAlign = AndroidPaint.Align.LEFT   // restore for tick labels
+
+                // --- NOW your tick labels block continues here ---
+
+
+
+
                 val tickStep = 0.25f
                 var tick = tickStep
-                val nativeCanvas = drawContext.canvas.nativeCanvas
+                //val nativeCanvas = drawContext.canvas.nativeCanvas
 
                 while (tick < maxG + 1e-3f) {
                     val r = radius * (tick / maxG)
@@ -995,34 +1015,7 @@ fun SimpleGGPlot(
             }
         }
 
-        Text(
-            text = "Accel",
-            style = MaterialTheme.typography.labelSmall,
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 2.dp)
-        )
-        Text(
-            text = "Brake",
-            style = MaterialTheme.typography.labelSmall,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 2.dp)
-        )
-        Text(
-            text = "Left",
-            style = MaterialTheme.typography.labelSmall,
-            modifier = Modifier
-                .align(Alignment.CenterStart)
-                .padding(start = 2.dp)
-        )
-        Text(
-            text = "Right",
-            style = MaterialTheme.typography.labelSmall,
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .padding(end = 2.dp)
-        )
+
     }
 }
 
