@@ -213,21 +213,17 @@ fun EventViewerScreen(
                 style = MaterialTheme.typography.bodySmall
             )
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(4.dp))
 
-
-
-            Spacer(Modifier.height(16.dp))
 
             // -----------------------------
             // EVENT LIST (scrollable window)
             // -----------------------------
-            Text("Events:", style = MaterialTheme.typography.titleSmall)
 
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(100.dp) // adjust as needed so the plot is still visible
+                    .height(130.dp) // adjust as needed so the plot is still visible
                     .border(1.dp, MaterialTheme.colorScheme.outlineVariant)
             ) {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -268,7 +264,7 @@ fun EventViewerScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(100.dp) // adjust as needed
+                            .height(130.dp) // adjust as needed
                             .border(1.dp, MaterialTheme.colorScheme.outlineVariant)
                     ) {
                         LazyColumn(modifier = Modifier.fillMaxSize()) {
