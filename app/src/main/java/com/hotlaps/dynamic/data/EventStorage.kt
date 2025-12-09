@@ -11,6 +11,9 @@ import java.util.Locale
 import java.util.TimeZone
 import androidx.core.content.FileProvider
 import android.content.Intent
+import com.hotlaps.dynamic.util.GForceSmoother
+import kotlin.math.sqrt
+
 
 /**
  * Responsible for saving and loading Event sessions.
@@ -409,6 +412,246 @@ object EventStorage {
         return deleted
     }
 
+
+    fun createSmoothedCsvForSharing(
+        context: Context,
+        sourceFile: File,
+        samples: List<EventSample>,
+        smoothingLevel: SmoothingLevel
+    ): File? {
+        if (samples.isEmpty()) return null
+
+        // Put temp files in app cache
+        val shareDir = File(context.cacheDir, "event_share")
+        if (!shareDir.exists()) {
+            shareDir.mkdirs()
+        }
+
+        val baseName = sourceFile.nameWithoutExtension
+        val suffix = when (smoothingLevel) {
+            SmoothingLevel.Off -> "raw"
+            SmoothingLevel.Low -> "low"
+            SmoothingLevel.Medium -> "medium"
+            SmoothingLevel.Heavy -> "heavy"
+        }
+
+        val outFile = File(shareDir, "${baseName}_smooth_$suffix.csv")
+
+        // Clear any existing file with this name
+        if (outFile.exists()) {
+            outFile.delete()
+        }
+
+        // Same header as appendSample()
+        outFile.appendText(
+            "timestampMs,deltaMs,localTime,trackName,eventName," +
+                    "gpsLat,gpsLon,closestCornerIndex,distanceToClosestCornerM," +
+                    "rawLatG,rawLongG,latG,longG,gSum," +
+                    "speed," +
+                    "cornerIndex,cornerName,visitNumber,Apex\n"
+        )
+
+        val localTimeFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).apply {
+            timeZone = TimeZone.getDefault()
+        }
+
+        for (sample in samples) {
+            val localTime = localTimeFormat.format(Date(sample.utcMs))
+            val speedStr = sample.speedMps?.toString() ?: ""
+
+            val line = buildString {
+                // Time: timestampMs (UTC), deltaMs (interval)
+                append(sample.utcMs); append(',')
+                append(sample.intervalMs); append(',')
+
+                // Local time (human-readable)
+                append(localTime); append(',')
+
+                // Event metadata
+                append(sample.trackName); append(',')
+                append(sample.eventName); append(',')
+
+                // GPS + nearest corner info
+                append(sample.gpsLat); append(',')
+                append(sample.gpsLon); append(',')
+                append(sample.closestCornerIndex); append(',')
+                append(sample.distanceToClosestCornerM); append(',')
+
+                // Raw + smoothed G values
+                append(sample.rawLatG); append(',')
+                append(sample.rawLongG); append(',')
+                append(sample.latG); append(',')
+                append(sample.longG); append(',')
+                append(sample.gSum); append(',')
+
+                // Speed
+                append(speedStr); append(',')
+
+                // Corner visit info
+                append(sample.cornerIndex); append(',')
+                append(sample.cornerName); append(',')
+                append(sample.visitNumber); append(',')
+
+                // Apex flag
+                append(if (sample.isApexSample) "1" else "0")
+                append('\n')
+            }
+
+            outFile.appendText(line)
+        }
+
+        return outFile
+    }
+
+    private fun applySmoothingForExport(
+        samples: List<EventSample>,
+        level: SmoothingLevel
+    ): List<EventSample> {
+        if (samples.isEmpty()) return samples
+
+        fun pickRaw(sample: EventSample): Pair<Float, Float> {
+            val hasRaw = (sample.rawLatG != 0f || sample.rawLongG != 0f)
+            return if (hasRaw) {
+                sample.rawLatG to sample.rawLongG
+            } else {
+                sample.latG to sample.longG
+            }
+        }
+
+        // Off = show raw values (no smoothing)
+        if (level == SmoothingLevel.Off) {
+            return samples.map { s ->
+                val (rawLat, rawLong) = pickRaw(s)
+                val gSum = sqrt(rawLat * rawLat + rawLong * rawLong)
+                s.copy(
+                    latG = rawLat,
+                    longG = rawLong,
+                    gSum = gSum
+                )
+            }
+        }
+
+        val tauMsOrNull: Float? = when (level) {
+            SmoothingLevel.Off -> null
+            else -> level.tauMs.coerceAtLeast(1).toFloat()
+        }
+
+        val smoother = GForceSmoother(
+            tauMs = tauMsOrNull,
+            maWindowSize = level.windowSize
+        ).also { it.reset() }
+
+        return samples.map { s ->
+            val (rawLat, rawLong) = pickRaw(s)
+            val smoothed = smoother.addSample(
+                rawLatG = rawLat,
+                rawLongG = rawLong,
+                sampleTimeMs = s.utcMs
+            )
+            val gSum = sqrt(smoothed.latG * smoothed.latG + smoothed.longG * smoothed.longG)
+
+            s.copy(
+                latG = smoothed.latG,
+                longG = smoothed.longG,
+                gSum = gSum
+            )
+        }
+    }
+
+    fun createSmoothedCsvForSharing(
+        context: Context,
+        file: File,
+        smoothingLevel: SmoothingLevel
+    ): File? {
+        // Load original samples from the event CSV
+        val samples = loadSamplesFromCsv(file)
+        if (samples.isEmpty()) return null
+
+        // Apply the desired smoothing, using rawLatG/rawLongG where available
+        val smoothedSamples = applySmoothingForExport(samples, smoothingLevel)
+        if (smoothedSamples.isEmpty()) return null
+
+        // Write the smoothed samples to a separate CSV in the same directory
+        val dir = file.parentFile ?: eventsDir(context) ?: return null
+
+        val baseName = file.nameWithoutExtension
+        val suffix = when (smoothingLevel) {
+            SmoothingLevel.Off -> "raw"
+            SmoothingLevel.Low -> "low"
+            SmoothingLevel.Medium -> "medium"
+            SmoothingLevel.Heavy -> "heavy"
+        }
+
+        val outFile = File(dir, "${baseName}_smooth_$suffix.csv")
+
+        if (outFile.exists()) {
+            outFile.delete()
+        }
+
+        // Same header as appendSample()
+        outFile.appendText(
+            "timestampMs,deltaMs,localTime,trackName,eventName," +
+                    "gpsLat,gpsLon,closestCornerIndex,distanceToClosestCornerM," +
+                    "rawLatG,rawLongG,latG,longG,gSum," +
+                    "speed," +
+                    "cornerIndex,cornerName,visitNumber,Apex\n"
+        )
+
+        val localTimeFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).apply {
+            timeZone = TimeZone.getDefault()
+        }
+
+        for (sample in smoothedSamples) {
+            val localTime = localTimeFormat.format(Date(sample.utcMs))
+            val speedStr = sample.speedMps?.toString() ?: ""
+
+            val line = buildString {
+                // Time
+                append(sample.utcMs); append(',')
+                append(sample.intervalMs); append(',')
+
+                // Local time (human-readable)
+                append(localTime); append(',')
+
+                // Event metadata
+                append(sample.trackName); append(',')
+                append(sample.eventName); append(',')
+
+                // GPS + nearest corner info
+                append(sample.gpsLat); append(',')
+                append(sample.gpsLon); append(',')
+                append(sample.closestCornerIndex); append(',')
+                append(sample.distanceToClosestCornerM); append(',')
+
+                // Raw + smoothed G values
+                append(sample.rawLatG); append(',')
+                append(sample.rawLongG); append(',')
+                append(sample.latG); append(',')
+                append(sample.longG); append(',')
+                append(sample.gSum); append(',')
+
+                // Speed
+                append(speedStr); append(',')
+
+                // Corner visit info
+                append(sample.cornerIndex); append(',')
+                append(sample.cornerName); append(',')
+                append(sample.visitNumber); append(',')
+
+                // Apex flag
+                append(if (sample.isApexSample) "1" else "0")
+                append('\n')
+            }
+
+            outFile.appendText(line)
+        }
+
+        return outFile
+    }
+
+
+
+
     fun shareEventCsv(context: Context, file: File) {
         val uri = FileProvider.getUriForFile(
             context,
@@ -774,4 +1017,8 @@ class SpeedInterpolator {
         val t = (sampleUtc - t0).toDouble() / (t1 - t0).toDouble()
         return v0 + t * (v1 - t0)
     }
+
+
+
+
 }

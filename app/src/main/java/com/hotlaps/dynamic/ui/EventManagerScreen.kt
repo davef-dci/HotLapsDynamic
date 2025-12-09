@@ -19,6 +19,14 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import com.hotlaps.dynamic.data.SmoothingLevel
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -44,7 +52,10 @@ fun EventManagerScreen(
     var showSharePanel by remember { mutableStateOf(false) }
     var selectedShareFiles by remember { mutableStateOf(setOf<File>()) }
 
+    // NEW: smoothing level for shared CSVs
+    var shareSmoothingLevel by remember { mutableStateOf(SmoothingLevel.Medium) }
 
+    val coroutineScope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
@@ -219,6 +230,45 @@ fun EventManagerScreen(
 
                 Spacer(Modifier.height(8.dp))
 
+                // Smoothing selector for shared CSVs
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Smoothing for shared CSVs:",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+
+                    var smoothingMenuExpanded by remember { mutableStateOf(false) }
+
+                    Box {
+                        OutlinedButton(onClick = { smoothingMenuExpanded = true }) {
+                            Text(shareSmoothingLevel.displayName)
+                        }
+
+                        DropdownMenu(
+                            expanded = smoothingMenuExpanded,
+                            onDismissRequest = { smoothingMenuExpanded = false }
+                        ) {
+                            SmoothingLevel.entries.forEach { level ->
+                                DropdownMenuItem(
+                                    text = { Text(level.displayName) },
+                                    onClick = {
+                                        shareSmoothingLevel = level
+                                        smoothingMenuExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+
+
                 if (eventFiles.isEmpty()) {
                     Text(
                         text = "No event files found.",
@@ -274,6 +324,8 @@ fun EventManagerScreen(
                         ) {
                             Text("Share Selected")
                         }
+
+
 
 
                         // Cancel

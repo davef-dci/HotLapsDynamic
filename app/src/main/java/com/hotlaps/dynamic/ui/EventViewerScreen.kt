@@ -831,11 +831,18 @@ fun SimpleGGPlot(
         max(abs(sample.latG), abs(sample.longG))
     } ?: 0f
 
-    val maxG = when {
-        rawMaxG <= 0f -> 0.5f
-        rawMaxG < 0.5f -> 0.5f
-        else -> rawMaxG * 1.1f
+// We’ll round up to the next 0.25G, with a minimum outer scale of 0.25G
+    val tickStep = 0.25f
+    val minOuterG = tickStep
+
+    val maxG = if (rawMaxG <= 0f) {
+        minOuterG
+    } else {
+        val padded = rawMaxG * 1.1f          // a little headroom
+        val steps = ceil(padded / tickStep).toInt().coerceAtLeast(1)
+        steps * tickStep                     // e.g. 0.11 -> 0.25, 0.42 -> 0.5, 0.78 -> 1.0
     }
+
 
     var userScale by remember { mutableStateOf(1f) }
     var userOffset by remember { mutableStateOf(Offset.Zero) }
