@@ -36,6 +36,8 @@ fun EditTrackScreen(
 
 {
     val context = LocalContext.current
+    var trackName by remember { mutableStateOf(track.name) }
+
 
     val latLonOverrides = remember {
         mutableStateMapOf<Int, Pair<Double, Double>>()
@@ -87,7 +89,11 @@ fun EditTrackScreen(
 
 
                             // New track with updated corners
-                            val updatedTrack = track.copy(corners = updatedCorners)
+                            val updatedTrack = track.copy(
+                                name = trackName.trim(),
+                                corners = updatedCorners
+                            )
+
 
                             // Persist to JSON
                             TrackStorage.saveTrack(context, updatedTrack)
@@ -111,6 +117,19 @@ fun EditTrackScreen(
                 .padding(innerPadding)
                 .padding(16.dp)
         ) {
+
+            OutlinedTextField(
+                value = trackName,
+                onValueChange = { trackName = it },
+                label = { Text("Track Name") },
+                singleLine = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+            )
+            Spacer(Modifier.height(16.dp))
+
+
+
             Text(
                 text = "Corners for this track:",
                 style = MaterialTheme.typography.titleMedium

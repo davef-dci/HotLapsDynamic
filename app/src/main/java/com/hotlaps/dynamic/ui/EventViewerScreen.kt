@@ -215,24 +215,6 @@ fun EventViewerScreen(
 
             Spacer(Modifier.height(12.dp))
 
-            // Chart mode buttons
-            SingleChoiceSegmentedButtonRow(
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                SegmentedButton(
-                    selected = chartMode == ChartMode.GG,
-                    onClick = { chartMode = ChartMode.GG },
-                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-                    label = { Text("G-G Plot") }
-                )
-
-                SegmentedButton(
-                    selected = chartMode == ChartMode.G_VS_TIME,
-                    onClick = { chartMode = ChartMode.G_VS_TIME },
-                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-                    label = { Text("G vs Time") }
-                )
-            }
 
 
             Spacer(Modifier.height(16.dp))
@@ -335,6 +317,27 @@ fun EventViewerScreen(
 
                 Spacer(Modifier.height(16.dp))
             }
+
+            // Chart mode buttons
+            SingleChoiceSegmentedButtonRow(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                SegmentedButton(
+                    selected = chartMode == ChartMode.GG,
+                    onClick = { chartMode = ChartMode.GG },
+                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                    label = { Text("G-G Plot") }
+                )
+
+                SegmentedButton(
+                    selected = chartMode == ChartMode.G_VS_TIME,
+                    onClick = { chartMode = ChartMode.G_VS_TIME },
+                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                    label = { Text("G vs Time") }
+                )
+            }
+
+
 
             // Map corner/visit -> apex
             val apexByGroup = remember(apexVisits) {
@@ -484,15 +487,6 @@ fun EventViewerScreen(
             // CHART AREA (GG / Time)
             // -------------------------
             if (selectedFile != null && samplesForPlot.isNotEmpty()) {
-                val title =
-                    if (chartMode == ChartMode.GG) "G-G Plot (selected corner visits)"
-                    else "G vs Time (selected corner visits)"
-
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleSmall
-                )
-                Spacer(Modifier.height(8.dp))
                 if (chartMode == ChartMode.GG) {
                     SimpleGGPlot(
                         samples = samplesForPlotGrouped,
