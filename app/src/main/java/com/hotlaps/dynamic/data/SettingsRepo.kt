@@ -43,7 +43,7 @@ class SettingsRepo(private val context: Context) {
         const val GG_TRAIL_WINDOW_S = 3.0f
         const val GG_UPDATE_RATE_HZ = 10  // 2–50 Hz supported
         const val CORNER_TRIGGER_RADIUS_M = 30f
-        const val SMOOTHING_LEVEL = 1  // 0=Off, 1=Low, 2=Medium, 3=Heavy
+        const val SMOOTHING_LEVEL = 2  // 0=Off, 1=Low, 2=Medium, 3=Heavy
         const val BREAKAWAY_G = 1.00f
 
     }
