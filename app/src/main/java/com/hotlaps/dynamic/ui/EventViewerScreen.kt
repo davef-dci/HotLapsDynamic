@@ -64,7 +64,13 @@ import com.hotlaps.dynamic.data.SettingsRepo
 import androidx.compose.runtime.collectAsState
 
 
+import com.hotlaps.dynamic.data.SmoothingLevel
+import com.hotlaps.dynamic.util.GForceSmoother
+import kotlin.math.sqrt
 
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -98,6 +104,12 @@ fun EventViewerScreen(
             val repo = remember(context) { SettingsRepo(context) }
             val breakawayG by repo.breakawayG.collectAsState(initial = 1.00f)
 
+            // Default viewer smoothing comes from global setting
+            val smoothingIndex by repo.smoothingLevel.collectAsState(initial = 2)
+            var viewerSmoothingLevel by remember(smoothingIndex) {
+                mutableStateOf(SmoothingLevel.fromIndex(smoothingIndex))
+            }
+
 
 
             // All events on disk
@@ -121,6 +133,12 @@ fun EventViewerScreen(
                     EventStorage.loadSamplesFromCsv(file)
                 } ?: emptyList()
             }
+
+            // Samples used for plotting in the viewer, after applying the chosen smoothing level
+            val viewSamplesForSelected = remember(samplesForSelected, viewerSmoothingLevel) {
+                applySmoothingForViewer(samplesForSelected, viewerSmoothingLevel)
+            }
+
 
             // Apex detection: one apex per (cornerIndex, visitNumber)
             val apexVisits = remember(samplesForSelected) {
@@ -333,6 +351,38 @@ fun EventViewerScreen(
                     label = { Text("G vs Time") }
                 )
             }
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Data smoothing")
+
+                var smoothingMenuExpanded by remember { mutableStateOf(false) }
+
+                Box {
+                    OutlinedButton(onClick = { smoothingMenuExpanded = true }) {
+                        Text(viewerSmoothingLevel.displayName)
+                    }
+
+                    DropdownMenu(
+                        expanded = smoothingMenuExpanded,
+                        onDismissRequest = { smoothingMenuExpanded = false }
+                    ) {
+                        SmoothingLevel.entries.forEach { level ->
+                            DropdownMenuItem(
+                                text = { Text(level.displayName) },
+                                onClick = {
+                                    viewerSmoothingLevel = level
+                                    smoothingMenuExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
 
 
 
@@ -348,13 +398,13 @@ fun EventViewerScreen(
                 }
             }
 
-            // Filter samples based on selected corner/visit and apex windows
+// Filter samples based on selected corner/visit and apex windows
             val samplesForPlot =
                 if (apexVisits.isNotEmpty() && selectedCornerVisits.isNotEmpty()) {
                     val beforeMs = (beforeApexSeconds * 1000f).toLong()
                     val afterMs = (afterApexSeconds * 1000f).toLong()
 
-                    samplesForSelected.filter { sample ->
+                    viewSamplesForSelected.filter { sample ->
                         apexVisits.any { apex ->
                             val key = apex.cornerIndex to apex.visitNumber
                             if (!selectedCornerVisits.contains(key)) {
@@ -368,6 +418,7 @@ fun EventViewerScreen(
                 } else {
                     samplesForSelected
                 }
+
 
             // Assign nearest apex corner/visit to each sample so plotting code knows which visit it belongs to
             val samplesForPlotGrouped: List<EventSample> =
@@ -694,14 +745,15 @@ fun EventViewerScreen(
                 Spacer(Modifier.height(8.dp))
 
                 if (cornerVisitGroups.isEmpty()) {
-                    val overallSummary = remember(samplesForSelected) {
-                        computeMaxGSummary(samplesForSelected)
+                    val overallSummary = remember(viewSamplesForSelected) {
+                        computeMaxGSummary(viewSamplesForSelected)
                     }
 
                     MaxGSummaryHeaderRow()
                     Spacer(Modifier.height(4.dp))
                     MaxGSummaryRow(label = "Event", summary = overallSummary)
                 } else {
+
                     val samplesForSummary = samplesForPlotGrouped.filter { sample ->
                         selectedCornerVisits.contains(sample.cornerIndex to sample.visitNumber)
                     }
@@ -1403,6 +1455,69 @@ private fun computeMaxGSummary(samples: List<EventSample>): MaxGSummary {
         left = maxLeft,
         right = maxRight
     )
+}
+/**
+ * Recompute latG / longG / gSum for viewing, based on the selected smoothing level.
+ *
+ * - Uses rawLatG/rawLongG when available.
+ * - Falls back to latG/longG if raw values are 0 (for older events).
+ * - Returns a *new* list so we never mutate the original loaded samples.
+ */
+fun applySmoothingForViewer(
+    samples: List<EventSample>,
+    level: SmoothingLevel
+): List<EventSample> {
+    if (samples.isEmpty()) return samples
+
+    // Small helper to pick "raw" values but gracefully fall back
+    fun pickRaw(sample: EventSample): Pair<Float, Float> {
+        val hasRaw = (sample.rawLatG != 0f || sample.rawLongG != 0f)
+        return if (hasRaw) {
+            sample.rawLatG to sample.rawLongG
+        } else {
+            sample.latG to sample.longG
+        }
+    }
+
+    // Off = just show raw values (no EMA/MA)
+    if (level == SmoothingLevel.Off) {
+        return samples.map { s ->
+            val (rawLat, rawLong) = pickRaw(s)
+            val gSum = sqrt(rawLat * rawLat + rawLong * rawLong)
+            s.copy(
+                latG = rawLat,
+                longG = rawLong,
+                gSum = gSum
+            )
+        }
+    }
+
+    // For Low / Medium / Heavy: use the same smoother as live GG screen
+    val tauMsOrNull: Float? = when (level) {
+        SmoothingLevel.Off -> null
+        else -> level.tauMs.coerceAtLeast(1).toFloat()
+    }
+
+    val smoother = GForceSmoother(
+        tauMs = tauMsOrNull,
+        maWindowSize = level.windowSize
+    ).also { it.reset() }
+
+    return samples.map { s ->
+        val (rawLat, rawLong) = pickRaw(s)
+        val smoothed = smoother.addSample(
+            rawLatG = rawLat,
+            rawLongG = rawLong,
+            sampleTimeMs = s.utcMs
+        )
+        val gSum = sqrt(smoothed.latG * smoothed.latG + smoothed.longG * smoothed.longG)
+
+        s.copy(
+            latG = smoothed.latG,
+            longG = smoothed.longG,
+            gSum = gSum
+        )
+    }
 }
 
 @Composable
