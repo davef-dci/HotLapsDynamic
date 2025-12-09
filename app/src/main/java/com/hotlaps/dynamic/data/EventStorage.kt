@@ -358,32 +358,25 @@ object EventStorage {
         val oldFile = File(dir, "event_${eventId}.csv")
 
         if (!oldFile.exists()) {
-            Log.w(
-                TAG,
-                "renameEventFile: old file not found for eventId=$eventId at ${oldFile.absolutePath}"
-            )
+            Log.w(TAG, "renameEventFile: old file not found for eventId=$eventId at ${oldFile.absolutePath}")
             return
         }
 
-        // 1) Turn the user-entered name into a filesystem-safe base
+        // 1) Sanitize the user-entered name for filesystem safety
         val safeBase = newName
             .replace("[^A-Za-z0-9 _-]".toRegex(), "_")
             .replace(" +".toRegex(), " ")
             .trim()
             .ifBlank { "Event" }
 
-        // 2) Use the eventId (which we created from System.currentTimeMillis()) as the timestamp
-        val formatter = SimpleDateFormat("yyyy-MM-dd HH-mm-ss", Locale.getDefault())
-        val timestamp = formatter.format(Date(eventId))
-
-        // 3) Build the target filename: "<safeBase> - 2025-12-05 22-31-15.csv"
-        var targetName = "$safeBase - $timestamp.csv"
+        // 2) Start with "<safeBase>.csv"
+        var targetName = "$safeBase.csv"
         var newFile = File(dir, targetName)
 
-        // 4) If a file with that name somehow already exists, add a numeric suffix
+        // 3) If a file with that name already exists, add "(2)", "(3)", etc.
         var suffix = 2
         while (newFile.exists()) {
-            targetName = "$safeBase - $timestamp ($suffix).csv"
+            targetName = "$safeBase ($suffix).csv"
             newFile = File(dir, targetName)
             suffix++
         }
@@ -393,15 +386,13 @@ object EventStorage {
             if (ok) {
                 Log.d(TAG, "renameEventFile: renamed to ${newFile.name}")
             } else {
-                Log.e(
-                    TAG,
-                    "renameEventFile: renameTo() returned false from ${oldFile.name} to ${newFile.name}"
-                )
+                Log.e(TAG, "renameEventFile: renameTo() failed for ${oldFile.absolutePath}")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "renameEventFile: error renaming file", e)
+            Log.e(TAG, "renameEventFile: exception while renaming", e)
         }
     }
+
 
     fun deleteEvents(context: Context, filesToDelete: List<File>): Int {
         val dir = eventsDir(context) ?: return 0

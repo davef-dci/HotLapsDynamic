@@ -163,7 +163,7 @@ fun EventManagerScreen(
                                     }
                                 )
                                 Text(
-                                    text = file.name,
+                                    text = file.name.removeSuffix(".csv"),
                                     style = MaterialTheme.typography.bodySmall
                                 )
                             }
@@ -248,7 +248,7 @@ fun EventManagerScreen(
                                     }
                                 )
                                 Text(
-                                    text = file.name,
+                                    text = file.name.removeSuffix(".csv"),
                                     style = MaterialTheme.typography.bodySmall
                                 )
                             }

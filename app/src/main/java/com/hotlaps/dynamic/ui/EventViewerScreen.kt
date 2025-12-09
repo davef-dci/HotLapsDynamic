@@ -229,9 +229,10 @@ fun EventViewerScreen(
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
                     items(eventFiles) { file ->
                         val isSelected = (file == selectedFile)
+                        val label = file.name.removeSuffix(".csv")
 
                         Text(
-                            text = if (isSelected) "▶ ${file.name}" else file.name,
+                            text = if (isSelected) "▶ $label" else label,
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier
                                 .fillMaxWidth()

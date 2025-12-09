@@ -239,22 +239,14 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
     // Track associated with the current event (if any)
     private var currentTrack: Track? = null
 
-    // NEW: start an event even if no track is selected
+    // Track associated with the current event (if any)
     fun startManualEvent(context: Context, track: Track?) {
 
         // Remember which track this event is associated with
         currentTrack = track
 
-        val baseName = track?.name ?: "Untitled"
-
-        // Create a friendly timestamp like "2025-11-18 13:42"
-        val now = System.currentTimeMillis()
-        val formatter = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
-        val formattedTime = formatter.format(Date(now))
-
-        // Human-friendly name
-        val eventName = "$baseName - $formattedTime"
-
+        // Short, human-friendly default name
+        val eventName = track?.name?.takeIf { it.isNotBlank() } ?: "Untitled session"
 
         // Let EventStorage generate the ID and timestamps
         val event = EventStorage.createEvent(
