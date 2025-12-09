@@ -917,9 +917,12 @@ fun SimpleGGPlot(
                 )
 
                 // --- Breakaway circle ---
+// --- Breakaway circle ---
+// Only draw if the breakaway limit is actually within the current G range.
+// If breakawayG > maxG, the circle would be off-screen, so we skip it.
                 breakawayG?.let { bG ->
-                    if (bG > 0f) {
-                        val frac = (bG / maxG).coerceIn(0f, 1f)
+                    if (bG > 0f && bG <= maxG) {
+                        val frac = bG / maxG          // no clamping
                         val br = radius * frac
                         drawCircle(
                             color = Color(0xFFEF4444),
@@ -929,6 +932,7 @@ fun SimpleGGPlot(
                         )
                     }
                 }
+
 
                 // --- Direction labels ---
                 labelPaint.textAlign = AndroidPaint.Align.CENTER
