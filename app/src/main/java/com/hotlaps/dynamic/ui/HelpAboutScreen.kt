@@ -16,6 +16,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.hotlaps.dynamic.sendFeedbackEmail
 import com.hotlaps.dynamic.ui.help.HelpScaffold
+import com.hotlaps.dynamic.BuildConfig
+
 
 @Composable
 fun HelpAboutScreen(
@@ -25,7 +27,10 @@ fun HelpAboutScreen(
 
     HelpScaffold(
         title = "About Apex Dynamics",
+
         onBack = onBack
+
+
     ) { innerPadding ->
 
         Column(
@@ -39,6 +44,14 @@ fun HelpAboutScreen(
                 text = "About Apex Dynamics",
                 style = MaterialTheme.typography.headlineSmall
             )
+
+            Text(
+                text = "Version ${BuildConfig.VERSION_NAME}",
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            Spacer(Modifier.height(12.dp))
+
 
             Spacer(Modifier.height(12.dp))
 

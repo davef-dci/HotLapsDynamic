@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import com.hotlaps.dynamic.BuildConfig
 
 fun Context.sendFeedbackEmail(currentScreen: String? = null) {
 
@@ -13,6 +14,8 @@ fun Context.sendFeedbackEmail(currentScreen: String? = null) {
             append(" – $currentScreen")
         }
     }
+
+    val appVersion = "v${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})"
 
     val body = """
         Please describe your feedback:
@@ -27,19 +30,39 @@ fun Context.sendFeedbackEmail(currentScreen: String? = null) {
         ---
 
         Diagnostics (please leave this section):
-        App version: (auto-fill soon)
+        App version: $appVersion
         Screen: ${currentScreen ?: "Unknown"}
     """.trimIndent()
 
-    val intent = Intent(Intent.ACTION_SENDTO).apply {
-        data = Uri.parse("mailto:")
+    // Preferred: apps that explicitly handle mailto: links
+    val emailIntent = Intent(Intent.ACTION_SENDTO).apply {
+        data = Uri.parse("mailto:") // generic mailto so user can pick account
         putExtra(Intent.EXTRA_EMAIL, arrayOf("apexdynamics.app@gmail.com"))
         putExtra(Intent.EXTRA_SUBJECT, subject)
         putExtra(Intent.EXTRA_TEXT, body)
     }
 
-    if (intent.resolveActivity(packageManager) != null) {
-        startActivity(intent)
+    val pm = packageManager
+
+    val canHandleSendTo = emailIntent.resolveActivity(pm) != null
+
+    if (canHandleSendTo) {
+        startActivity(emailIntent)
+        return
+    }
+
+    // Fallback: broader email SEND intent
+    val fallbackIntent = Intent(Intent.ACTION_SEND).apply {
+        type = "message/rfc822" // try to limit to email apps
+        putExtra(Intent.EXTRA_EMAIL, arrayOf("apexdynamics.app@gmail.com"))
+        putExtra(Intent.EXTRA_SUBJECT, subject)
+        putExtra(Intent.EXTRA_TEXT, body)
+    }
+
+    val canHandleSend = fallbackIntent.resolveActivity(pm) != null
+
+    if (canHandleSend) {
+        startActivity(Intent.createChooser(fallbackIntent, "Send feedback via…"))
     } else {
         Toast.makeText(this, "No email app available", Toast.LENGTH_LONG).show()
     }
