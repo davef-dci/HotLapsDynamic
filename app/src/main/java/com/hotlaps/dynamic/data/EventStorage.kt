@@ -558,6 +558,87 @@ object EventStorage {
         }
     }
 
+    private fun interpolateSpeedsInSamples(samples: List<EventSample>): List<EventSample> {
+        if (samples.isEmpty()) return samples
+
+        // Pull out times & speeds
+        val timestamps = samples.map { it.utcMs }
+        val speeds = samples.map { it.speedMps }
+
+        // Helper like in recomputeInterpolatedSpeedForEvent
+        fun approxEqual(a: Double?, b: Double?, eps: Double = 1e-9): Boolean {
+            if (a == null && b == null) return true
+            if (a == null || b == null) return false
+            return kotlin.math.abs(a - b) <= eps
+        }
+
+        // Find anchor indices where speed changes
+        val anchorIndices = mutableListOf<Int>()
+        var lastAnchorIndex: Int? = null
+        var lastAnchorSpeed: Double? = null
+
+        for (i in samples.indices) {
+            val s = speeds[i] ?: continue
+            if (lastAnchorIndex == null) {
+                lastAnchorIndex = i
+                lastAnchorSpeed = s
+                anchorIndices.add(i)
+            } else {
+                if (!approxEqual(s, lastAnchorSpeed)) {
+                    lastAnchorIndex = i
+                    lastAnchorSpeed = s
+                    anchorIndices.add(i)
+                }
+            }
+        }
+
+        if (anchorIndices.size < 2) {
+            // Not enough changes to do anything useful
+            Log.w(
+                TAG,
+                "interpolateSpeedsInSamples: only ${anchorIndices.size} speed anchor(s); skipping"
+            )
+            return samples
+        }
+
+        // Make sure last row with speed is an anchor
+        val lastIndexWithSpeed = (samples.indices).lastOrNull { speeds[it] != null }
+        if (lastIndexWithSpeed != null && !anchorIndices.contains(lastIndexWithSpeed)) {
+            anchorIndices.add(lastIndexWithSpeed)
+        }
+
+        val newSpeeds = speeds.toMutableList()
+
+        // Interpolate between each pair of anchors based on timestamps
+        for (a in 0 until anchorIndices.size - 1) {
+            val i0 = anchorIndices[a]
+            val i1 = anchorIndices[a + 1]
+            if (i0 < 0 || i1 <= i0 || i1 >= samples.size) continue
+
+            val v0 = speeds[i0]
+            val v1 = speeds[i1]
+            val t0 = timestamps[i0].toDouble()
+            val t1 = timestamps[i1].toDouble()
+
+            if (v0 == null || v1 == null) continue
+            if (t1 <= t0) continue
+
+            val denom = t1 - t0
+            for (i in i0..i1) {
+                val ti = timestamps[i].toDouble()
+                val u = ((ti - t0) / denom).coerceIn(0.0, 1.0)
+                newSpeeds[i] = v0 + (v1 - v0) * u
+            }
+        }
+
+        // Return a new list of samples with updated speedMps
+        return samples.mapIndexed { idx, sample ->
+            val s = newSpeeds[idx]
+            if (s != null) sample.copy(speedMps = s) else sample
+        }
+    }
+
+
     fun createSmoothedCsvForSharing(
         context: Context,
         file: File,
@@ -566,6 +647,9 @@ object EventStorage {
         // Load original samples from the event CSV
         val samples = loadSamplesFromCsv(file)
         if (samples.isEmpty()) return null
+
+        // 🔧 NEW: interpolate speeds in-memory before smoothing Gs
+        val withInterpolatedSpeeds = interpolateSpeedsInSamples(samples)
 
         // Apply the desired smoothing, using rawLatG/rawLongG where available
         val smoothedSamples = applySmoothingForExport(samples, smoothingLevel)
