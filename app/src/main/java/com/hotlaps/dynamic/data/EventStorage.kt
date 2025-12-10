@@ -831,13 +831,9 @@ object EventStorage {
             val rows = mutableListOf<MutableList<String>>()
             val timestamps = mutableListOf<Long>()
             val speeds = mutableListOf<Double?>()
-            val gpsLat = mutableListOf<Double?>()
-            val gpsLon = mutableListOf<Double?>()
 
             // Column indices (must match header written by appendSample)
             val IDX_TIMESTAMP = 0
-            val IDX_GPS_LAT = 5
-            val IDX_GPS_LON = 6
             val IDX_SPEED = 14
 
             for (line in dataLines) {
@@ -845,25 +841,19 @@ object EventStorage {
 
                 val parts = line.split(',').toMutableList()
                 if (parts.size <= IDX_SPEED) {
-                    // Malformed row, keep as-is and skip from interpolation
+                    // Malformed row, keep as-is and mark as unusable
                     rows.add(parts)
                     timestamps.add(0L)
                     speeds.add(null)
-                    gpsLat.add(null)
-                    gpsLon.add(null)
                     continue
                 }
 
                 val utcMs = parts[IDX_TIMESTAMP].toLongOrNull()
-                val lat = parts[IDX_GPS_LAT].toDoubleOrNull()
-                val lon = parts[IDX_GPS_LON].toDoubleOrNull()
                 val speed = parts[IDX_SPEED].toDoubleOrNull()
 
                 rows.add(parts)
                 timestamps.add(utcMs ?: 0L)
                 speeds.add(speed)
-                gpsLat.add(lat)
-                gpsLon.add(lon)
             }
 
             if (rows.isEmpty()) {
@@ -878,57 +868,49 @@ object EventStorage {
                 return kotlin.math.abs(a - b) <= eps
             }
 
-            // 1) Build list of "anchor" indices where GPS changes
+            // Build list of anchor indices where SPEED changes (your idea).
             val anchorIndices = mutableListOf<Int>()
+            var lastAnchorIndex: Int? = null
+            var lastAnchorSpeed: Double? = null
 
-            // Always treat the first row as an anchor if it has a GPS fix
-            if (gpsLat[0] != null && gpsLon[0] != null) {
-                anchorIndices.add(0)
-            }
+            for (i in rows.indices) {
+                val s = speeds[i] ?: continue  // skip rows without speed
 
-            for (i in 1 until rows.size) {
-                val latPrev = gpsLat[i - 1]
-                val lonPrev = gpsLon[i - 1]
-                val latCur = gpsLat[i]
-                val lonCur = gpsLon[i]
-
-                // If GPS is missing, skip
-                if (latCur == null || lonCur == null) continue
-                if (latPrev == null || lonPrev == null) {
-                    // First valid GPS after a gap -> new anchor
+                if (lastAnchorIndex == null) {
+                    // First usable speed row
+                    lastAnchorIndex = i
+                    lastAnchorSpeed = s
                     anchorIndices.add(i)
-                    continue
-                }
-
-                // If either lat or lon changed beyond epsilon, treat as new anchor
-                val latChanged = !approxEqual(latCur, latPrev)
-                val lonChanged = !approxEqual(lonCur, lonPrev)
-
-                if (latChanged || lonChanged) {
-                    anchorIndices.add(i)
+                } else {
+                    if (!approxEqual(s, lastAnchorSpeed)) {
+                        // Speed has changed -> new anchor
+                        lastAnchorIndex = i
+                        lastAnchorSpeed = s
+                        anchorIndices.add(i)
+                    }
                 }
             }
 
             if (anchorIndices.size < 2) {
-                // Not enough distinct GPS points to interpolate between; nothing to do.
+                // Not enough distinct speed changes to interpolate; nothing to do.
                 Log.w(
                     TAG,
-                    "recomputeInterpolatedSpeedForEvent: only ${anchorIndices.size} GPS anchor(s); skipping"
+                    "recomputeInterpolatedSpeedForEvent: only ${anchorIndices.size} speed anchor(s); skipping"
                 )
                 return false
             }
 
-            // Make sure the last row is included as an anchor if it has GPS
-            val lastIdx = rows.lastIndex
-            if (!anchorIndices.contains(lastIdx) &&
-                gpsLat[lastIdx] != null && gpsLon[lastIdx] != null
+            // Make sure the last row with a speed is included as an anchor
+            val lastIndexWithSpeed = (rows.indices).lastOrNull { speeds[it] != null }
+            if (lastIndexWithSpeed != null &&
+                !anchorIndices.contains(lastIndexWithSpeed)
             ) {
-                anchorIndices.add(lastIdx)
+                anchorIndices.add(lastIndexWithSpeed)
             }
 
-            // 2) Interpolate speed between each consecutive pair of anchors
             val newSpeeds = speeds.toMutableList()
 
+            // For each consecutive pair of speed anchors, linearly interpolate.
             for (a in 0 until anchorIndices.size - 1) {
                 val i0 = anchorIndices[a]
                 val i1 = anchorIndices[a + 1]
@@ -939,14 +921,8 @@ object EventStorage {
                 val t0 = timestamps[i0].toDouble()
                 val t1 = timestamps[i1].toDouble()
 
-                if (v0 == null || v1 == null) {
-                    // Can't interpolate this span; leave it as-is
-                    continue
-                }
-                if (t1 <= t0) {
-                    // Degenerate / out-of-order timestamps; skip this span
-                    continue
-                }
+                if (v0 == null || v1 == null) continue
+                if (t1 <= t0) continue    // degenerate timestamps
 
                 val denom = t1 - t0
                 for (i in i0..i1) {
@@ -956,13 +932,13 @@ object EventStorage {
                 }
             }
 
-            // 3) Write interpolated speeds back into the rows.
+            // Write interpolated speeds back into column 14.
             for (i in rows.indices) {
                 val s = newSpeeds[i]
                 rows[i][IDX_SPEED] = s?.toString() ?: ""
             }
 
-            // 4) Rebuild file with header + updated data rows.
+            // Rebuild file with header + updated data rows.
             val newContent = buildString {
                 append(header); append('\n')
                 for (row in rows) {
@@ -978,6 +954,7 @@ object EventStorage {
             return false
         }
     }
+
 
 }
 
