@@ -1312,11 +1312,15 @@ fun GGScreen(
                 major += majorStep
             }
 
-            // --- Breakaway G circle (red) ---
-            if (breakawayG > 0f) {
-                val frac = (breakawayG / maxAbsG).coerceIn(0f, 1f)
-                if (frac > 0f) {
-                    val br = radius * frac
+// --- Breakaway G circle (red) ---
+// Only draw if the breakaway circle actually fits *inside* the main GG circle.
+            if (breakawayG > 0f && maxAbsG > 0f) {
+                val fracRaw = breakawayG / maxAbsG
+
+                // If breakawayG is at or beyond the current scale, don't draw it.
+                // The 0.98f keeps the red stroke from sitting right on the outer rim.
+                if (fracRaw in 0f..0.98f) {
+                    val br = radius * fracRaw
                     drawCircle(
                         color = Color(0xFFEF4444), // bright red
                         radius = br,
@@ -1325,6 +1329,7 @@ fun GGScreen(
                     )
                 }
             }
+
 
 
             // Center dot
