@@ -296,7 +296,7 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
         activeCornerDistanceSamples.clear()
         lastDistanceSampledM = null
 
-        // 🔧 NEW: run offline speed interpolation for this event's CSV
+         // 🔧 NEW: run offline speed interpolation for this event's CSV
         if (event != null && ::appContext.isInitialized) {
             viewModelScope.launch(Dispatchers.IO) {
                 EventStorage.recomputeInterpolatedSpeedForEvent(
@@ -305,6 +305,7 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
                 )
             }
         }
+
     }
 
 
