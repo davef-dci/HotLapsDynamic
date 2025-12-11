@@ -591,12 +591,6 @@ object EventStorage {
             }
         }
 
-        debugLogToFile(context, "anchorIndices=${anchorIndices.size}")
-
-        if (anchorIndices.size < 2) {
-            debugLogToFile(context, "Not enough speed changes — no interpolation")
-            return samples
-        }
 
         val lastIndexWithSpeed = (samples.indices).lastOrNull { speeds[it] != null }
         if (lastIndexWithSpeed != null &&
@@ -616,7 +610,6 @@ object EventStorage {
             val t0 = timestamps[i0].toDouble()
             val t1 = timestamps[i1].toDouble()
 
-            debugLogToFile(context, "segment: i0=$i0 i1=$i1 v0=$v0 v1=$v1 t0=$t0 t1=$t1")
 
             if (v0 == null || v1 == null) continue
             if (t1 <= t0) continue
@@ -651,21 +644,18 @@ object EventStorage {
         file: File,
         smoothingLevel: SmoothingLevel
     ): File? {
-        // Load original samples from the event CSV
+        // 1) Load original samples from the event CSV
         val samples = loadSamplesFromCsv(file)
         if (samples.isEmpty()) return null
 
-        // 🔧 NEW: interpolate speeds in-memory before smoothing Gs
+        // 2) Interpolate speeds in-memory before smoothing Gs
         val withInterpolatedSpeeds = interpolateSpeedsInSamples(context, samples)
 
-
-
-        // Apply the desired smoothing, using rawLatG/rawLongG where available
+        // 3) Apply the desired smoothing, using rawLatG/rawLongG where available
         val smoothedSamples = applySmoothingForExport(withInterpolatedSpeeds, smoothingLevel)
-
         if (smoothedSamples.isEmpty()) return null
 
-        // Write the smoothed samples to a separate CSV in the same directory
+        // 4) Choose output directory (currently same dir as source file)
         val dir = file.parentFile ?: eventsDir(context) ?: return null
 
         val baseName = file.nameWithoutExtension
@@ -682,8 +672,11 @@ object EventStorage {
             outFile.delete()
         }
 
+        // 5) Build entire CSV in memory, then write once
+        val sb = StringBuilder()
+
         // Same header as appendSample()
-        outFile.appendText(
+        sb.append(
             "timestampMs,deltaMs,localTime,trackName,eventName," +
                     "gpsLat,gpsLon,closestCornerIndex,distanceToClosestCornerM," +
                     "rawLatG,rawLongG,latG,longG,gSum," +
@@ -699,52 +692,37 @@ object EventStorage {
             val localTime = localTimeFormat.format(Date(sample.utcMs))
             val speedStr = sample.speedMps?.toString() ?: ""
 
-            val line = buildString {
-                // Time
-                append(sample.utcMs); append(',')
-                append(sample.intervalMs); append(',')
-
-                // Local time (human-readable)
-                append(localTime); append(',')
-
-                // Event metadata
-                append(sample.trackName); append(',')
-                append(sample.eventName); append(',')
-
-                // GPS + nearest corner info
-                append(sample.gpsLat); append(',')
-                append(sample.gpsLon); append(',')
-                append(sample.closestCornerIndex); append(',')
-                append(sample.distanceToClosestCornerM); append(',')
-
-                // Raw + smoothed G values
-                append(sample.rawLatG); append(',')
-                append(sample.rawLongG); append(',')
-                append(sample.latG); append(',')
-                append(sample.longG); append(',')
-                append(sample.gSum); append(',')
-
-                // Speed
-                append(speedStr); append(',')
-
-                // Corner visit info
-                append(sample.cornerIndex); append(',')
-                append(sample.cornerName); append(',')
-                append(sample.visitNumber); append(',')
-
-                // Apex flag
-                append(if (sample.isApexSample) "1" else "0")
-                append('\n')
-            }
-
-            outFile.appendText(line)
+            // Build a single CSV line for this sample
+            sb.append(sample.utcMs).append(',')
+                .append(sample.intervalMs).append(',')
+                .append(localTime).append(',')
+                .append(sample.trackName).append(',')
+                .append(sample.eventName).append(',')
+                .append(sample.gpsLat).append(',')
+                .append(sample.gpsLon).append(',')
+                .append(sample.closestCornerIndex).append(',')
+                .append(sample.distanceToClosestCornerM).append(',')
+                .append(sample.rawLatG).append(',')
+                .append(sample.rawLongG).append(',')
+                .append(sample.latG).append(',')
+                .append(sample.longG).append(',')
+                .append(sample.gSum).append(',')
+                .append(speedStr).append(',')
+                .append(sample.cornerIndex).append(',')
+                .append(sample.cornerName).append(',')
+                .append(sample.visitNumber).append(',')
+                .append(if (sample.isApexSample) "1" else "0")
+                .append('\n')
         }
 
-        debugLogToFile(context, "EXPORT using interpolated speeds")
+        // Single write instead of N appends
+        outFile.writeText(sb.toString())
 
+        debugLogToFile(context, "EXPORT using interpolated speeds (smoothed=${smoothedSamples.size})")
 
         return outFile
     }
+
 
 
 

@@ -315,17 +315,29 @@ fun EventManagerScreen(
                         Button(
                             onClick = {
                                 if (selectedShareFiles.isNotEmpty()) {
-                                    val smoothed = selectedShareFiles.mapNotNull { file ->
-                                        EventStorage.createSmoothedCsvForSharing(context, file, shareSmoothingLevel)
-                                    }
-                                    EventStorage.shareMultipleEventCsv(context, smoothed)
+                                    coroutineScope.launch {
+                                        // 1) Heavy work on IO thread
+                                        val smoothed = withContext(Dispatchers.IO) {
+                                            selectedShareFiles.mapNotNull { file ->
+                                                EventStorage.createSmoothedCsvForSharing(
+                                                    context,
+                                                    file,
+                                                    shareSmoothingLevel
+                                                )
+                                            }
+                                        }
 
-                                    statusMessage = "Sharing ${selectedShareFiles.size} event file(s)"
-                                    showSharePanel = false
+                                        // 2) Back on main thread: share + UI updates
+                                        EventStorage.shareMultipleEventCsv(context, smoothed)
+
+                                        statusMessage = "Sharing ${selectedShareFiles.size} event file(s)"
+                                        showSharePanel = false
+                                    }
                                 }
                             },
                             enabled = selectedShareFiles.isNotEmpty()
-                        ) {
+                        )
+                        {
                             Text("Share Selected")
                         }
 
