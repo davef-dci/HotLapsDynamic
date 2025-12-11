@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "929580472194",
+    "project_id": "apexdynamics-219e8",
+    "storage_bucket": "apexdynamics-219e8.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:929580472194:android:a3447c928587d9c6ea619b",
+        "android_client_info": {
+          "package_name": "com.hotlaps.dynamic"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAhwLDBuqI0FV4S0ACbowDJRxYfAWMmQwY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
