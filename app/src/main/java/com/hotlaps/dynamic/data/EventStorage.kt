@@ -666,7 +666,7 @@ object EventStorage {
             SmoothingLevel.Heavy -> "heavy"
         }
 
-        val outFile = File(dir, "${baseName}_smooth_$suffix.csv")
+        val outFile = file       // <-- overwrite original
 
         if (outFile.exists()) {
             outFile.delete()
