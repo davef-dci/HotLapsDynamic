@@ -56,7 +56,8 @@ import com.hotlaps.dynamic.ui.help.HelpGForceMapScreen
 import com.hotlaps.dynamic.ui.help.HelpTracksScreen
 import com.hotlaps.dynamic.ui.help.HelpEventsScreen
 import com.hotlaps.dynamic.ui.help.HelpSettingsScreen
-
+import com.google.firebase.crashlytics.FirebaseCrashlytics
+import com.hotlaps.dynamic.BuildConfig
 
 // ---------------------------------------------------------------------
 // Reusable drawer navigation item with bigger hit area & larger text

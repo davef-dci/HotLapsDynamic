@@ -191,6 +191,10 @@ fun CalibrateScreen(onBack: () -> Unit) {
                 Button(
                     enabled = !collecting,
                     onClick = {
+
+
+
+
                         xs.clear(); ys.clear(); zs.clear()
                         collected = 0
                         forwardVec = null

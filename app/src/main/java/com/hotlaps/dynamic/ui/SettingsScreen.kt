@@ -24,6 +24,10 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.ui.Alignment
 import androidx.navigation.NavController
 import com.hotlaps.dynamic.data.SmoothingLevel
+import com.hotlaps.dynamic.BuildConfig
+
+import com.google.firebase.crashlytics.FirebaseCrashlytics
+
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -164,6 +168,17 @@ fun SettingsScreen(onBack: () -> Unit, navController: NavController)
             }
 
             Divider()
+
+
+            Button(onClick = {
+                if (BuildConfig.DEBUG) {
+                    FirebaseCrashlytics.getInstance().log("User triggered test crash")
+                    throw RuntimeException("Test Crashlytics crash")
+                }
+            }) {
+                Text("Crash Test")
+            }
+
 
 
             Text("G-G trail window (seconds)")

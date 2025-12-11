@@ -8,6 +8,8 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    id("com.google.gms.google-services")   // REQUIRED
+    id("com.google.firebase.crashlytics")  // REQUIRED
 }
 
 android {
@@ -84,6 +86,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-text:1.7.0")
     implementation("com.google.code.gson:gson:2.10.1")
     implementation("androidx.compose.material:material-icons-extended:1.6.1")
+    implementation("com.google.firebase:firebase-crashlytics-ktx")
 
 
 
@@ -106,6 +109,10 @@ dependencies {
 
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
+    implementation(platform("com.google.firebase:firebase-bom:33.5.1"))
+    implementation("com.google.firebase:firebase-crashlytics-ktx")
+
+
 }
 
 
