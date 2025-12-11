@@ -114,6 +114,7 @@ import androidx.compose.foundation.background
 
 import androidx.compose.ui.graphics.toArgb
 import com.hotlaps.dynamic.AccentLime
+import com.hotlaps.dynamic.BuildConfig
 import com.hotlaps.dynamic.RecordRed
 
 import com.hotlaps.dynamic.data.SmoothingLevel
@@ -536,7 +537,9 @@ fun GGScreen(
     }
 
     // --- Pager state for swipeable Drive / Debug pages ---
-    val pagerState = rememberPagerState(initialPage = 0, pageCount = { 2 })
+    val pagerState = rememberPagerState(initialPage = 0, pageCount = {
+        if (BuildConfig.DEBUG) 2 else 1
+    })
     val scope = rememberCoroutineScope()
 
     if (showRenameDialog) {
@@ -965,214 +968,216 @@ fun GGScreen(
                         }
                             // === Page 1: Debug panel ===
                             1 -> {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(12.dp),
-                                    verticalArrangement = Arrangement.Top,
-                                    horizontalAlignment = Alignment.Start
-                                ) {
-                                    Text(
-                                        text = "Debug Panel",
-                                        fontSize = 22.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(bottom = 8.dp)
-                                    )
+                                if (BuildConfig.DEBUG) {
 
-                                    val t = activeTrack
-
-                                    Text("Track: ${t?.name ?: "(none)"}")
-                                    if (t != null) {
-                                        Text("Corners: ${t.corners.size}")
-                                    }
-
-                                    Spacer(Modifier.height(8.dp))
-
-                                    Text(
-                                        "Raw GPS (screen): ${"%.6f".format(gpsLat)}, ${
-                                            "%.6f".format(
-                                                gpsLon
-                                            )
-                                        }"
-                                    )
-                                    Text(
-                                        "VM GPS: ${"%.6f".format(vmGpsLat)}, ${
-                                            "%.6f".format(
-                                                vmGpsLon
-                                            )
-                                        }"
-                                    )
-                                    Text(
-                                        "VM G: lat=${"%.2f".format(vmLatG)}, long=${
-                                            "%.2f".format(
-                                                vmLongG
-                                            )
-                                        }"
-                                    )
-
-                                    Spacer(Modifier.height(8.dp))
-
-                                    if (t != null && firstCorner != null && distanceToFirstCorner != null) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(12.dp),
+                                        verticalArrangement = Arrangement.Top,
+                                        horizontalAlignment = Alignment.Start
+                                    ) {
                                         Text(
-                                            "Corner 1 distance: ${
+                                            text = "Debug Panel",
+                                            fontSize = 22.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(bottom = 8.dp)
+                                        )
+
+                                        val t = activeTrack
+
+                                        Text("Track: ${t?.name ?: "(none)"}")
+                                        if (t != null) {
+                                            Text("Corners: ${t.corners.size}")
+                                        }
+
+                                        Spacer(Modifier.height(8.dp))
+
+                                        Text(
+                                            "Raw GPS (screen): ${"%.6f".format(gpsLat)}, ${
+                                                "%.6f".format(
+                                                    gpsLon
+                                                )
+                                            }"
+                                        )
+                                        Text(
+                                            "VM GPS: ${"%.6f".format(vmGpsLat)}, ${
+                                                "%.6f".format(
+                                                    vmGpsLon
+                                                )
+                                            }"
+                                        )
+                                        Text(
+                                            "VM G: lat=${"%.2f".format(vmLatG)}, long=${
+                                                "%.2f".format(
+                                                    vmLongG
+                                                )
+                                            }"
+                                        )
+
+                                        Spacer(Modifier.height(8.dp))
+
+                                        if (t != null && firstCorner != null && distanceToFirstCorner != null) {
+                                            Text(
+                                                "Corner 1 distance: ${
+                                                    "%.1f".format(
+                                                        distanceToFirstCorner
+                                                    )
+                                                } m"
+                                            )
+                                        } else {
+                                            Text("Corner 1 distance: (n/a)")
+                                        }
+
+                                        nearestCornerInfo?.let { (_, distM) ->
+                                            val inside =
+                                                driveViewModel.isWithinCornerTriggerRadius(distM)
+                                            Text("Inside trigger radius: $inside")
+                                        } ?: run {
+                                            Text("Inside trigger radius: (n/a)")
+                                        }
+
+                                        Text(
+                                            text = "Corner trigger radius: ${
                                                 "%.1f".format(
-                                                    distanceToFirstCorner
+                                                    driveViewModel.getCornerTriggerRadiusMeters()
                                                 )
-                                            } m"
-                                        )
-                                    } else {
-                                        Text("Corner 1 distance: (n/a)")
-                                    }
-
-                                    nearestCornerInfo?.let { (_, distM) ->
-                                        val inside =
-                                            driveViewModel.isWithinCornerTriggerRadius(distM)
-                                        Text("Inside trigger radius: $inside")
-                                    } ?: run {
-                                        Text("Inside trigger radius: (n/a)")
-                                    }
-
-                                    Text(
-                                        text = "Corner trigger radius: ${
-                                            "%.1f".format(
-                                                driveViewModel.getCornerTriggerRadiusMeters()
-                                            )
-                                        } m",
-                                        modifier = Modifier.padding(top = 4.dp)
-                                    )
-
-                                    nearestCornerInfo?.let { (label, distM) ->
-                                        Text(
-                                            text = "Nearest corner (all): #$label (${
-                                                String.format(
-                                                    "%.1f",
-                                                    distM
-                                                )
-                                            } m)",
+                                            } m",
                                             modifier = Modifier.padding(top = 4.dp)
                                         )
-                                    } ?: run {
-                                        Text(
-                                            text = "Nearest corner (all): (n/a)",
-                                            modifier = Modifier.padding(top = 4.dp)
-                                        )
-                                    }
 
-                                    Spacer(Modifier.height(12.dp))
-
-                                    Text("Event ID: ${currentEvent?.id ?: 0L}")
-                                    Text("Event name: ${currentEvent?.name ?: "(none)"}")
-                                    Text("TrackId on Event: ${currentEvent?.trackId ?: 0L}")
-
-                                    Spacer(Modifier.height(16.dp))
-
-                                    Text(
-                                        text = "G-G Smoothing",
-                                        fontSize = 18.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Text(
-                                        text = "Samples: $smoothingSamples (~${
-                                            "%.2f".format(
-                                                smoothingSamples / 20f
+                                        nearestCornerInfo?.let { (label, distM) ->
+                                            Text(
+                                                text = "Nearest corner (all): #$label (${
+                                                    String.format(
+                                                        "%.1f",
+                                                        distM
+                                                    )
+                                                } m)",
+                                                modifier = Modifier.padding(top = 4.dp)
                                             )
-                                        } s at 20 Hz)",
-                                        fontSize = 14.sp
-                                    )
-
-                                    Slider(
-                                        value = smoothingSamples.toFloat(),
-                                        onValueChange = { newValue ->
-                                            val clamped = newValue.toInt().coerceIn(1, 30)
-                                            smoothingSamples = clamped
-                                            gSmoother.setWindowSize(clamped)
-                                        },
-                                        valueRange = 1f..30f,
-                                        steps = 30 - 2
-                                    )
-
-                                    // --- Desk Simulation from simulation.csv (truncated file) ---
-                                    Spacer(Modifier.height(16.dp))
-
-                                    Text(
-                                        text = "Desk Simulation (simulation.csv)",
-                                        fontSize = 18.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(bottom = 4.dp)
-                                    )
-
-                                    if (t != null) {
-                                        Button(
-                                            onClick = {
-                                                driveViewModel.startSimulationFromTruncatedCsv(
-                                                    context = context,
-                                                    track = activeTrack,
-                                                    playbackSpeed = 0.0,
-                                                    emaTauMs = tauMsOrNull,
-                                                    maWindowSize = smoothingLevel.windowSize
-                                                )
-                                            },
-                                            modifier = Modifier.padding(bottom = 8.dp)
-                                        ) {
-                                            Text("Replay simulation.csv")
+                                        } ?: run {
+                                            Text(
+                                                text = "Nearest corner (all): (n/a)",
+                                                modifier = Modifier.padding(top = 4.dp)
+                                            )
                                         }
-                                    } else {
-                                        Text(
-                                            text = "Replay simulation.csv: select a track first",
-                                            fontSize = 14.sp,
-                                            modifier = Modifier.padding(bottom = 8.dp)
-                                        )
-                                    }
 
-                                    // Existing GPS teleport sim
-                                    if (t != null && firstCorner != null) {
+                                        Spacer(Modifier.height(12.dp))
+
+                                        Text("Event ID: ${currentEvent?.id ?: 0L}")
+                                        Text("Event name: ${currentEvent?.name ?: "(none)"}")
+                                        Text("TrackId on Event: ${currentEvent?.trackId ?: 0L}")
+
+                                        Spacer(Modifier.height(16.dp))
+
                                         Text(
-                                            text = "GPS Simulation (Debug only)",
+                                            text = "G-G Smoothing",
+                                            fontSize = 18.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = "Samples: $smoothingSamples (~${
+                                                "%.2f".format(
+                                                    smoothingSamples / 20f
+                                                )
+                                            } s at 20 Hz)",
+                                            fontSize = 14.sp
+                                        )
+
+                                        Slider(
+                                            value = smoothingSamples.toFloat(),
+                                            onValueChange = { newValue ->
+                                                val clamped = newValue.toInt().coerceIn(1, 30)
+                                                smoothingSamples = clamped
+                                                gSmoother.setWindowSize(clamped)
+                                            },
+                                            valueRange = 1f..30f,
+                                            steps = 30 - 2
+                                        )
+
+                                        // --- Desk Simulation from simulation.csv (truncated file) ---
+                                        Spacer(Modifier.height(16.dp))
+
+                                        Text(
+                                            text = "Desk Simulation (simulation.csv)",
+                                            fontSize = 18.sp,
                                             fontWeight = FontWeight.Bold,
                                             modifier = Modifier.padding(bottom = 4.dp)
                                         )
 
-                                        Button(
-                                            onClick = {
-                                                driveViewModel.updateGps(
-                                                    firstCorner.lat,
-                                                    firstCorner.lon
-                                                )
-                                            },
-                                            modifier = Modifier.padding(bottom = 4.dp)
-                                        ) {
-                                            Text("Teleport INSIDE corner 1")
+                                        if (t != null) {
+                                            Button(
+                                                onClick = {
+                                                    driveViewModel.startSimulationFromTruncatedCsv(
+                                                        context = context,
+                                                        track = activeTrack,
+                                                        playbackSpeed = 0.0,
+                                                        emaTauMs = tauMsOrNull,
+                                                        maWindowSize = smoothingLevel.windowSize
+                                                    )
+                                                },
+                                                modifier = Modifier.padding(bottom = 8.dp)
+                                            ) {
+                                                Text("Replay simulation.csv")
+                                            }
+                                        } else {
+                                            Text(
+                                                text = "Replay simulation.csv: select a track first",
+                                                fontSize = 14.sp,
+                                                modifier = Modifier.padding(bottom = 8.dp)
+                                            )
                                         }
-                                    } else {
-                                        Text("GPS Simulation: (needs a track with at least one corner)")
-                                    }
 
+                                        // Existing GPS teleport sim
+                                        if (t != null && firstCorner != null) {
+                                            Text(
+                                                text = "GPS Simulation (Debug only)",
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(bottom = 4.dp)
+                                            )
 
-
-                                    if (t != null && firstCorner != null) {
-                                        Text(
-                                            text = "GPS Simulation (Debug only)",
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.padding(bottom = 4.dp)
-                                        )
-
-                                        Button(
-                                            onClick = {
-                                                driveViewModel.updateGps(
-                                                    firstCorner.lat,
-                                                    firstCorner.lon
-                                                )
-                                            },
-                                            modifier = Modifier.padding(bottom = 4.dp)
-                                        ) {
-                                            Text("Teleport INSIDE corner 1")
+                                            Button(
+                                                onClick = {
+                                                    driveViewModel.updateGps(
+                                                        firstCorner.lat,
+                                                        firstCorner.lon
+                                                    )
+                                                },
+                                                modifier = Modifier.padding(bottom = 4.dp)
+                                            ) {
+                                                Text("Teleport INSIDE corner 1")
+                                            }
+                                        } else {
+                                            Text("GPS Simulation: (needs a track with at least one corner)")
                                         }
-                                    } else {
-                                        Text("GPS Simulation: (needs a track with at least one corner)")
+
+
+
+                                        if (t != null && firstCorner != null) {
+                                            Text(
+                                                text = "GPS Simulation (Debug only)",
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(bottom = 4.dp)
+                                            )
+
+                                            Button(
+                                                onClick = {
+                                                    driveViewModel.updateGps(
+                                                        firstCorner.lat,
+                                                        firstCorner.lon
+                                                    )
+                                                },
+                                                modifier = Modifier.padding(bottom = 4.dp)
+                                            ) {
+                                                Text("Teleport INSIDE corner 1")
+                                            }
+                                        } else {
+                                            Text("GPS Simulation: (needs a track with at least one corner)")
+                                        }
+
+
                                     }
-
-
-
                                 }
                             }
                         }

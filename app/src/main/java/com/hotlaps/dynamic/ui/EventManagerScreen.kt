@@ -315,7 +315,11 @@ fun EventManagerScreen(
                         Button(
                             onClick = {
                                 if (selectedShareFiles.isNotEmpty()) {
-                                    EventStorage.shareMultipleEventCsv(context, selectedShareFiles.toList())
+                                    val smoothed = selectedShareFiles.mapNotNull { file ->
+                                        EventStorage.createSmoothedCsvForSharing(context, file, shareSmoothingLevel)
+                                    }
+                                    EventStorage.shareMultipleEventCsv(context, smoothed)
+
                                     statusMessage = "Sharing ${selectedShareFiles.size} event file(s)"
                                     showSharePanel = false
                                 }

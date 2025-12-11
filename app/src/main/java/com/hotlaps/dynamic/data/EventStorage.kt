@@ -558,21 +558,22 @@ object EventStorage {
         }
     }
 
-    private fun interpolateSpeedsInSamples(samples: List<EventSample>): List<EventSample> {
+    private fun interpolateSpeedsInSamples(
+        context: Context,
+        samples: List<EventSample>
+    ): List<EventSample> {
+
         if (samples.isEmpty()) return samples
 
-        // Pull out times & speeds
         val timestamps = samples.map { it.utcMs }
         val speeds = samples.map { it.speedMps }
 
-        // Helper like in recomputeInterpolatedSpeedForEvent
         fun approxEqual(a: Double?, b: Double?, eps: Double = 1e-9): Boolean {
             if (a == null && b == null) return true
             if (a == null || b == null) return false
             return kotlin.math.abs(a - b) <= eps
         }
 
-        // Find anchor indices where speed changes
         val anchorIndices = mutableListOf<Int>()
         var lastAnchorIndex: Int? = null
         var lastAnchorSpeed: Double? = null
@@ -583,42 +584,39 @@ object EventStorage {
                 lastAnchorIndex = i
                 lastAnchorSpeed = s
                 anchorIndices.add(i)
-            } else {
-                if (!approxEqual(s, lastAnchorSpeed)) {
-                    lastAnchorIndex = i
-                    lastAnchorSpeed = s
-                    anchorIndices.add(i)
-                }
+            } else if (!approxEqual(s, lastAnchorSpeed)) {
+                lastAnchorIndex = i
+                lastAnchorSpeed = s
+                anchorIndices.add(i)
             }
         }
 
+        debugLogToFile(context, "anchorIndices=${anchorIndices.size}")
+
         if (anchorIndices.size < 2) {
-            // Not enough changes to do anything useful
-            Log.w(
-                TAG,
-                "interpolateSpeedsInSamples: only ${anchorIndices.size} speed anchor(s); skipping"
-            )
+            debugLogToFile(context, "Not enough speed changes — no interpolation")
             return samples
         }
 
-        // Make sure last row with speed is an anchor
         val lastIndexWithSpeed = (samples.indices).lastOrNull { speeds[it] != null }
-        if (lastIndexWithSpeed != null && !anchorIndices.contains(lastIndexWithSpeed)) {
+        if (lastIndexWithSpeed != null &&
+            !anchorIndices.contains(lastIndexWithSpeed)
+        ) {
             anchorIndices.add(lastIndexWithSpeed)
         }
 
         val newSpeeds = speeds.toMutableList()
 
-        // Interpolate between each pair of anchors based on timestamps
         for (a in 0 until anchorIndices.size - 1) {
             val i0 = anchorIndices[a]
             val i1 = anchorIndices[a + 1]
-            if (i0 < 0 || i1 <= i0 || i1 >= samples.size) continue
 
             val v0 = speeds[i0]
             val v1 = speeds[i1]
             val t0 = timestamps[i0].toDouble()
             val t1 = timestamps[i1].toDouble()
+
+            debugLogToFile(context, "segment: i0=$i0 i1=$i1 v0=$v0 v1=$v1 t0=$t0 t1=$t1")
 
             if (v0 == null || v1 == null) continue
             if (t1 <= t0) continue
@@ -631,11 +629,20 @@ object EventStorage {
             }
         }
 
-        // Return a new list of samples with updated speedMps
         return samples.mapIndexed { idx, sample ->
             val s = newSpeeds[idx]
             if (s != null) sample.copy(speedMps = s) else sample
         }
+    }
+
+    private fun debugLogToFile(context: Context, message: String) {
+        try {
+            val dir = context.getExternalFilesDir("debug_logs")
+            if (dir != null && (dir.exists() || dir.mkdirs())) {
+                val file = File(dir, "speed_interp_debug.log")
+                file.appendText("${System.currentTimeMillis()}, $message\n")
+            }
+        } catch (_: Exception) {}
     }
 
 
@@ -649,10 +656,13 @@ object EventStorage {
         if (samples.isEmpty()) return null
 
         // 🔧 NEW: interpolate speeds in-memory before smoothing Gs
-        val withInterpolatedSpeeds = interpolateSpeedsInSamples(samples)
+        val withInterpolatedSpeeds = interpolateSpeedsInSamples(context, samples)
+
+
 
         // Apply the desired smoothing, using rawLatG/rawLongG where available
-        val smoothedSamples = applySmoothingForExport(samples, smoothingLevel)
+        val smoothedSamples = applySmoothingForExport(withInterpolatedSpeeds, smoothingLevel)
+
         if (smoothedSamples.isEmpty()) return null
 
         // Write the smoothed samples to a separate CSV in the same directory
@@ -729,6 +739,9 @@ object EventStorage {
 
             outFile.appendText(line)
         }
+
+        debugLogToFile(context, "EXPORT using interpolated speeds")
+
 
         return outFile
     }
@@ -1078,6 +1091,7 @@ class SpeedInterpolator {
         val t = (sampleUtc - t0).toDouble() / (t1 - t0).toDouble()
         return v0 + t * (v1 - t0)
     }
+
 
 
 
