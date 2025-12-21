@@ -170,15 +170,6 @@ fun SettingsScreen(onBack: () -> Unit, navController: NavController)
             Divider()
 
 
-            Button(onClick = {
-                if (BuildConfig.DEBUG) {
-                    FirebaseCrashlytics.getInstance().log("User triggered test crash")
-                    throw RuntimeException("Test Crashlytics crash")
-                }
-            }) {
-                Text("Crash Test")
-            }
-
 
 
             Text("G-G trail window (seconds)")

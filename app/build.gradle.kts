@@ -20,8 +20,8 @@ android {
         applicationId = "com.hotlaps.dynamic"
         minSdk = 26
         targetSdk = 36
-        versionCode = 8
-        versionName = "0.1.8-Close_Test"
+        versionCode = 9
+        versionName = "0.1.9-Close_Test"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
     }
