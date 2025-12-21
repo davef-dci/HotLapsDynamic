@@ -9,6 +9,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.hotlaps.dynamic.ui.components.BigButton
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

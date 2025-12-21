@@ -38,7 +38,6 @@ import com.hotlaps.dynamic.ui.EventManagerScreen
 import com.hotlaps.dynamic.ui.EventViewerScreen
 import com.hotlaps.dynamic.ui.GGScreen
 import com.hotlaps.dynamic.ui.HelpAboutScreen
-import com.hotlaps.dynamic.ui.MainMenuDynamics
 import com.hotlaps.dynamic.ui.SplashDynamics
 import com.hotlaps.dynamic.ui.TeachCornersScreen
 import com.hotlaps.dynamic.ui.TrackAndCornerSetupScreen
@@ -169,7 +168,7 @@ class MainActivity : ComponentActivity() {
 
                                 // Events
                                 DrawerNavItem(
-                                    label = "Events",
+                                    label = "Events (Results)",
                                     iconResId = R.drawable.event
                                 ) {
                                     scope.launch {
@@ -292,20 +291,7 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
 
-                            composable("menu") {
-                                MainMenuDynamics(
-                                    onOpenDrawer = {
-                                        scope.launch {
-                                            drawerState.open()
-                                        }
-                                    },
-                                    onDrive = { nav.navigate("drive") },
-                                    onTrackManager = { nav.navigate("trackSetup") },
-                                    onEventManager = { nav.navigate("eventManager") },
-                                    onCalibrate = { nav.navigate("calib") },
-                                    onSettings = { nav.navigate("settings") }
-                                )
-                            }
+
 
                             composable("drive") {
                                 GGScreen(
