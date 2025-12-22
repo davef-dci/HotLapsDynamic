@@ -32,6 +32,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 
 
+
 /**
  * Holds all Drive-mode state:
  *  - Current Event (if any)
@@ -1435,6 +1436,12 @@ fun updateCornerCaptureState(
         emaTauMs: Float? = null,
         maWindowSize: Int = 1
     ) {
+
+        Log.d(
+            "DebugSim",
+            "startSimulationFromTruncatedCsv: playbackSpeed=$playbackSpeed"
+        )
+
         val currentTrack = track
         if (currentTrack == null) {
             Log.w("DebugSim", "startSimulationFromTruncatedCsv called with null track")
@@ -1467,31 +1474,17 @@ fun updateCornerCaptureState(
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val eventsDir = FileHelper.appEventsDir(context)
-                if (eventsDir == null || !eventsDir.exists()) {
-                    Log.w(
-                        "DebugSim",
-                        "appEventsDir not available; cannot load simulation2.csv"
-                    )
-                    return@launch
-                }
-
-                // 👇 NEW: use simulation2.csv
-                val simFile = java.io.File(eventsDir, "simulation2.csv")
-                if (!simFile.exists()) {
-                    Log.w(
-                        "DebugSim",
-                        "simulation2.csv not found at ${simFile.absolutePath}"
-                    )
-                    return@launch
-                }
-
                 val allLines = try {
-                    simFile.readLines()
-                        .map { it.trim() }
-                        .filter { it.isNotEmpty() }
+                    context.assets.open("simulation2.csv")
+                        .bufferedReader()
+                        .useLines { lines ->
+                            lines
+                                .map { it.trim() }
+                                .filter { it.isNotEmpty() }
+                                .toList()
+                        }
                 } catch (e: Exception) {
-                    Log.e("DebugSim", "Error reading simulation2.csv", e)
+                    Log.e("DebugSim", "Error reading simulation2.csv from assets", e)
                     return@launch
                 }
 
@@ -1618,6 +1611,28 @@ fun updateCornerCaptureState(
             }
         }
     }
+
+    private fun ensureSimulationCsvExists(context: Context): File {
+        val eventsDir = File(context.getExternalFilesDir(null), "events")
+        if (!eventsDir.exists()) {
+            eventsDir.mkdirs()
+        }
+
+        val simFile = File(eventsDir, "simulation2.csv")
+
+        if (!simFile.exists()) {
+            context.assets.open("simulation2.csv").use { input ->
+                simFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            Log.i("DebugSim", "Copied simulation2.csv from assets to ${simFile.absolutePath}")
+        }
+
+        return simFile
+    }
+
+
 
 
 
