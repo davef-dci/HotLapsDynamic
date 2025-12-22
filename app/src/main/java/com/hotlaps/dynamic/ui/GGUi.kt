@@ -536,10 +536,17 @@ fun GGScreen(
 
     }
 
+    val showDebugToolsSetting by repo
+        .showDebugTools
+        .collectAsStateWithLifecycle(initialValue = false)
+
+    val showDebug = BuildConfig.DEBUG || showDebugToolsSetting
+
+
+
+
     // --- Pager state for swipeable Drive / Debug pages ---
-    val pagerState = rememberPagerState(initialPage = 0, pageCount = {
-        if (BuildConfig.DEBUG) 2 else 1
-    })
+    val pagerState = rememberPagerState(initialPage = 0, pageCount = { if (showDebug) 2 else 1 })
     val scope = rememberCoroutineScope()
 
     if (showRenameDialog) {
@@ -968,7 +975,7 @@ fun GGScreen(
                         }
                             // === Page 1: Debug panel ===
                             1 -> {
-                                if (BuildConfig.DEBUG) {
+                                if (showDebug) {
 
                                     Column(
                                         modifier = Modifier

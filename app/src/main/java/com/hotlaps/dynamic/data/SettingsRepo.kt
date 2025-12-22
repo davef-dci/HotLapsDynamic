@@ -8,6 +8,8 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import androidx.datastore.preferences.core.booleanPreferencesKey
+
 
 private val Context.settingsDataStore by preferencesDataStore(name = "settings")
 
@@ -34,6 +36,9 @@ class SettingsRepo(private val context: Context) {
 
         // 6) Tire grip limit / Breakaway G
         val BREAKAWAY_G = floatPreferencesKey("breakaway_g")
+
+        val SHOW_DEBUG_TOOLS = booleanPreferencesKey("show_debug_tools")
+
     }
 
     // --- Defaults (tweak as you like)
@@ -45,6 +50,8 @@ class SettingsRepo(private val context: Context) {
         const val CORNER_TRIGGER_RADIUS_M = 30f
         const val SMOOTHING_LEVEL = 2  // 0=Off, 1=Low, 2=Medium, 3=Heavy
         const val BREAKAWAY_G = 1.00f
+        const val SHOW_DEBUG_TOOLS = false
+
 
     }
 
@@ -76,6 +83,12 @@ class SettingsRepo(private val context: Context) {
         context.settingsDataStore.data.map {
             it[K.BREAKAWAY_G] ?: D.BREAKAWAY_G
         }
+
+    val showDebugTools: Flow<Boolean> =
+        context.settingsDataStore.data.map {
+            it[K.SHOW_DEBUG_TOOLS] ?: D.SHOW_DEBUG_TOOLS
+        }
+
 
     // --- Updaters
     suspend fun updateTrailBrakeG(v: Float) {
@@ -115,5 +128,12 @@ class SettingsRepo(private val context: Context) {
             prefs[K.BREAKAWAY_G] = clamped
         }
     }
+
+    suspend fun updateShowDebugTools(enabled: Boolean) {
+        context.settingsDataStore.edit { prefs ->
+            prefs[K.SHOW_DEBUG_TOOLS] = enabled
+        }
+    }
+
 
 }

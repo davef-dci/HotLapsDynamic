@@ -63,6 +63,10 @@ fun SettingsScreen(onBack: () -> Unit, navController: NavController)
      val breakawayG by repo.breakawayG.collectAsState(initial = 1.00f)
      var breakawayText by remember(breakawayG) { mutableStateOf("%.2f".format(breakawayG)) }
 
+     var devTapCount by remember { mutableStateOf(0) }
+     var showDevToggle by remember { mutableStateOf(false) }
+
+     val showDebugTools by repo.showDebugTools.collectAsState(initial = false)
 
 
      Scaffold(
@@ -280,6 +284,46 @@ fun SettingsScreen(onBack: () -> Unit, navController: NavController)
             if (status.isNotBlank()) {
                 Text(status, color = MaterialTheme.colorScheme.primary)
             }
+
+            Divider()
+
+            Text(
+                text = "App Version ${BuildConfig.VERSION_NAME}",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        devTapCount++
+                        if (devTapCount >= 7) {
+                            showDevToggle = true
+                            devTapCount = 0
+                        }
+                    }
+                    .padding(vertical = 12.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            if (showDevToggle || showDebugTools) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Developer Tools")
+
+                    Switch(
+                        checked = showDebugTools,
+                        onCheckedChange = { enabled ->
+                            scope.launch {
+                                repo.updateShowDebugTools(enabled)
+                            }
+                        }
+                    )
+                }
+            }
+
+
+
         }
     }
 }
