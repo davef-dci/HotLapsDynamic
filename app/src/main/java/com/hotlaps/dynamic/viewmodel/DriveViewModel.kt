@@ -1475,7 +1475,7 @@ fun updateCornerCaptureState(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val allLines = try {
-                    context.assets.open("simulation2.csv")
+                    context.assets.open("simulation3.csv")
                         .bufferedReader()
                         .useLines { lines ->
                             lines
@@ -1484,12 +1484,12 @@ fun updateCornerCaptureState(
                                 .toList()
                         }
                 } catch (e: Exception) {
-                    Log.e("DebugSim", "Error reading simulation2.csv from assets", e)
+                    Log.e("DebugSim", "Error reading simulation3.csv from assets", e)
                     return@launch
                 }
 
                 if (allLines.isEmpty()) {
-                    Log.w("DebugSim", "simulation2.csv is empty")
+                    Log.w("DebugSim", "simulation3.csv is empty")
                     return@launch
                 }
 

@@ -43,7 +43,7 @@ An Event is a recorded driving session: a block of G-force, GPS, speed, and corn
 
 Apex Dynamics gives you two main tools for working with events:
 • Event Manager – manage, share, and delete event files.
-• Event Viewer – analyze G-G plots, G vs Time, corner visits, and max G summaries for a selected event.
+• Event Viewer – analyze G-G plots, G vs Time, lap corners, and max G summaries for a selected event.
                 """.trimIndent(),
                 style = MaterialTheme.typography.bodyMedium
             )
@@ -100,7 +100,7 @@ Below that is a scrollable list of event files. Tap a file name to select it. Th
             Spacer(Modifier.height(16.dp))
 
             Text(
-                text = "Corner Visits & Selection",
+                text = "Corner Laps & Selection",
                 style = MaterialTheme.typography.titleMedium
             )
 
@@ -108,13 +108,13 @@ Below that is a scrollable list of event files. Tap a file name to select it. Th
 
             Text(
                 text = """
-If the event has corner data, the Event Viewer builds a list of corner visits (corner index + visit number).
+If the event has corner data, the Event Viewer builds a list of corner laps (corner index + visit number).
 
-• Each row shows something like “Corner 1 – Visit 3”.
-• Checkboxes let you toggle which visits are included in the plots.
-• Only selected visits are drawn in color; unselected visits are ignored.
+• Each row shows something like “Corner 1 – Lap 3”.
+• Checkboxes let you toggle which laps are included in the plots.
+• Only selected corner laps are drawn in color; unselected corner laps are ignored.
 
-If there are no corner-tagged samples, the viewer tells you the event has no corner visits and plots the full event as a single sequence instead.
+If there are no corner-tagged samples, the viewer tells you the event has no corner laps and plots the full event as a single sequence instead.
                 """.trimIndent(),
                 style = MaterialTheme.typography.bodyMedium
             )
@@ -135,12 +135,12 @@ The Event Viewer has a mode selector with two options:
 • G vs Time – two stacked plots showing longitudinal G and lateral G over time around the apex.
 
 In both modes:
-• Each selected corner visit is assigned a unique color.
+• Each selected lap corner is assigned a unique color.
 • A slider at the bottom controls a “replay position” from 0–100% of the visible window.
 • A moving marker shows the current sample at that replay position:
   – A bright dot on the G-G plot
   – A vertical line on the G vs Time plot
-• The legend below the plot shows which color belongs to which corner/visit and displays the current G values for the replay sample.
+• The legend below the plot shows which color belongs to which corner/lap and displays the current G values for the replay sample.
                 """.trimIndent(),
                 style = MaterialTheme.typography.bodyMedium
             )
@@ -170,14 +170,14 @@ Key points:
 • Time is shown as “time from apex”, with 0 at the detected apex.
   – Negative time = before the apex (braking and turn-in).
   – Positive time = after the apex (throttle pickup and exit).
-• Each selected corner visit is drawn in its own color on both plots.
+• Each selected lap corner is drawn in its own color on both plots.
 • The vertical cursor line moves as you drag the replay slider, so you can see exactly:
   – How hard you were braking at a given moment
   – When you started releasing the brake
   – When you began adding throttle
   – How lateral G built up and decayed through the corner
 
-Using this, you can compare different visits and answer questions like:
+Using this, you can compare different corners and answer questions like:
 • Did I brake later on this lap?
 • Did I release the brake more smoothly?
 • Did I get back to throttle earlier or more aggressively?
@@ -196,7 +196,7 @@ Using this, you can compare different visits and answer questions like:
 
             Text(
                 text = """
-Each corner visit has a detected apex. The Event Viewer lets you define a time window around each apex using the dual sliders at the bottom:
+Each corner has a detected apex. The Event Viewer lets you define a time window around each apex using the dual sliders at the bottom:
 
 • Before – how many seconds before the apex to include.
 • After – how many seconds after the apex to include.
@@ -226,15 +226,15 @@ Every event is saved as a CSV file with one row per sample.
 Typical columns include:
 • Time information
 • Track and event name
-• Corner index and visit number
+• Corner index and lap number
 • Lateral and longitudinal G (both raw and smoothed)
 • GPS latitude and longitude
 • Distance to the closest corner
 • Speed (interpolated between GPS points)
-• Apex flag indicating whether this sample is the detected apex for a corner visit
+• Apex flag indicating whether this sample is the detected apex for a lap corner
 
 Apex flags:
-• The app runs a post-processing algorithm to find the apex for each visit, based on the nearest GPS points and curve shape.
+• The app runs a post-processing algorithm to find the apex for each lap, based on the nearest GPS points and curve shape.
 • The resulting apex is marked in the CSV so you can:
   – Verify the detected apex locations in your own tools
   – Slice the data into “before apex” and “after apex” windows outside the app
@@ -258,14 +258,14 @@ Use Event Manager’s “Share Event CSV” button to send these files to a coac
                 text = """
 At the bottom, the Event Viewer shows a Max G Summary table.
 
-If there are no corner visits, the summary shows:
+If there are no lap corners, the summary shows:
 • A single row labeled “Event” – the maximum braking, acceleration, left G, and right G across the full event.
 
-If corner visits are present, the summary can show:
-• One row per selected corner/visit (for example “Corner 1 – Visit 3”).
+If lap corners are present, the summary can show:
+• One row per selected corner/lap (for example “Corner 1 – Lap 3”).
 • Columns for max braking, acceleration, left G, and right G in that visit’s apex window.
 
-This makes it easy to see which visit had the hardest braking, strongest acceleration, or highest cornering G in each direction.
+This makes it easy to see which laps had the hardest braking, strongest acceleration, or highest cornering G in each direction.
                 """.trimIndent(),
                 style = MaterialTheme.typography.bodyMedium
             )

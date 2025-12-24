@@ -71,6 +71,9 @@ import kotlin.math.sqrt
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -273,8 +276,13 @@ fun EventViewerScreen(
                         style = MaterialTheme.typography.bodySmall
                     )
                 } else {
+
+                    CoachPicksCard()
+                    Spacer(Modifier.height(12.dp))
+
+
                     Text(
-                        text = "Corner visits (toggle to include in plot):",
+                        text = "Lap Corners (toggle to include in plot):",
                         style = MaterialTheme.typography.bodySmall
                     )
 
@@ -318,7 +326,7 @@ fun EventViewerScreen(
 
 
                                     Text(
-                                        text = "Corner $cornerIdx – Visit $visitNum",
+                                        text = "Corner $cornerIdx – Lap $visitNum",
                                         style = MaterialTheme.typography.bodySmall
                                     )
 
@@ -475,13 +483,13 @@ fun EventViewerScreen(
                     if (samplesForPlotGrouped.isEmpty()) {
                         emptyList()
                     } else if (selectedCornerVisits.isEmpty()) {
-                        // No corner visits: treat the entire apex-window samples as one sequence
+                        // No lap corners: treat the entire apex-window samples as one sequence
                         val idx = ((samplesForPlotGrouped.size - 1) * replayProgress)
                             .roundToInt()
                             .coerceIn(0, samplesForPlotGrouped.size - 1)
                         listOf(samplesForPlotGrouped[idx])
                     } else {
-                        // Corner visits present: pick one sample per selected corner/visit
+                        // Lap Corners present: pick one sample per selected corner/visit
                         val byGroup = samplesForPlotGrouped
                             .filter { selectedCornerVisits.contains(it.cornerIndex to it.visitNumber) }
                             .groupBy { it.cornerIndex to it.visitNumber }
@@ -761,12 +769,12 @@ fun EventViewerScreen(
 
                     if (samplesForSummary.isEmpty()) {
                         Text(
-                            text = "No corner visits selected – toggle checkboxes above to see stats.",
+                            text = "No lap corner selected – toggle checkboxes above to see stats.",
                             style = MaterialTheme.typography.bodySmall
                         )
                     } else {
                         Text(
-                            text = "Per selected corner visit:",
+                            text = "Per selected lap corner:",
                             style = MaterialTheme.typography.bodySmall
                         )
                         Spacer(Modifier.height(8.dp))
@@ -789,7 +797,7 @@ fun EventViewerScreen(
                             val summary = computeMaxGSummary(visitSamples)
 
                             MaxGSummaryRow(
-                                label = "Corner $cornerIdx – Visit $visitNum",
+                                label = "Corner $cornerIdx – Lap $visitNum",
                                 summary = summary
                             )
                             Spacer(Modifier.height(2.dp))
@@ -1571,7 +1579,7 @@ private fun GGVisitLegend(
 
     if (selectedCornerVisits.isEmpty()) {
         Text(
-            text = "No corner visits selected – toggle checkboxes above to see traces.",
+            text = "No corners selected – toggle checkboxes above to see traces.",
             style = MaterialTheme.typography.bodySmall
         )
         return
@@ -1609,7 +1617,7 @@ private fun GGVisitLegend(
 
                 Spacer(Modifier.width(8.dp))
 
-                val baseLabel = "Corner $cornerIdx – Visit $visitNum"
+                val baseLabel = "Corner $cornerIdx – Lap $visitNum"
                 val replaySample = replaySamplesByGroup[cornerIdx to visitNum]
 
                 val labelWithG = if (replaySample != null) {
@@ -1679,7 +1687,7 @@ private fun TimePlotLegend(
 ) {
     if (selectedCornerVisits.isEmpty()) {
         Text(
-            text = "No corner visits selected – toggle checkboxes above to see traces.",
+            text = "No lap corners selected – toggle checkboxes above to see traces.",
             style = MaterialTheme.typography.bodySmall
         )
         return
@@ -1714,7 +1722,7 @@ private fun TimePlotLegend(
 
                 Spacer(Modifier.width(8.dp))
 
-                val baseLabel = "Corner $cornerIdx – Visit $visitNum"
+                val baseLabel = "Corner $cornerIdx – Lap $visitNum"
                 val replaySample = replaySamplesByGroup[cornerIdx to visitNum]
 
                 val labelWithG = if (replaySample != null) {
@@ -1764,3 +1772,36 @@ fun TinyCheckbox(
 
     )
 }
+
+@Composable
+private fun CoachPicksCard() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(
+                text = "Coach Picks",
+                style = MaterialTheme.typography.titleSmall
+            )
+
+            Spacer(Modifier.height(4.dp))
+
+            Text(
+                text = "Highlights for this event (fast segments, biggest gains/losses).",
+                style = MaterialTheme.typography.bodySmall
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            Text(
+                text = "No picks yet — coming soon.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+

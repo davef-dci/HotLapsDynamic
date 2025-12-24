@@ -74,16 +74,16 @@ data class EventSample(
 // ... Event and EventSample stay as you have them ...
 
 /**
- * One pass ("visit") through a specific corner within a specific Event.
+ * One pass ("lap") through a specific corner within a specific Event.
  *
  * This does NOT store samples itself. Instead, it records:
  *  - which event
  *  - which corner
- *  - which visit number
+ *  - which lap number
  *  - the time window that defines this corner attack
  *
  * Later we will:
- *  - use startUtcMs/endUtcMs to find the EventSamples for this visit
+ *  - use startUtcMs/endUtcMs to find the EventSamples for this lap
  *  - or match on (eventId, cornerIndex, visitNumber)
  */
 data class CornerVisit(

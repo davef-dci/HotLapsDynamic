@@ -103,7 +103,7 @@ When you choose “Add New Track”, you will:
             Spacer(Modifier.height(16.dp))
 
             Text(
-                text = "Corners & Visits",
+                text = "Corners & Laps",
                 style = MaterialTheme.typography.titleMedium
             )
 
@@ -116,10 +116,10 @@ Each corner has:
 • A GPS location
 • A “trigger radius” around that location
 
-When you drive with a track selected, the app monitors your GPS position. Every time you pass through a corner’s trigger radius, it records a Visit to that corner. Later, in the Event Viewer, you can:
-• See how many visits you made to each corner
+When you drive with a track selected, the app monitors your GPS position. Every time you pass through a corner’s trigger radius, it records a lap visit to that corner. Later, in the Event Viewer, you can:
+• See how many visits (laps) you made to each corner
 • Compare G-force traces lap by lap
-• Align visits around the apex to compare braking and throttle
+• Align each lap corner around the apex to compare braking and throttle
                 """.trimIndent(),
                 style = MaterialTheme.typography.bodyMedium
             )
@@ -163,7 +163,7 @@ From the Track Manager you can:
 • Adjust corner order or positions if GPS was slightly off
 • Remove old tracks you no longer use
 
-Any changes to a track affect how future events interpret corner visits. Existing events keep their original data and can be recomputed if needed.
+Any changes to a track affect how future events interpret lap corners. Existing events keep their original data and can be recomputed if needed.
                 """.trimIndent(),
                 style = MaterialTheme.typography.bodyMedium
             )

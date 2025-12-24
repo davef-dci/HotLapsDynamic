@@ -62,7 +62,7 @@ Apex Dynamics is a precision motorsports telemetry tool that helps drivers under
 KEY FEATURES
 • Dynamic G-Force Map with live G-circle visualization
 • Lateral & longitudinal G-force vs. time charts
-• Automatic corner visit detection
+• Automatic corner detection
 • Apex alignment for lap-to-lap comparison
 • Track creation & corner management
 • CSV export for coaching or advanced analysis
