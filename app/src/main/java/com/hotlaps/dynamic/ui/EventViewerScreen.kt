@@ -76,6 +76,7 @@ import androidx.compose.material3.CardDefaults
 
 
 
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EventViewerScreen(
@@ -1773,35 +1774,167 @@ fun TinyCheckbox(
     )
 }
 
+private enum class CoachMode { Segment, Corner }
+
+
 @Composable
 private fun CoachPicksCard() {
+    // TEMP: hardcoded segments + dummy top-3 results (v1 UI skeleton)
+
+    var mode by remember { mutableStateOf(CoachMode.Segment) }
+    val segments = listOf(
+        "Corner 1 → Corner 2",
+        "Corner 2 → Corner 3",
+        "Corner 3 → Corner 1"
+    )
+
+
+
+
+    var selectedSegment by remember { mutableStateOf(segments.first()) }
+    var menuExpanded by remember { mutableStateOf(false) }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
         )
     ) {
+
+
+
         Column(modifier = Modifier.padding(12.dp)) {
+
             Text(
-                text = "Coach Picks",
+                text = "Segment Coach (v1)",
                 style = MaterialTheme.typography.titleSmall
-            )
-
-            Spacer(Modifier.height(4.dp))
-
-            Text(
-                text = "Highlights for this event (fast segments, biggest gains/losses).",
-                style = MaterialTheme.typography.bodySmall
             )
 
             Spacer(Modifier.height(8.dp))
 
-            Text(
-                text = "No picks yet — coming soon.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                val segmentSelected = mode == CoachMode.Segment
+                val cornerSelected = mode == CoachMode.Corner
+
+                OutlinedButton(
+                    modifier = Modifier.weight(1f),
+                    onClick = { mode = CoachMode.Segment }
+                ) {
+                    Text(if (segmentSelected) "✓ Segment Coach" else "Segment Coach")
+                }
+
+                OutlinedButton(
+                    modifier = Modifier.weight(1f),
+                    onClick = { mode = CoachMode.Corner }
+                ) {
+                    Text(if (cornerSelected) "✓ Corner Analysis" else "Corner Analysis")
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            when (mode) {
+                CoachMode.Segment -> {
+                    Spacer(Modifier.height(6.dp))
+
+                    Text(
+                        text = "Pick a segment (A→B). Shows top 3 laps by apex-to-apex time.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+
+                    Spacer(Modifier.height(10.dp))
+
+                    // Dropdown
+                    Box {
+                        OutlinedButton(onClick = { menuExpanded = true }) {
+                            Text(selectedSegment)
+                        }
+
+                        DropdownMenu(
+                            expanded = menuExpanded,
+                            onDismissRequest = { menuExpanded = false }
+                        ) {
+                            segments.forEach { seg ->
+                                DropdownMenuItem(
+                                    text = { Text(seg) },
+                                    onClick = {
+                                        selectedSegment = seg
+                                        menuExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+
+                    Text(
+                        text = "Top 3 laps (placeholder):",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+
+                    Spacer(Modifier.height(8.dp))
+
+                    // Dummy rows
+                    val dummy = listOf(
+                        "Lap 4  —  3.21s",
+                        "Lap 2  —  3.35s",
+                        "Lap 5  —  3.42s"
+                    )
+
+                    dummy.forEach { row ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = row,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+
+                            Spacer(Modifier.height(6.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    modifier = Modifier.weight(1f),
+                                    onClick = { /* TODO v1: jump to Exit A */ }
+                                ) {
+                                    Text("Review Exit A", fontSize = 12.sp)
+                                }
+
+                                Button(
+                                    modifier = Modifier.weight(1f),
+                                    onClick = { /* TODO v1: jump to Entry B */ }
+                                ) {
+                                    Text("Review Entry B", fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                CoachMode.Corner -> {
+                    Text(
+                        text = "Corner Analysis (placeholder)",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "Coming soon: fastest/slowest laps at a single corner, entry/exit window presets, etc.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+
+
+
         }
     }
 }
-
