@@ -278,7 +278,7 @@ fun EventViewerScreen(
                     )
                 } else {
 
-                    CoachPicksCard()
+                    CoachPicksCard(apexVisits)
                     Spacer(Modifier.height(12.dp))
 
 
@@ -1778,20 +1778,34 @@ private enum class CoachMode { Segment, Corner }
 
 
 @Composable
-private fun CoachPicksCard() {
+private fun CoachPicksCard(apexVisits: List<ApexVisit>) {
     // TEMP: hardcoded segments + dummy top-3 results (v1 UI skeleton)
 
     var mode by remember { mutableStateOf(CoachMode.Segment) }
-    val segments = listOf(
-        "Corner 1 → Corner 2",
-        "Corner 2 → Corner 3",
-        "Corner 3 → Corner 1"
-    )
+    val segments = remember(apexVisits) {
+        // Build corner list in track order (assumes cornerIndex increases around the lap)
+        val corners = apexVisits
+            .distinctBy { it.cornerIndex }
+            .sortedBy { it.cornerIndex }
+
+        if (corners.size < 2) {
+            listOf("Need at least 2 corners")
+        } else {
+            corners.indices.map { i ->
+                val a = corners[i]
+                val b = corners[(i + 1) % corners.size] // wrap last→first
+                "${a.cornerName} → ${b.cornerName}"
+            }
+        }
+    }
 
 
 
 
-    var selectedSegment by remember { mutableStateOf(segments.first()) }
+    var selectedSegment by remember(segments) {
+        mutableStateOf(segments.first())
+    }
+
     var menuExpanded by remember { mutableStateOf(false) }
 
     Card(
