@@ -1467,38 +1467,17 @@ fun updateCornerCaptureState(
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val eventsDir = FileHelper.appEventsDir(context)
-                if (eventsDir == null || !eventsDir.exists()) {
-                    Log.w(
-                        "DebugSim",
-                        "appEventsDir not available; cannot load simulation3.csv"
-                    )
-                    return@launch
-                }
-
-                // 👇 NEW: use simulation3.csv
-                val simFile = java.io.File(eventsDir, "simulation3.csv")
-                if (!simFile.exists()) {
-                    Log.w(
-                        "DebugSim",
-                        "simulation3.csv not found at ${simFile.absolutePath}"
-                    )
-                    return@launch
-                }
-
                 val allLines = try {
-                    simFile.readLines()
+                    context.assets.open("simulation3.csv")
+                        .bufferedReader()
+                        .readLines()
                         .map { it.trim() }
                         .filter { it.isNotEmpty() }
                 } catch (e: Exception) {
-                    Log.e("DebugSim", "Error reading simulation3.csv", e)
+                    Log.e("DebugSim", "Failed to load simulation3.csv from assets", e)
                     return@launch
                 }
 
-                if (allLines.isEmpty()) {
-                    Log.w("DebugSim", "simulation3.csv is empty")
-                    return@launch
-                }
 
                 // Strip header row if present (intervalMs OR deltaMs)
                 val dataLines =
