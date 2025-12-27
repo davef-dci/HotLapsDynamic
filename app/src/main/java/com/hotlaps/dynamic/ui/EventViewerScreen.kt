@@ -278,7 +278,7 @@ fun EventViewerScreen(
                     )
                 } else {
 
-                    CoachPicksCard(apexVisits)
+                    CoachPicksCard(samples = samplesForSelected,apexVisits)
                     Spacer(Modifier.height(12.dp))
 
 
@@ -1447,6 +1447,91 @@ private data class MaxGSummary(
     val right: Float
 )
 
+private data class SegmentLapResult(
+    val lapNumber: Int,
+    val segmentTimeMs: Long,
+    val fromApexSampleIndex: Int,
+    val toApexSampleIndex: Int
+)
+
+private fun computeTop3ForSegment(
+    samples: List<EventSample>,
+    segment: SegmentKey
+): Pair<List<SegmentLapResult>, Pair<Int, Int>> {
+    // returns: (top3Results, (validCount, totalCandidateCount))
+
+    if (samples.isEmpty()) return emptyList<SegmentLapResult>() to (0 to 0)
+
+    // 1) Prefix-sum timebase from intervalMs (sim-safe)
+    val t = LongArray(samples.size)
+    var acc = 0L
+    for (i in samples.indices) {
+        if (i == 0) {
+            t[i] = 0L
+        } else {
+            acc += samples[i].intervalMs
+            t[i] = acc
+        }
+    }
+
+    // 2) Build apex index lookup: lap -> corner -> sampleIndex
+    val apexIndexByLapCorner = HashMap<Int, HashMap<Int, Int>>()
+    val lapsWithAnyApex = HashSet<Int>()
+
+    for (i in samples.indices) {
+        val s = samples[i]
+        if (!s.isApexSample) continue
+        val lap = s.visitNumber
+        val corner = s.cornerIndex
+        if (lap <= 0 || corner <= 0) continue
+
+        lapsWithAnyApex.add(lap)
+        val byCorner = apexIndexByLapCorner.getOrPut(lap) { HashMap() }
+
+        // Keep the first apex per (lap,corner) (or you could choose latest; first is fine for v1)
+        if (!byCorner.containsKey(corner)) {
+            byCorner[corner] = i
+        }
+    }
+
+    val allCandidateLaps = lapsWithAnyApex.toList().sorted()
+    var validCount = 0
+
+    // 3) For each lap, strictly require both endpoints; otherwise skip
+    val results = ArrayList<SegmentLapResult>()
+
+    for (lap in allCandidateLaps) {
+        val idxA = apexIndexByLapCorner[lap]?.get(segment.fromCornerIndex) ?: continue
+
+        val idxB = if (!segment.isWrap) {
+            apexIndexByLapCorner[lap]?.get(segment.toCornerIndex)
+        } else {
+            apexIndexByLapCorner[lap + 1]?.get(segment.toCornerIndex)
+        } ?: continue
+
+        // Sanity: indices should be increasing in time
+        if (idxB <= idxA) continue
+
+        val dt = samples[idxB].utcMs - samples[idxA].utcMs
+
+        if (dt <= 0) continue
+
+        validCount++
+        results.add(
+            SegmentLapResult(
+                lapNumber = lap,
+                segmentTimeMs = dt,
+                fromApexSampleIndex = idxA,
+                toApexSampleIndex = idxB
+            )
+        )
+    }
+
+    val top3 = results.sortedBy { it.segmentTimeMs }.take(3)
+    return top3 to (validCount to allCandidateLaps.size)
+}
+
+
 private fun computeMaxGSummary(samples: List<EventSample>): MaxGSummary {
     var maxBrake = 0f
     var maxAccel = 0f
@@ -1775,26 +1860,39 @@ fun TinyCheckbox(
 }
 
 private enum class CoachMode { Segment, Corner }
+private data class SegmentKey(val fromCornerIndex: Int, val toCornerIndex: Int, val isWrap: Boolean)
+private data class SegmentOption(val key: SegmentKey, val label: String)
 
 
 @Composable
-private fun CoachPicksCard(apexVisits: List<ApexVisit>) {
+private fun CoachPicksCard(
+    samples: List<EventSample>,
+    apexVisits: List<ApexVisit>
+) {
     // TEMP: hardcoded segments + dummy top-3 results (v1 UI skeleton)
 
     var mode by remember { mutableStateOf(CoachMode.Segment) }
-    val segments = remember(apexVisits) {
-        // Build corner list in track order (assumes cornerIndex increases around the lap)
+    val segmentOptions = remember(apexVisits) {
         val corners = apexVisits
             .distinctBy { it.cornerIndex }
             .sortedBy { it.cornerIndex }
 
         if (corners.size < 2) {
-            listOf("Need at least 2 corners")
+            listOf(
+                SegmentOption(
+                    key = SegmentKey(0, 0, false),
+                    label = "Need at least 2 corners"
+                )
+            )
         } else {
             corners.indices.map { i ->
                 val a = corners[i]
-                val b = corners[(i + 1) % corners.size] // wrap last→first
-                "${a.cornerName} → ${b.cornerName}"
+                val b = corners[(i + 1) % corners.size]
+                val isWrap = (i == corners.lastIndex) // last→first
+                SegmentOption(
+                    key = SegmentKey(a.cornerIndex, b.cornerIndex, isWrap),
+                    label = "${a.cornerName} → ${b.cornerName}"
+                )
             }
         }
     }
@@ -1802,9 +1900,11 @@ private fun CoachPicksCard(apexVisits: List<ApexVisit>) {
 
 
 
-    var selectedSegment by remember(segments) {
-        mutableStateOf(segments.first())
+
+    var selectedSegment by remember(segmentOptions) {
+        mutableStateOf(segmentOptions.first())
     }
+
 
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -1864,74 +1964,99 @@ private fun CoachPicksCard(apexVisits: List<ApexVisit>) {
                     // Dropdown
                     Box {
                         OutlinedButton(onClick = { menuExpanded = true }) {
-                            Text(selectedSegment)
+                            Text(selectedSegment.label)
                         }
 
                         DropdownMenu(
                             expanded = menuExpanded,
                             onDismissRequest = { menuExpanded = false }
                         ) {
-                            segments.forEach { seg ->
+                            segmentOptions.forEach { opt ->
                                 DropdownMenuItem(
-                                    text = { Text(seg) },
+                                    text = { Text(opt.label) },
                                     onClick = {
-                                        selectedSegment = seg
+                                        selectedSegment = opt
                                         menuExpanded = false
                                     }
                                 )
                             }
+
                         }
                     }
+
+// --- REAL computation (strict: skip laps missing either apex) ---
+                    val (top3, counts) = remember(samples, selectedSegment.key) {
+                        // If segment is placeholder (0→0), return empty
+                        if (selectedSegment.key.fromCornerIndex <= 0 || selectedSegment.key.toCornerIndex <= 0) {
+                            emptyList<SegmentLapResult>() to (0 to 0)
+                        } else {
+                            computeTop3ForSegment(samples, selectedSegment.key)
+                        }
+                    }
+                    val (validCount, totalCandidates) = counts
+
+
 
                     Spacer(Modifier.height(12.dp))
 
                     Text(
-                        text = "Top 3 laps (placeholder):",
+                        text = "Top laps:",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+
+                    Spacer(Modifier.height(4.dp))
+
+                    Text(
+                        text = "Valid laps: $validCount / $totalCandidates",
                         style = MaterialTheme.typography.bodySmall
                     )
 
                     Spacer(Modifier.height(8.dp))
 
-                    // Dummy rows
-                    val dummy = listOf(
-                        "Lap 4  —  3.21s",
-                        "Lap 2  —  3.35s",
-                        "Lap 5  —  3.42s"
-                    )
+                    if (top3.isEmpty()) {
+                        Text(
+                            text = "No valid laps for this segment (missing apex A or B on each lap).",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    } else {
+                        top3.forEachIndexed { rank, r ->
+                            val seconds = r.segmentTimeMs / 1000.0
+                            val label = "#${rank + 1}: Lap ${r.lapNumber} — ${"%.2f".format(seconds)} s"
 
-                    dummy.forEach { row ->
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 6.dp)
-                        ) {
-                            Text(
-                                text = row,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-
-                            Spacer(Modifier.height(6.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 6.dp)
                             ) {
-                                Button(
-                                    modifier = Modifier.weight(1f),
-                                    onClick = { /* TODO v1: jump to Exit A */ }
-                                ) {
-                                    Text("Review Exit A", fontSize = 12.sp)
-                                }
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
 
-                                Button(
-                                    modifier = Modifier.weight(1f),
-                                    onClick = { /* TODO v1: jump to Entry B */ }
+                                Spacer(Modifier.height(6.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    Text("Review Entry B", fontSize = 12.sp)
+                                    Button(
+                                        modifier = Modifier.weight(1f),
+                                        onClick = { /* TODO v1: jump to Exit A (use r.fromApexSampleIndex) */ }
+                                    ) {
+                                        Text("Review Exit A", fontSize = 12.sp)
+                                    }
+
+                                    Button(
+                                        modifier = Modifier.weight(1f),
+                                        onClick = { /* TODO v1: jump to Entry B (use r.toApexSampleIndex) */ }
+                                    ) {
+                                        Text("Review Entry B", fontSize = 12.sp)
+                                    }
                                 }
                             }
                         }
                     }
+
                 }
 
                 CoachMode.Corner -> {
