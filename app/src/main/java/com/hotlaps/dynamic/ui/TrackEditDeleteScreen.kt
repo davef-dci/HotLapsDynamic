@@ -20,7 +20,7 @@ import com.hotlaps.dynamic.viewmodel.TrackSelectionViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TrackManagerScreen(
+fun TrackEditDeleteScreen(
     trackSelectionViewModel: TrackSelectionViewModel, // currently unused, kept to avoid breaking callers
     modifier: Modifier = Modifier,
     onBack: () -> Unit,
@@ -36,13 +36,16 @@ fun TrackManagerScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var trackToDelete by remember { mutableStateOf<TrackWithFile?>(null) }
 
+
+
+
     LaunchedEffect(Unit) {
         try {
             val list = TrackStorage.listTracks(context)
             tracks = list
             error = null
         } catch (t: Throwable) {
-            Log.e("TrackManagerScreen", "Error loading tracks", t)
+            Log.e("TrackEditDeleteScreen", "Error loading tracks", t)
             tracks = emptyList()
             error = t.message ?: t.toString()
         } finally {
@@ -53,7 +56,7 @@ fun TrackManagerScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Manage Tracks") },
+                title = { Text("Edit or Delete Tracks") },
                 navigationIcon = {
                     IconButton(onClick = onOpenDrawer) {
                         Icon(

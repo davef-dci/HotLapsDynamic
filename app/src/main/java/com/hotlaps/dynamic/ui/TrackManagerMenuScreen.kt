@@ -65,7 +65,7 @@ fun TrackAndCornerSetupScreen(
             Spacer(Modifier.height(12.dp))
 
             // 2) Edit existing track
-            // For now this still goes to the existing TrackManagerScreen,
+            // For now this still goes to the existing TrackEditDeleteScreen,
             // which shows the list of tracks with Edit/Delete per row.
             BigButton(
                 text = "Edit Existing Track",

@@ -42,7 +42,7 @@ import com.hotlaps.dynamic.ui.MainMenuDynamics
 import com.hotlaps.dynamic.ui.SplashDynamics
 import com.hotlaps.dynamic.ui.TeachCornersScreen
 import com.hotlaps.dynamic.ui.TrackAndCornerSetupScreen
-import com.hotlaps.dynamic.ui.TrackManagerScreen
+import com.hotlaps.dynamic.ui.TrackEditDeleteScreen
 import com.hotlaps.dynamic.ui.calibration.CalibrateScreen
 import com.hotlaps.dynamic.ui.help.HelpQuickStartScreen
 import com.hotlaps.dynamic.ui.help.HelpScreen
@@ -56,8 +56,6 @@ import com.hotlaps.dynamic.ui.help.HelpGForceMapScreen
 import com.hotlaps.dynamic.ui.help.HelpTracksScreen
 import com.hotlaps.dynamic.ui.help.HelpEventsScreen
 import com.hotlaps.dynamic.ui.help.HelpSettingsScreen
-import com.google.firebase.crashlytics.FirebaseCrashlytics
-import com.hotlaps.dynamic.BuildConfig
 
 // ---------------------------------------------------------------------
 // Reusable drawer navigation item with bigger hit area & larger text
@@ -68,6 +66,7 @@ fun DrawerNavItem(
     iconResId: Int,
     onClick: () -> Unit
 ) {
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -422,7 +421,7 @@ class MainActivity : ComponentActivity() {
 
 
                             composable("trackManager") {
-                                TrackManagerScreen(
+                                TrackEditDeleteScreen(
                                     trackSelectionViewModel = trackSelectionViewModel,
                                     onBack = { nav.popBackStack() },
                                     onUseTrack = { _: Track ->

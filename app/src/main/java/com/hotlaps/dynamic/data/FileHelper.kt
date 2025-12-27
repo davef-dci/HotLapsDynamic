@@ -82,13 +82,18 @@ object FileHelper {
         val dir = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
             "$PUBLIC_APP_DIR/tracks"
-
         )
+
         if (!dir.exists()) {
-            dir.mkdirs()
+            val ok = dir.mkdirs()
+            Log.d("FileHelper", "publicTracksDir mkdirs ok=$ok path=${dir.absolutePath}")
+        } else {
+            Log.d("FileHelper", "publicTracksDir exists path=${dir.absolutePath}")
         }
+
         return dir
     }
+
 
 
 
