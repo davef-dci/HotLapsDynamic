@@ -1419,7 +1419,7 @@ fun updateCornerCaptureState(
 
 
     /**
-     * Debug-only: replay simulation2.csv which has schema:
+     * Debug-only: replay simulation3.csv which has schema:
      *
      *   deltaMs,gpsLat,gpsLon,speed,rawLatG,rawLongG
      *
@@ -1471,17 +1471,17 @@ fun updateCornerCaptureState(
                 if (eventsDir == null || !eventsDir.exists()) {
                     Log.w(
                         "DebugSim",
-                        "appEventsDir not available; cannot load simulation2.csv"
+                        "appEventsDir not available; cannot load simulation3.csv"
                     )
                     return@launch
                 }
 
-                // 👇 NEW: use simulation2.csv
-                val simFile = java.io.File(eventsDir, "simulation2.csv")
+                // 👇 NEW: use simulation3.csv
+                val simFile = java.io.File(eventsDir, "simulation3.csv")
                 if (!simFile.exists()) {
                     Log.w(
                         "DebugSim",
-                        "simulation2.csv not found at ${simFile.absolutePath}"
+                        "simulation3.csv not found at ${simFile.absolutePath}"
                     )
                     return@launch
                 }
@@ -1491,12 +1491,12 @@ fun updateCornerCaptureState(
                         .map { it.trim() }
                         .filter { it.isNotEmpty() }
                 } catch (e: Exception) {
-                    Log.e("DebugSim", "Error reading simulation2.csv", e)
+                    Log.e("DebugSim", "Error reading simulation3.csv", e)
                     return@launch
                 }
 
                 if (allLines.isEmpty()) {
-                    Log.w("DebugSim", "simulation2.csv is empty")
+                    Log.w("DebugSim", "simulation3.csv is empty")
                     return@launch
                 }
 
@@ -1511,13 +1511,13 @@ fun updateCornerCaptureState(
                     }
 
                 if (dataLines.isEmpty()) {
-                    Log.w("DebugSim", "simulation2.csv has no data rows")
+                    Log.w("DebugSim", "simulation3.csv has no data rows")
                     return@launch
                 }
 
                 Log.d(
                     "DebugSim",
-                    "Starting truncated simulation from simulation2.csv with ${dataLines.size} rows " +
+                    "Starting truncated simulation from simulation3.csv with ${dataLines.size} rows " +
                             "into eventId=${event.id}, track=${currentTrack.name}, playbackSpeed=$playbackSpeed"
                 )
 
@@ -1608,7 +1608,7 @@ fun updateCornerCaptureState(
 
                 Log.d(
                     "DebugSim",
-                    "Finished truncated simulation from simulation2.csv into eventId=${event.id}"
+                    "Finished truncated simulation from simulation3.csv into eventId=${event.id}"
                 )
 
                 stopEvent()

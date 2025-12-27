@@ -12,6 +12,10 @@ import java.io.File
  * - Events dir:       .../events/
  * - Public export:    /Download/HotLapsDynamic/events/
  */
+
+
+private const val PUBLIC_APP_DIR = "ApexDynamics"
+
 object FileHelper {
 
     private const val TAG = "FileHelper"
@@ -47,7 +51,8 @@ object FileHelper {
         )
 
         // Our subfolder: /Download/HotLapsDynamic/events
-        val dir = File(downloads, "HotLapsDynamic/events")
+        val dir = File(downloads, "$PUBLIC_APP_DIR/events")
+
         if (!dir.exists() && !dir.mkdirs()) {
             Log.e(TAG, "eventsDir: failed to create ${dir.absolutePath}")
             return null
@@ -58,17 +63,33 @@ object FileHelper {
 
     /**
      * Public export location visible to normal file managers:
-     *   /storage/emulated/0/Download/HotLapsDynamic/events
+     *   /storage/emulated/0/Download/ApexDynamics/events/
      */
     fun publicEventsExportDir(): File? {
         val downloads = Environment.getExternalStoragePublicDirectory(
             Environment.DIRECTORY_DOWNLOADS
         )
-        val dir = File(downloads, "HotLapsDynamic/events")
+        val dir = File(downloads, "$PUBLIC_APP_DIR/events")
+
         if (!dir.exists() && !dir.mkdirs()) {
             Log.e(TAG, "publicEventsExportDir: failed to create ${dir.absolutePath}")
             return null
         }
         return dir
     }
+
+    fun publicTracksDir(context: Context): File {
+        val dir = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            "$PUBLIC_APP_DIR/tracks"
+
+        )
+        if (!dir.exists()) {
+            dir.mkdirs()
+        }
+        return dir
+    }
+
+
+
 }
