@@ -1,0 +1,98 @@
+{
+  "id": 6009263057979057343,
+  "name": "Road America - Bend Course",
+  "isBuiltIn": true,
+  "corners": [
+    {
+      "index": 1,
+      "officialNumber": null,
+      "name": "1",
+      "lat": 43.792079,
+      "lon": -87.989737
+    },
+    {
+      "index": 2,
+      "officialNumber": null,
+      "name": "3",
+      "lat": 43.791517,
+      "lon": -87.995286
+    },
+    {
+      "index": 3,
+      "officialNumber": null,
+      "name": "5",
+      "lat": 43.801774,
+      "lon": -87.992518
+    },
+    {
+      "index": 4,
+      "officialNumber": null,
+      "name": "6",
+      "lat": 43.801674,
+      "lon": -87.9961
+    },
+    {
+      "index": 5,
+      "officialNumber": null,
+      "name": "7",
+      "lat": 43.799538,
+      "lon": -87.996195
+    },
+    {
+      "index": 6,
+      "officialNumber": null,
+      "name": "8",
+      "lat": 43.797134,
+      "lon": -88.000009
+    },
+    {
+      "index": 7,
+      "officialNumber": null,
+      "name": "9 - Carousel Entry",
+      "lat": 43.795261,
+      "lon": -87.998714
+    },
+    {
+      "index": 8,
+      "officialNumber": null,
+      "name": "10 - Carousel Exit",
+      "lat": 43.794496,
+      "lon": -88.001589
+    },
+    {
+      "index": 9,
+      "officialNumber": null,
+      "name": "Bend 1",
+      "lat": 43.797007,
+      "lon": -88.002532
+    },
+    {
+      "index": 10,
+      "officialNumber": null,
+      "name": "Bend 2",
+      "lat": 43.797288,
+      "lon": -88.003346
+    },
+    {
+      "index": 11,
+      "officialNumber": null,
+      "name": "Canada Corner",
+      "lat": 43.80494,
+      "lon": -87.997522
+    },
+    {
+      "index": 12,
+      "officialNumber": null,
+      "name": "Bill Mitchell Bend",
+      "lat": 43.803735,
+      "lon": -87.994204
+    },
+    {
+      "index": 13,
+      "officialNumber": null,
+      "name": "14",
+      "lat": 43.804053,
+      "lon": -87.990036
+    }
+  ]
+}

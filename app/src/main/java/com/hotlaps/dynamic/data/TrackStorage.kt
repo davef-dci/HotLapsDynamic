@@ -519,6 +519,67 @@ object TrackStorage {
         return out
     }
 
+    fun seedBuiltInTracks(context: Context): ImportResult {
+        val folder = "built_in_tracks"
+        val assetNames = try {
+            context.assets.list(folder)?.toList() ?: emptyList()
+        } catch (t: Throwable) {
+            return ImportResult(
+                imported = 0,
+                skipped = 0,
+                errors = 1,
+                messages = listOf("Failed to list assets/$folder: ${t.message}")
+            )
+        }
+
+        if (assetNames.isEmpty()) {
+            return ImportResult(0, 0, 0, listOf("No built-in tracks found"))
+        }
+
+        var imported = 0
+        var errors = 0
+        val messages = mutableListOf<String>()
+
+        for (name in assetNames) {
+            if (!name.endsWith(".json", ignoreCase = true)) continue
+
+            try {
+                val json = context.assets
+                    .open("$folder/$name")
+                    .bufferedReader()
+                    .use { it.readText() }
+
+                // Stable ID derived from filename
+                val stableId = name.lowercase().hashCode().toLong().let { if (it < 0) -it else it }
+
+                val parsed = jsonToTrack(stableId, json)
+                val builtInTrack = parsed.copy(
+                    id = stableId,
+                    isBuiltIn = true
+                )
+
+                // Overwrite every time
+                val ok = saveTrack(context, builtInTrack)
+                if (ok) {
+                    imported++
+                    messages += "Built-in updated: ${builtInTrack.name}"
+                } else {
+                    errors++
+                    messages += "Failed to save built-in: $name"
+                }
+            } catch (t: Throwable) {
+                errors++
+                messages += "Error importing $name: ${t.message}"
+            }
+        }
+
+        return ImportResult(
+            imported = imported,
+            skipped = 0,
+            errors = errors,
+            messages = messages
+        )
+    }
 
 
 

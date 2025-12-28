@@ -56,6 +56,8 @@ import com.hotlaps.dynamic.ui.help.HelpGForceMapScreen
 import com.hotlaps.dynamic.ui.help.HelpTracksScreen
 import com.hotlaps.dynamic.ui.help.HelpEventsScreen
 import com.hotlaps.dynamic.ui.help.HelpSettingsScreen
+import com.hotlaps.dynamic.data.TrackStorage
+
 
 // ---------------------------------------------------------------------
 // Reusable drawer navigation item with bigger hit area & larger text
@@ -269,6 +271,11 @@ class MainActivity : ComponentActivity() {
                         LaunchedEffect(Unit) {
                             driveViewModel.setAppContext(context)
                         }
+
+                        LaunchedEffect(Unit) {
+                            TrackStorage.seedBuiltInTracks(context)
+                        }
+
 
                         NavHost(navController = nav, startDestination = "splash") {
                             composable("splash") {

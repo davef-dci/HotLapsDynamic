@@ -32,5 +32,7 @@ data class Track(
     val location: String? = null,
 
     // All of the corners that belong to this track
-    val corners: List<Corner>
+    val corners: List<Corner>,
+
+    val isBuiltIn: Boolean = false
 )
