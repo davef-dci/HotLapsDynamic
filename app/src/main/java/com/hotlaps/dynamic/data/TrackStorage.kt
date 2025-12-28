@@ -7,6 +7,10 @@ import com.hotlaps.dynamic.model.Corner
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import android.net.Uri
+import androidx.core.content.FileProvider
+
+
 
 object TrackStorage {
 
@@ -17,6 +21,68 @@ object TrackStorage {
         val file: File,
         val track: Track
     )
+
+    data class ImportResult(
+        val imported: Int,
+        val skipped: Int,
+        val errors: Int,
+        val messages: List<String>
+    )
+
+    fun importTracksFromPublicDownloads(context: Context): ImportResult {
+        val publicDir = FileHelper.publicTracksDir(context)
+        val candidates = publicDir.listFiles { f ->
+            f.isFile && f.name.endsWith(".json", ignoreCase = true)
+        } ?: emptyArray()
+
+        if (candidates.isEmpty()) {
+            return ImportResult(
+                imported = 0,
+                skipped = 0,
+                errors = 0,
+                messages = listOf("No .json files found in ${publicDir.absolutePath}")
+            )
+        }
+
+        var imported = 0
+        var skipped = 0
+        var errors = 0
+        val msgs = mutableListOf<String>()
+
+        for (file in candidates) {
+            try {
+                val json = file.readText()
+
+                // Try to extract an id from filename if it matches track_<id>.json, otherwise fake it.
+                val idFromName = extractIdFromFileName(file.name) ?: System.currentTimeMillis()
+
+                val parsed = jsonToTrack(idFromName, json)
+
+                // IMPORTANT: avoid collisions with existing IDs by assigning a fresh ID on import
+                val importedTrack = parsed.copy(id = System.currentTimeMillis())
+
+                val ok = saveTrack(context, importedTrack)
+                if (ok) {
+                    imported++
+                    msgs += "Imported: ${file.name} → ${importedTrack.name}"
+                } else {
+                    errors++
+                    msgs += "Failed saving: ${file.name}"
+                }
+            } catch (t: Throwable) {
+                errors++
+                msgs += "Error importing ${file.name}: ${t.message}"
+            }
+        }
+
+        return ImportResult(imported, skipped, errors, msgs)
+    }
+
+
+
+
+
+
 
     // Get (and create) the tracks directory. Returns null if unavailable.
     private fun tracksDir(context: Context): File? {
@@ -199,4 +265,113 @@ object TrackStorage {
             corners = corners
         )
     }
+
+    fun importSingleTrackFromUri(context: Context, uri: Uri): ImportResult {
+        return try {
+            val json = context.contentResolver
+                .openInputStream(uri)
+                ?.bufferedReader()
+                ?.use { it.readText() }
+                ?: return ImportResult(
+                    imported = 0,
+                    skipped = 0,
+                    errors = 1,
+                    messages = listOf("Unable to read selected file")
+                )
+
+            // Parse using your existing JSON parser
+            val parsed = jsonToTrack(System.currentTimeMillis(), json)
+
+            // Avoid overwriting an existing track ID by assigning a fresh ID
+            val importedTrack = parsed.copy(id = System.currentTimeMillis())
+
+            val ok = saveTrack(context, importedTrack)
+
+            if (ok) {
+                ImportResult(
+                    imported = 1,
+                    skipped = 0,
+                    errors = 0,
+                    messages = listOf("Imported: ${importedTrack.name}")
+                )
+            } else {
+                ImportResult(
+                    imported = 0,
+                    skipped = 0,
+                    errors = 1,
+                    messages = listOf("Failed to save imported track")
+                )
+            }
+        } catch (t: Throwable) {
+            ImportResult(
+                imported = 0,
+                skipped = 0,
+                errors = 1,
+                messages = listOf("Import error: ${t.message}")
+            )
+        }
+    }
+
+    /**
+     * Export an authoritative CSV template for track creation.
+     *
+     * Columns:
+     *   Track Name, Corner Name, Latitude, Longitude
+     */
+    fun exportTrackCsvTemplateToUri(
+        context: Context,
+        uri: Uri
+    ): Boolean {
+        return try {
+            val csv = buildString {
+                append("Track Name,Corner Name,Latitude,Longitude\n")
+                append("Road America,Turn 1,43.801234,-87.989876\n")
+                append("Road America,Turn 3 (Carousel),43.792222,-87.975555\n")
+            }
+
+            context.contentResolver
+                .openOutputStream(uri, "w")
+                ?.bufferedWriter(Charsets.UTF_8)
+                ?.use { writer ->
+                    writer.write(csv)
+                } ?: return false
+
+            Log.d(TAG, "exportTrackCsvTemplateToUri: wrote template to $uri")
+            true
+        } catch (t: Throwable) {
+            Log.e(TAG, "exportTrackCsvTemplateToUri: failed", t)
+            false
+        }
+    }
+
+    /**
+     * Copies the static CSV template from assets to cache
+     * and returns a FileProvider Uri suitable for sharing.
+     */
+    fun buildShareableCsvTemplateUri(context: Context): Uri? {
+        return try {
+            val outFile = File(
+                context.cacheDir,
+                "ApexDynamics_TrackTemplate.csv"
+            )
+
+            context.assets.open("track_template.csv").use { input ->
+                outFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+
+            FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                outFile
+            )
+        } catch (t: Throwable) {
+            Log.e(TAG, "buildShareableCsvTemplateUri failed", t)
+            null
+        }
+    }
+
+
+
 }

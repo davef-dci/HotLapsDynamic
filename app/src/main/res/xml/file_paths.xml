@@ -1,7 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Allow sharing files from external storage (/storage/emulated/0/Download/...) -->
+
+    <cache-path
+        name="cache"
+        path="." />
+
+    <!-- Keep only if you already rely on it elsewhere -->
     <external-path
         name="external_files"
         path="." />
+
 </paths>
