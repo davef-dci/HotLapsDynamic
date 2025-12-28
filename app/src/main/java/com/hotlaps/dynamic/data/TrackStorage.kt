@@ -372,6 +372,154 @@ object TrackStorage {
         }
     }
 
+    fun importSingleTrackCsvFromText(context: Context, csvText: String): ImportResult {
+        return try {
+            val lines = csvText
+                .lineSequence()
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .filter { !it.startsWith("#") }
+                .toList()
+
+            if (lines.size < 2) {
+                return ImportResult(
+                    imported = 0,
+                    skipped = 0,
+                    errors = 1,
+                    messages = listOf("CSV too short. Need at least a header + 1 corner row.")
+                )
+            }
+
+            // Expect header: Track Name,Corner Name,Latitude,Longitude
+            val header = splitCsvLine(lines[0]).map { it.trim().lowercase() }
+
+            val trackIdx = header.indexOfFirst { it.contains("track") && it.contains("name") }
+                .takeIf { it >= 0 }
+                ?: return ImportResult(0, 0, 1, listOf("Header must include 'Track Name' column."))
+
+            val cornerIdx = header.indexOfFirst { it.contains("corner") && it.contains("name") }
+                .takeIf { it >= 0 }
+                ?: return ImportResult(0, 0, 1, listOf("Header must include 'Corner Name' column."))
+
+            val latIdx = header.indexOfFirst { it.contains("lat") }
+                .takeIf { it >= 0 }
+                ?: return ImportResult(0, 0, 1, listOf("Header must include 'Latitude' column."))
+
+            val lonIdx = header.indexOfFirst { it.contains("lon") }
+                .takeIf { it >= 0 }
+                ?: return ImportResult(0, 0, 1, listOf("Header must include 'Longitude' column."))
+
+            val dataLines = lines.drop(1)
+            if (dataLines.isEmpty()) {
+                return ImportResult(0, 0, 1, listOf("No corner rows found under header."))
+            }
+
+            var errors = 0
+            val messages = mutableListOf<String>()
+            val corners = mutableListOf<Corner>()
+
+            var trackName: String? = null
+
+            dataLines.forEachIndexed { i, raw ->
+                val rowNum = i + 2 // human-readable row number (1 header + 1-based)
+                val cols = splitCsvLine(raw)
+
+                fun colOrNull(idx: Int): String? = cols.getOrNull(idx)?.trim()
+
+                val tn = colOrNull(trackIdx).orEmpty()
+                val cn = colOrNull(cornerIdx).orEmpty()
+                val latStr = colOrNull(latIdx)
+                val lonStr = colOrNull(lonIdx)
+
+                if (trackName == null && tn.isNotBlank()) trackName = tn
+
+                val lat = latStr?.toDoubleOrNull()
+                val lon = lonStr?.toDoubleOrNull()
+
+                if (cn.isBlank() || lat == null || lon == null) {
+                    errors++
+                    messages += "Row $rowNum: invalid (need Corner Name, Latitude, Longitude)."
+                    return@forEachIndexed
+                }
+
+                if (lat !in -90.0..90.0 || lon !in -180.0..180.0) {
+                    errors++
+                    messages += "Row $rowNum: lat/lon out of range."
+                    return@forEachIndexed
+                }
+
+                val index = corners.size + 1
+
+                corners += Corner(
+                    index = index,
+                    officialNumber = null,
+                    name = cn,
+                    lat = lat,
+                    lon = lon
+                )
+            }
+
+            if (corners.isEmpty()) {
+                return ImportResult(0, 0, 1, listOf("No valid corner rows found.") + messages.take(5))
+            }
+
+            val newTrack = Track(
+                id = System.currentTimeMillis(),
+                name = (trackName ?: "Imported Track").ifBlank { "Imported Track" },
+                corners = corners
+            )
+
+            val ok = saveTrack(context, newTrack)
+            if (ok) {
+                ImportResult(
+                    imported = 1,
+                    skipped = 0,
+                    errors = errors,
+                    messages = listOf("Imported: ${newTrack.name} (${corners.size} corners)") + messages.take(5)
+                )
+            } else {
+                ImportResult(0, 0, 1, listOf("Failed to save imported track."))
+            }
+        } catch (t: Throwable) {
+            ImportResult(0, 0, 1, listOf("CSV import error: ${t.message}"))
+        }
+    }
+
+    /**
+     * Tiny CSV splitter that supports quoted fields ("like, this").
+     * Good enough for names with commas if user puts quotes around them.
+     */
+    private fun splitCsvLine(line: String): List<String> {
+        val out = mutableListOf<String>()
+        val sb = StringBuilder()
+        var inQuotes = false
+        var i = 0
+        while (i < line.length) {
+            val c = line[i]
+            when {
+                c == '"' -> {
+                    // handle escaped quotes ""
+                    val nextIsQuote = (i + 1 < line.length && line[i + 1] == '"')
+                    if (inQuotes && nextIsQuote) {
+                        sb.append('"')
+                        i++
+                    } else {
+                        inQuotes = !inQuotes
+                    }
+                }
+                c == ',' && !inQuotes -> {
+                    out += sb.toString()
+                    sb.setLength(0)
+                }
+                else -> sb.append(c)
+            }
+            i++
+        }
+        out += sb.toString()
+        return out
+    }
+
+
 
 
 }

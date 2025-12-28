@@ -29,6 +29,8 @@ import com.hotlaps.dynamic.data.TrackStorage
 import android.content.Intent
 import android.widget.Toast
 import androidx.core.content.ContextCompat
+import android.provider.OpenableColumns
+import android.util.Log
 
 
 
@@ -45,6 +47,8 @@ fun AddNewTrackScreen(
 
     val context = LocalContext.current
     val importResultState = remember { mutableStateOf<TrackStorage.ImportResult?>(null) }
+    val importCsvResultState = remember { mutableStateOf<TrackStorage.ImportResult?>(null) }
+
 
     val exportResultState = remember { mutableStateOf<String?>(null) }
 
@@ -79,6 +83,56 @@ fun AddNewTrackScreen(
                 )
             }
         }
+
+
+    val importCsvLauncher =
+        rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.OpenDocument()
+        ) { uri: Uri? ->
+            if (uri != null) {
+
+                val dbg = debugUri(context, uri)
+                Toast.makeText(context, "Picked: ${dbg.take(80)}...", Toast.LENGTH_LONG).show()
+                Log.d("CSV_IMPORT", dbg)
+
+
+                val csvText = context.contentResolver
+                    .openInputStream(uri)
+                    ?.bufferedReader()
+                    ?.use { it.readText() }
+
+                val preview = csvText
+                    ?.lineSequence()
+                    ?.take(2)
+                    ?.joinToString(" | ")
+                    ?: "(null)"
+                Toast.makeText(context, "CSV preview: $preview", Toast.LENGTH_LONG).show()
+                android.util.Log.d("CSV_IMPORT", "uri=$uri preview=$preview")
+
+
+                if (csvText == null) {
+                    importCsvResultState.value = TrackStorage.ImportResult(
+                        imported = 0,
+                        skipped = 0,
+                        errors = 1,
+                        messages = listOf("Unable to read selected CSV file")
+                    )
+                } else {
+                    importCsvResultState.value =
+                        TrackStorage.importSingleTrackCsvFromText(context, csvText)
+                }
+            } else {
+                importCsvResultState.value = TrackStorage.ImportResult(
+                    imported = 0,
+                    skipped = 0,
+                    errors = 0,
+                    messages = listOf("CSV import cancelled")
+                )
+            }
+
+
+        }
+
 
 
     Scaffold(
@@ -149,15 +203,18 @@ fun AddNewTrackScreen(
 
             Spacer(Modifier.height(12.dp))
 
-            BigButton(
+            /* BigButton(
                 text = "Import Track File",
                 onClick = {
                     // JSON for now. Later we can allow CSV too.
-                    importTrackLauncher.launch(arrayOf("application/json", "text/csv", "text/*", "*/*"))
+                    importTrackLauncher.launch(arrayOf("application/json", "text/*", "*/*"))
+
 
                 },
                 enabled = true
             )
+
+
 
             importResultState.value?.let { r ->
                 Spacer(Modifier.height(12.dp))
@@ -166,6 +223,24 @@ fun AddNewTrackScreen(
                     Text(msg, style = MaterialTheme.typography.bodySmall)
                 }
             }
+            */
+            BigButton(
+                text = "Import Track CSV",
+                onClick = {
+                    importCsvLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "text/plain"))
+
+                },
+                enabled = true
+            )
+
+            importCsvResultState.value?.let { r ->
+                Spacer(Modifier.height(12.dp))
+                Text("CSV Imported: ${r.imported}  Errors: ${r.errors}")
+                r.messages.take(3).forEach { msg ->
+                    Text(msg, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+
 
             Spacer(Modifier.height(12.dp))
 
@@ -177,6 +252,33 @@ fun AddNewTrackScreen(
 
 
 
+}
+
+private fun debugUri(context: android.content.Context, uri: android.net.Uri): String {
+    var name = "(unknown)"
+    var size: Long? = null
+
+    context.contentResolver.query(
+        uri,
+        arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE),
+        null,
+        null,
+        null
+    )?.use { c ->
+        val nameIdx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+        val sizeIdx = c.getColumnIndex(OpenableColumns.SIZE)
+        if (c.moveToFirst()) {
+            if (nameIdx >= 0) name = c.getString(nameIdx) ?: name
+            if (sizeIdx >= 0) size = if (!c.isNull(sizeIdx)) c.getLong(sizeIdx) else null
+        }
+    }
+
+    val head = context.contentResolver.openInputStream(uri)?.use { input ->
+        val bytes = input.readNBytes(256)
+        String(bytes, Charsets.UTF_8)
+    } ?: "(no bytes)"
+
+    return "name=$name size=${size ?: -1} uri=$uri head=${head.replace("\n", "\\n")}"
 }
 
 
