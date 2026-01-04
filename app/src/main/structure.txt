@@ -1,0 +1,129 @@
+Folder PATH listing for volume Expansion 
+Volume serial number is B4D8-ACE3
+D:.
+|   AndroidManifest.xml
+|   ic_launcher-playstore.png
+|   structure.txt
+|   
++---assets
+|   |   simulation3.csv
+|   |   track_template.csv
+|   |   
+|   \---built_in_tracks
+|           Road America - Bend Course.json
+|           Road America - Kink Course.json
+|           
++---java
+|   \---com
+|       \---hotlaps
+|           \---dynamic
+|               |   Color.kt
+|               |   MainActivity.kt
+|               |   Theme.kt
+|               |   Type.kt
+|               |   
+|               +---data
+|               |       CalibRepo.kt
+|               |       EventStorage.kt
+|               |       FileHelper.kt
+|               |       PrefsRepo.kt
+|               |       SettingsRepo.kt
+|               |       SmoothingLevel.kt
+|               |       TrackStorage.kt
+|               |       
+|               +---model
+|               |       Event.kt
+|               |       Track.kt
+|               |       
+|               +---ui
+|               |   |   AddNewTrackScreen.kt
+|               |   |   CalibrateScreen.kt
+|               |   |   ChartMode.kt
+|               |   |   CornerCaptureManagerScreen.kt
+|               |   |   CreateTrackFromCoordinatesScreen.kt
+|               |   |   DisclaimerScreen.kt
+|               |   |   EditTrackScreen.kt
+|               |   |   EventManagerScreen.kt
+|               |   |   EventViewerScreen.kt
+|               |   |   GGUi.kt
+|               |   |   HelpAboutScreen.kt
+|               |   |   MainMenuDynamics.kt
+|               |   |   SettingsScreen.kt
+|               |   |   SplashDynamics.kt
+|               |   |   TeachCornersScreen.kt
+|               |   |   TrackEditDeleteScreen.kt
+|               |   |   TrackManagerMenuScreen.kt
+|               |   |   TrackPickerScreen.kt
+|               |   |   
+|               |   \---help
+|               |           HelpEventsScreen.kt
+|               |           HelpGForceMapScreen.kt
+|               |           HelpQuickStartScreen.kt
+|               |           HelpScaffold.kt
+|               |           HelpScreen.kt
+|               |           HelpSettingsScreen.kt
+|               |           HelpTracksScreen.kt
+|               |           UnderstangingCalibrationScreen.kt
+|               |           
+|               +---util
+|               |       FeedbackUtils.kt
+|               |       GeoUtils.kt
+|               |       GForceSmoother.kt
+|               |       
+|               \---viewmodel
+|                       DriveViewModel.kt
+|                       TrackSelectionViewModel.kt
+|                       
+\---res
+    +---drawable
+    |       event.xml
+    |       ggmap.xml
+    |       ic_launcher_background.xml
+    |       ic_launcher_foreground.xml
+    |       splash_apex_dynamics.png
+    |       track.xml
+    |       
+    +---mipmap-anydpi-v26
+    |       ic_launcher.xml
+    |       ic_launcher_round.xml
+    |       
+    +---mipmap-hdpi
+    |       ic_launcher.webp
+    |       ic_launcher_foreground.webp
+    |       ic_launcher_round.webp
+    |       
+    +---mipmap-mdpi
+    |       ic_launcher.webp
+    |       ic_launcher_foreground.webp
+    |       ic_launcher_round.webp
+    |       
+    +---mipmap-xhdpi
+    |       ic_launcher.webp
+    |       ic_launcher_foreground.webp
+    |       ic_launcher_round.webp
+    |       
+    +---mipmap-xxhdpi
+    |       ic_launcher.webp
+    |       ic_launcher_foreground.webp
+    |       ic_launcher_round.webp
+    |       
+    +---mipmap-xxxhdpi
+    |       ic_launcher.webp
+    |       ic_launcher_foreground.webp
+    |       ic_launcher_round.webp
+    |       
+    +---values
+    |       colors.xml
+    |       ic_launcher_background.xml
+    |       strings.xml
+    |       themes.xml
+    |       
+    +---values-night
+    |       themes.xml
+    |       
+    \---xml
+            backup_rules.xml
+            data_extraction_rules.xml
+            file_paths.xml
+            usb_device_filter.xml
+            

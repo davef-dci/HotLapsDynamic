@@ -321,7 +321,13 @@ object EventStorage {
                 val cornerName = parts[16]
                 val visitNum = parts[17].toIntOrNull() ?: 0
 
-                val isApexSample = parts[18].equals("true", ignoreCase = true)
+                val apexToken = parts[18].trim()
+                val isApexSample =
+                    apexToken.equals("true", ignoreCase = true) ||
+                            apexToken.equals("1") ||
+                            apexToken.equals("yes", ignoreCase = true) ||
+                            apexToken.equals("y", ignoreCase = true)
+
 
                 val sample = EventSample(
                     eventId = 0L,   // arbitrary when loading loose CSV
@@ -655,8 +661,9 @@ object EventStorage {
         val smoothedSamples = applySmoothingForExport(withInterpolatedSpeeds, smoothingLevel)
         if (smoothedSamples.isEmpty()) return null
 
-        // 4) Choose output directory (currently same dir as source file)
-        val dir = file.parentFile ?: eventsDir(context) ?: return null
+        // 4) Write to a *separate* share file in cache (never overwrite the event file)
+        val shareDir = File(context.cacheDir, "event_share")
+        if (!shareDir.exists()) shareDir.mkdirs()
 
         val baseName = file.nameWithoutExtension
         val suffix = when (smoothingLevel) {
@@ -666,11 +673,9 @@ object EventStorage {
             SmoothingLevel.Heavy -> "heavy"
         }
 
-        val outFile = file       // <-- overwrite original
+        val outFile = File(shareDir, "${baseName}_$suffix.csv")
+        if (outFile.exists()) outFile.delete()
 
-        if (outFile.exists()) {
-            outFile.delete()
-        }
 
         // 5) Build entire CSV in memory, then write once
         val sb = StringBuilder()
@@ -711,7 +716,7 @@ object EventStorage {
                 .append(sample.cornerIndex).append(',')
                 .append(sample.cornerName).append(',')
                 .append(sample.visitNumber).append(',')
-                .append(if (sample.isApexSample) "1" else "0")
+                .append(if (sample.isApexSample) "True" else "")
                 .append('\n')
         }
 
