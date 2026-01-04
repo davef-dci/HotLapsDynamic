@@ -1211,11 +1211,7 @@ fun GGScreen(
                             ) {
                                 Text("Go to Calibration")
                             }
-                            Text(
-                                text = "Tip: park on a level surface, point the car straight ahead, then follow the on-screen steps.",
-                                style = MaterialTheme.typography.bodySmall,
-                                textAlign = TextAlign.Center
-                            )
+
                         }
                     }
                 }

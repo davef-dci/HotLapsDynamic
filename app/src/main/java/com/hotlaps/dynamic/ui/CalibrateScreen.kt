@@ -20,6 +20,8 @@ import androidx.compose.ui.unit.sp
 import com.hotlaps.dynamic.data.CalibRepo
 import kotlinx.coroutines.launch
 import kotlin.math.sqrt
+import kotlinx.coroutines.delay
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -34,6 +36,10 @@ fun CalibrateScreen(onBack: () -> Unit) {
     var collected by remember { mutableStateOf(0) }
     var status by remember { mutableStateOf("Ready to calibrate") }
     var forwardVec by remember { mutableStateOf<FloatArray?>(null) }
+
+    // Countdown before we begin sampling.
+    // null = not counting down, otherwise 3..1 displayed to the user.
+    var countdown by remember { mutableStateOf<Int?>(null) }
 
     var hasLinearAccel by remember { mutableStateOf(false) }
     var usingAccelFallback by remember { mutableStateOf(false) }
@@ -187,38 +193,111 @@ fun CalibrateScreen(onBack: () -> Unit) {
                 )
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(
-                    enabled = !collecting,
-                    onClick = {
+            // -----------------------------
+// BIG, CAR-FRIENDLY BUTTON AREA
+// -----------------------------
 
+// A shared modifier so all buttons are large and easy to tap in the car.
+// Adjust height if you want: 64.dp / 72.dp / 80.dp etc.
+            val bigButtonMod = Modifier
+                .fillMaxWidth()
+                .height(72.dp)
 
+// Convenience flags to keep our enable/disable rules readable.
+            val isCountingDown = countdown != null
 
+// Show a large countdown text while we wait to start collecting.
+// This gives the driver time to get hands back on the wheel.
+            if (isCountingDown) {
+                val n = countdown ?: 0
 
-                        xs.clear(); ys.clear(); zs.clear()
-                        collected = 0
-                        forwardVec = null
-                        status = "Collecting… 0 / $samplesTarget"
+                Text(
+                    text = "Starting in $n…",
+                    style = MaterialTheme.typography.headlineLarge,
+                    modifier = Modifier.fillMaxWidth()
+                )
 
-                        // Reset filters
-                        sX = 0f; sY = 0f; sZ = 0f
-                        gX = 0f; gY = 0f; gZ = 0f
-
-                        collecting = true
-                    }
-                ) { Text("Start Calibration") }
-
-                OutlinedButton(
-                    enabled = collecting,
-                    onClick = {
-                        collecting = false
-                        status = "Calibration cancelled"
-                    }
-                ) { Text("Cancel") }
+                // Optional: small visual progress during the countdown.
+                // (You can delete this indicator if you prefer.)
+                LinearProgressIndicator(
+                    progress = ((6 - n) / 6f).coerceIn(0f, 1f),
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
 
+// ----------------------
+// START CALIBRATION BUTTON
+// ----------------------
+//
+// Behavior:
+// 1) User taps Start
+// 2) We clear buffers + reset filters immediately
+// 3) We do a 3-2-1 countdown
+// 4) ONLY AFTER countdown ends, we set collecting = true
+//
+// NOTE: Your sensor subscription is in DisposableEffect(collecting),
+// so sensors won't begin streaming until collecting flips true.
+// This is exactly what we want (pause first, then collect).
             Button(
-                enabled = forwardVec != null && !collecting,
+                enabled = !collecting && !isCountingDown,
+                modifier = bigButtonMod,
+                onClick = {
+
+                    // Clear old samples so we start fresh
+                    xs.clear(); ys.clear(); zs.clear()
+                    collected = 0
+
+                    // Clear last computed vector until we re-finish a new run
+                    forwardVec = null
+
+                    // Update status immediately so user gets feedback
+                    status = "Get ready…"
+
+                    // Reset filters so EMA/gravity estimates don't carry from a prior run
+                    sX = 0f; sY = 0f; sZ = 0f
+                    gX = 0f; gY = 0f; gZ = 0f
+
+                    // Start countdown at 3
+                    countdown = 5
+
+                    // Run countdown asynchronously
+                    scope.launch {
+                        // Count down: 3 -> 2 -> 1
+                        while ((countdown ?: 0) > 1) {
+                            delay(650) // tweak this delay to taste (650..1000ms)
+                            countdown = (countdown ?: 2) - 1
+                        }
+
+                        // Hold briefly on "1" so it feels intentional
+                        delay(650)
+
+                        // Countdown finished; hide countdown UI
+                        countdown = null
+
+                        // Begin sampling NOW (sensor subscription will activate here)
+                        status = "Collecting… 0 / $samplesTarget"
+                        collecting = true
+                    }
+                }
+            ) {
+                // Bigger text helps readability in-car
+                Text("Start Calibration", fontSize = 20.sp)
+            }
+
+// --------------------
+// (NO CANCEL BUTTON)
+// --------------------
+// You requested removing Cancel because calibration is too fast to use it.
+// If later you want an emergency stop, we can add a long-press abort,
+// but for now we keep the UI clean and large.
+
+
+// Save the computed forward vector into CalibRepo.
+// Only enabled once calibration has produced a forwardVec,
+// and while we're not currently collecting / counting down.
+            Button(
+                enabled = forwardVec != null && !collecting && countdown == null,
+                modifier = bigButtonMod,
                 onClick = {
                     val vec = forwardVec ?: return@Button
                     scope.launch {
@@ -226,19 +305,27 @@ fun CalibrateScreen(onBack: () -> Unit) {
                         status = "Saved ✓  (You can go back)"
                     }
                 }
-            ) { Text("Use Calibration") }
+            ) {
+                Text("Use Calibration", fontSize = 20.sp)
+            }
 
 
+
+            // Delete calibration from storage.
+// This can be useful if you want to force a re-calibration.
             OutlinedButton(
+                enabled = !collecting && countdown == null,
+                modifier = bigButtonMod,
                 onClick = {
                     scope.launch {
                         calibRepo.clear()
-                        status = "Calibration deleted (debug)."
+                        status = "Calibration deleted."
                     }
                 }
             ) {
-                Text("Delete Calibration (Debug)")
+                Text("Delete Calibration", fontSize = 18.sp)
             }
+
 
         }
     }

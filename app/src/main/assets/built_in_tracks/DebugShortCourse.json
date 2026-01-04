@@ -1,0 +1,21 @@
+{
+  "id": 2633934858957375063,
+  "name": "Debug Short Course",
+  "isBuiltIn": true,
+  "corners": [
+    {
+      "index": 1,
+      "officialNumber": null,
+      "name": "First Corner",
+      "lat": 43.047349,
+      "lon": -89.444289
+    },
+    {
+      "index": 2,
+      "officialNumber": null,
+      "name": "Second Corner",
+      "lat": 43.046356,
+      "lon": -89.443498
+    }
+  ]
+}
