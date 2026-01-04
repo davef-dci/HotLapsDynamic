@@ -509,7 +509,10 @@ object EventStorage {
         if (smoothedSamples.isEmpty()) return null
 
         // 4) Interpolate GPS lat/lon between GPS fixes (export-only)
-        val gpsInterpolatedSamples = interpolateGpsInSamples(smoothedSamples)
+        val gpsInterpolatedSamples =
+            if (GPS_INTERP_MODE == "CatmullRom") interpolateGpsCatmullRom(smoothedSamples)
+            else interpolateGpsInSamples(smoothedSamples) // existing linear version
+
 
         // 5) Output directory (cache)
         val shareDir = File(context.cacheDir, "event_share")
@@ -730,6 +733,15 @@ object EventStorage {
         }
     }
 
+    // GPS interpolation mode used ONLY for export.
+// Keep Linear as the safe default for phone GPS (1 Hz).
+    private enum class GpsInterpMode { Linear, CatmullRom }
+
+    // Flip this one line to try CatmullRom.
+    private const val GPS_INTERP_MODE = "CatmullRom"
+
+
+
     // ---------------------------------------------------------------------------------------------
     // GPS interpolation (export-only)
     // ---------------------------------------------------------------------------------------------
@@ -767,6 +779,8 @@ object EventStorage {
         val lon = lon0 + (eastM / metersPerDegLon)
         return lat to lon
     }
+
+
 
     /**
      * Interpolate gpsLat/gpsLon between anchor GPS fixes (export-only).
@@ -828,6 +842,183 @@ object EventStorage {
         // (They are already set to that value in the recorded data.)
         return out
     }
+
+    /**
+     * Export-only GPS smoothing: centripetal Catmull–Rom spline through GPS anchor points.
+     *
+     * Safeguards for phone GPS (≈1 Hz):
+     *  - Only applies when we have 4 anchors (P0,P1,P2,P3).
+     *  - Falls back to linear when spacing is too large (avoids inventing huge arcs).
+     *
+     * Returns a list where gpsLat/gpsLon are overwritten in the export copy only.
+     */
+    private fun interpolateGpsCatmullRom(samples: List<EventSample>): List<EventSample> {
+        if (samples.size < 5) return samples
+
+        // 1) Extract GPS anchors: indices where GPS changes
+        val anchorIdx = mutableListOf<Int>()
+        anchorIdx.add(0)
+        var lastLat = samples[0].gpsLat
+        var lastLon = samples[0].gpsLon
+        for (i in 1 until samples.size) {
+            val lat = samples[i].gpsLat
+            val lon = samples[i].gpsLon
+            if (lat != lastLat || lon != lastLon) {
+                anchorIdx.add(i)
+                lastLat = lat
+                lastLon = lon
+            }
+        }
+        if (anchorIdx.size < 4) {
+            // Not enough anchors for spline → linear
+            return interpolateGpsInSamples(samples)
+        }
+
+        // 2) Convert anchors into local meters (east/north) relative to first anchor
+        val originLat = samples[anchorIdx[0]].gpsLat
+        val originLon = samples[anchorIdx[0]].gpsLon
+
+        data class Anchor(val idx: Int, val e: Double, val n: Double)
+        val anchors = anchorIdx.map { idx ->
+            val s = samples[idx]
+            val en = latLonToENMeters(s.gpsLat, s.gpsLon, originLat, originLon)
+            Anchor(idx = idx, e = en.eastM, n = en.northM)
+        }
+
+        // Output list (copies) so we don't mutate input
+        val out = samples.toMutableList()
+
+        // Rule of thumb: if anchors are far apart, spline can invent too much curvature at 1 Hz.
+        val MAX_SEGMENT_METERS = 40.0
+
+        // 3) For each segment between P1->P2, fill samples between anchor indices
+        // using P0,P1,P2,P3 for centripetal Catmull–Rom.
+        for (a in 1 until anchors.size - 2) {
+            val p0 = anchors[a - 1]
+            val p1 = anchors[a]
+            val p2 = anchors[a + 1]
+            val p3 = anchors[a + 2]
+
+            val startIdx = p1.idx
+            val endIdx = p2.idx
+            if (endIdx <= startIdx) continue
+
+            val segDist = hypot(p2.e - p1.e, p2.n - p1.n)
+            if (segDist > MAX_SEGMENT_METERS) {
+                // Too sparse → linear fill for this segment
+                fillLinearSegmentMeters(out, samples, startIdx, endIdx, originLat, originLon)
+                continue
+            }
+
+            val tStart = samples[startIdx].utcMs.toDouble()
+            val tEnd = samples[endIdx].utcMs.toDouble()
+            val denom = (tEnd - tStart)
+            if (denom <= 0.0) continue
+
+            for (k in startIdx..endIdx) {
+                val tk = samples[k].utcMs.toDouble()
+                val u = ((tk - tStart) / denom).coerceIn(0.0, 1.0)
+
+                val (e, n) = catmullRomCentripetal2D(
+                    u,
+                    p0.e, p0.n,
+                    p1.e, p1.n,
+                    p2.e, p2.n,
+                    p3.e, p3.n
+                )
+
+                val (lat, lon) = enMetersToLatLon(e, n, originLat, originLon)
+                out[k] = out[k].copy(gpsLat = lat, gpsLon = lon)
+            }
+        }
+
+        // 4) End regions (before first spline segment & after last) still linear
+        // Fill from first anchor to second anchor
+        fillLinearSegmentMeters(out, samples, anchors[0].idx, anchors[1].idx, originLat, originLon)
+        // Fill from last-1 anchor to last anchor
+        fillLinearSegmentMeters(out, samples, anchors[anchors.size - 2].idx, anchors.last().idx, originLat, originLon)
+
+        return out
+    }
+
+    private fun hypot(x: Double, y: Double): Double = kotlin.math.sqrt(x * x + y * y)
+
+    /**
+     * Linear fill in local meters between two anchor indices.
+     * Used as fallback when spline would be unsafe.
+     */
+    private fun fillLinearSegmentMeters(
+        out: MutableList<EventSample>,
+        samples: List<EventSample>,
+        startIdx: Int,
+        endIdx: Int,
+        originLat: Double,
+        originLon: Double
+    ) {
+        if (endIdx <= startIdx) return
+        val s0 = samples[startIdx]
+        val s1 = samples[endIdx]
+        val t0 = s0.utcMs.toDouble()
+        val t1 = s1.utcMs.toDouble()
+        if (t1 <= t0) return
+
+        val p0 = latLonToENMeters(s0.gpsLat, s0.gpsLon, originLat, originLon)
+        val p1 = latLonToENMeters(s1.gpsLat, s1.gpsLon, originLat, originLon)
+
+        for (k in startIdx..endIdx) {
+            val u = ((samples[k].utcMs - t0) / (t1 - t0)).coerceIn(0.0, 1.0)
+            val e = p0.eastM + u * (p1.eastM - p0.eastM)
+            val n = p0.northM + u * (p1.northM - p0.northM)
+            val (lat, lon) = enMetersToLatLon(e, n, originLat, originLon)
+            out[k] = out[k].copy(gpsLat = lat, gpsLon = lon)
+        }
+    }
+
+    /**
+     * Centripetal Catmull–Rom in 2D.
+     * This avoids many overshoot problems compared to uniform Catmull–Rom.
+     */
+    private fun catmullRomCentripetal2D(
+        u: Double,
+        x0: Double, y0: Double,
+        x1: Double, y1: Double,
+        x2: Double, y2: Double,
+        x3: Double, y3: Double
+    ): Pair<Double, Double> {
+        // Parameterization (alpha = 0.5 for centripetal)
+        fun tj(ti: Double, xa: Double, ya: Double, xb: Double, yb: Double): Double {
+            val dx = xb - xa
+            val dy = yb - ya
+            val dist = kotlin.math.sqrt(dx * dx + dy * dy)
+            return ti + kotlin.math.sqrt(dist) // dist^(alpha) where alpha=0.5
+        }
+
+        val t0 = 0.0
+        val t1 = tj(t0, x0, y0, x1, y1)
+        val t2 = tj(t1, x1, y1, x2, y2)
+        val t3 = tj(t2, x2, y2, x3, y3)
+
+        // Map u in [0,1] to t in [t1,t2]
+        val t = t1 + u * (t2 - t1)
+
+        fun lerp(ax: Double, ay: Double, bx: Double, by: Double, ta: Double, tb: Double, t: Double): Pair<Double, Double> {
+            if (tb - ta == 0.0) return ax to ay
+            val s = (t - ta) / (tb - ta)
+            return (ax + s * (bx - ax)) to (ay + s * (by - ay))
+        }
+
+        val a1 = lerp(x0, y0, x1, y1, t0, t1, t)
+        val a2 = lerp(x1, y1, x2, y2, t1, t2, t)
+        val a3 = lerp(x2, y2, x3, y3, t2, t3, t)
+
+        val b1 = lerp(a1.first, a1.second, a2.first, a2.second, t0, t2, t)
+        val b2 = lerp(a2.first, a2.second, a3.first, a3.second, t1, t3, t)
+
+        val c = lerp(b1.first, b1.second, b2.first, b2.second, t1, t2, t)
+        return c
+    }
+
+
 
     // ---------------------------------------------------------------------------------------------
     // Offline speed rewrite (mutates the event CSV by design)
