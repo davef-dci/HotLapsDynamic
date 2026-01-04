@@ -29,6 +29,8 @@ import kotlinx.coroutines.withContext
 
 
 
+
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EventManagerScreen(
@@ -56,6 +58,8 @@ fun EventManagerScreen(
     var shareSmoothingLevel by remember { mutableStateOf(SmoothingLevel.Medium) }
 
     val coroutineScope = rememberCoroutineScope()
+
+
 
     Scaffold(
         topBar = {

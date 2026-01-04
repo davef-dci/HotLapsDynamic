@@ -19,26 +19,22 @@ import kotlin.math.sqrt
  *
  * Responsible for writing/reading telemetry "event" CSV files.
  *
- * Key design rules (hard-won 🙂):
+ * Key design rules:
  *  1) The *event CSV* is the source of truth for analysis inside the app.
- *  2) "Share/export" must NEVER overwrite the event CSV. It should create a separate copy (cache file).
- *  3) Parsing should be tolerant of Apex encodings ("True", "1", "yes", etc.) so older files still load.
- *
- * Events live under the app-private external files directory:
- *   /Android/data/<package>/files/events/
+ *  2) Share/export must NEVER overwrite the event CSV (export creates a separate cache file).
+ *  3) Parsing must be tolerant of Apex encodings ("True", "1", "yes", etc.) for backward compatibility.
  */
 object EventStorage {
 
     private const val TAG = "EventStorage"
 
     /**
-     * Single lock for all event CSV file access.
-     * We only write one event at a time, so a global lock is fine.
+     * Single lock for event CSV access. Recording appends should be serialized.
      */
     private val fileLock = Any()
 
     // ---------------------------------------------------------------------------------------------
-    // CSV schema (single place to keep header + column indices consistent)
+    // CSV schema (single source of truth)
     // ---------------------------------------------------------------------------------------------
 
     // NOTE: If you add/reorder columns, update BOTH the header and indices below.
@@ -52,7 +48,7 @@ object EventStorage {
     // Column indices for parsing (must match CSV_HEADER above).
     private const val IDX_TIMESTAMP_MS = 0
     private const val IDX_DELTA_MS = 1
-    // IDX_LOCAL_TIME = 2 (ignored)
+    // IDX_LOCAL_TIME = 2 (stored but not parsed)
     private const val IDX_TRACK_NAME = 3
     private const val IDX_EVENT_NAME = 4
     private const val IDX_GPS_LAT = 5
@@ -76,11 +72,10 @@ object EventStorage {
     // Directory helpers
     // ---------------------------------------------------------------------------------------------
 
-    private fun eventsDir(context: Context): File? =
-        FileHelper.eventsDir(context)
+    private fun eventsDir(context: Context): File? = FileHelper.eventsDir(context)
 
     // ---------------------------------------------------------------------------------------------
-    // Event creation
+    // Event creation (model only)
     // ---------------------------------------------------------------------------------------------
 
     /**
@@ -103,16 +98,16 @@ object EventStorage {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // CSV append (recording)
+    // CSV append (recording path)
     // ---------------------------------------------------------------------------------------------
 
     /**
      * Append one telemetry sample to the per-event CSV.
      *
      * IMPORTANT:
-     *  - This is called during recording.
-     *  - Keep this fast and simple.
-     *  - We do not do interpolation here; we store speed as-is. (Interpolation can be done later.)
+     *  - Called during recording; keep fast.
+     *  - We store whatever GPS values exist at record time.
+     *  - We do NOT do interpolation here.
      *
      * Note: `cornerTriggerRadiusM` currently unused but kept for signature stability.
      */
@@ -137,8 +132,8 @@ object EventStorage {
 
                 val speedStr = sample.speedMps?.toString() ?: ""
 
-                // Apex column: "True" only for apex samples, blank otherwise
-                val apexStr = if (sample.isApexSample) "True" else ""
+// Apex exported as 0/1 so downstream tools can reliably detect it.
+                val apexStr = if (sample.isApexSample) "1" else "0"
 
                 val line = buildString {
                     append(sample.utcMs); append(',')
@@ -238,7 +233,7 @@ object EventStorage {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // Editing existing event CSV
+    // Editing existing event CSV (mutates event files by design)
     // ---------------------------------------------------------------------------------------------
 
     fun updateEventNameInCsv(context: Context, eventId: Long, newName: String) {
@@ -257,9 +252,6 @@ object EventStorage {
             val updatedLines = ArrayList<String>(lines.size)
             updatedLines.add(header)
 
-            // Index 4 in our schema: eventName
-            val EVENT_NAME_INDEX = IDX_EVENT_NAME
-
             for (i in 1 until lines.size) {
                 val line = lines[i]
                 if (line.isBlank()) {
@@ -268,13 +260,13 @@ object EventStorage {
                 }
 
                 val parts = line.split(',')
-                if (parts.size <= EVENT_NAME_INDEX) {
+                if (parts.size <= IDX_EVENT_NAME) {
                     updatedLines.add(line) // keep malformed row
                     continue
                 }
 
                 val mutable = parts.toMutableList()
-                mutable[EVENT_NAME_INDEX] = newName
+                mutable[IDX_EVENT_NAME] = newName
                 updatedLines.add(mutable.joinToString(","))
             }
 
@@ -348,7 +340,6 @@ object EventStorage {
             if (lines.size <= 1) return
 
             val dataLines = lines.toMutableList() // includes header at index 0
-
             var bestLineIndex = -1
             var bestError = Long.MAX_VALUE
 
@@ -400,8 +391,9 @@ object EventStorage {
     // ---------------------------------------------------------------------------------------------
 
     /**
-     * Load samples from a CSV file. This is used by EventViewerScreen and export smoothing.
-     * We accept multiple Apex encodings for backwards compatibility:
+     * Load samples from a CSV file. Used by EventViewerScreen and export smoothing.
+     *
+     * Apex parsing accepts multiple encodings for backwards compatibility:
      *   - "True"/"true"
      *   - "1"
      *   - "yes"/"y"
@@ -486,15 +478,16 @@ object EventStorage {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // Share/export (creates a derived CSV in cache, never overwrites event file)
+    // Share/export (creates derived CSV in cache, never overwrites event file)
     // ---------------------------------------------------------------------------------------------
 
     /**
-     * Create a shareable CSV file derived from an existing event CSV:
-     *  1) Load samples from the event file
-     *  2) Interpolate speeds in-memory
-     *  3) Apply smoothing to G values (based on SmoothingLevel)
-     *  4) Write result to a temp file in cache/event_share/
+     * Create a shareable CSV derived from an existing event CSV:
+     *  1) Load samples
+     *  2) Interpolate speed in-memory (anchor-based)
+     *  3) Smooth G values per SmoothingLevel
+     *  4) Interpolate GPS lat/lon in-memory (anchor-based) for a smoother replay path (desktop use)
+     *  5) Stream-write CSV to cache/event_share/
      *
      * IMPORTANT: This function MUST NOT modify the original event CSV.
      */
@@ -504,18 +497,21 @@ object EventStorage {
         smoothingLevel: SmoothingLevel
     ): File? {
 
-        // 1) Load original samples from the event CSV
+        // 1) Load original samples
         val samples = loadSamplesFromCsv(file)
         if (samples.isEmpty()) return null
 
-        // 2) Interpolate speeds in-memory before smoothing Gs
+        // 2) Interpolate speeds before smoothing Gs
         val withInterpolatedSpeeds = interpolateSpeedsInSamples(samples)
 
         // 3) Apply desired smoothing
         val smoothedSamples = applySmoothingForExport(withInterpolatedSpeeds, smoothingLevel)
         if (smoothedSamples.isEmpty()) return null
 
-        // 4) Choose output directory (cache)
+        // 4) Interpolate GPS lat/lon between GPS fixes (export-only)
+        val gpsInterpolatedSamples = interpolateGpsInSamples(smoothedSamples)
+
+        // 5) Output directory (cache)
         val shareDir = File(context.cacheDir, "event_share")
         if (!shareDir.exists()) shareDir.mkdirs()
 
@@ -530,44 +526,55 @@ object EventStorage {
         val outFile = File(shareDir, "${baseName}_$suffix.csv")
         if (outFile.exists()) outFile.delete()
 
-        // 5) Build CSV text in memory then write once
-        val sb = StringBuilder()
-        sb.append(CSV_HEADER)
-
+        // 6) Stream-write (avoid huge StringBuilder allocations)
         val localTimeFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).apply {
             timeZone = TimeZone.getDefault()
         }
 
-        for (sample in smoothedSamples) {
-            val localTime = localTimeFormat.format(Date(sample.utcMs))
-            val speedStr = sample.speedMps?.toString() ?: ""
-            val apexStr = if (sample.isApexSample) "True" else ""
+        try {
+            outFile.bufferedWriter().use { writer ->
+                writer.write(CSV_HEADER)
 
-            sb.append(sample.utcMs).append(',')
-                .append(sample.intervalMs).append(',')
-                .append(localTime).append(',')
-                .append(sample.trackName).append(',')
-                .append(sample.eventName).append(',')
-                .append(sample.gpsLat).append(',')
-                .append(sample.gpsLon).append(',')
-                .append(sample.closestCornerIndex).append(',')
-                .append(sample.distanceToClosestCornerM).append(',')
-                .append(sample.rawLatG).append(',')
-                .append(sample.rawLongG).append(',')
-                .append(sample.latG).append(',')
-                .append(sample.longG).append(',')
-                .append(sample.gSum).append(',')
-                .append(speedStr).append(',')
-                .append(sample.cornerIndex).append(',')
-                .append(sample.cornerName).append(',')
-                .append(sample.visitNumber).append(',')
-                .append(apexStr)
-                .append('\n')
+                for (sample in gpsInterpolatedSamples) {
+                    val localTime = localTimeFormat.format(Date(sample.utcMs))
+                    val speedStr = sample.speedMps?.toString() ?: ""
+                    val apexStr = if (sample.isApexSample) "True" else ""
+
+                    // Note: We overwrite gpsLat/gpsLon in the exported copy only.
+                    // Note: We overwrite gpsLat/gpsLon in the exported copy only.
+                    writer.append(sample.utcMs.toString()).append(',')
+                    writer.append(sample.intervalMs.toString()).append(',')
+                    writer.append(localTime).append(',')
+                    writer.append(sample.trackName).append(',')
+                    writer.append(sample.eventName).append(',')
+                    writer.append(sample.gpsLat.toString()).append(',')
+                    writer.append(sample.gpsLon.toString()).append(',')
+                    writer.append(sample.closestCornerIndex.toString()).append(',')
+                    writer.append(sample.distanceToClosestCornerM.toString()).append(',')
+                    writer.append(sample.rawLatG.toString()).append(',')
+                    writer.append(sample.rawLongG.toString()).append(',')
+                    writer.append(sample.latG.toString()).append(',')
+                    writer.append(sample.longG.toString()).append(',')
+                    writer.append(sample.gSum.toString()).append(',')
+                    writer.append(speedStr).append(',')
+                    writer.append(sample.cornerIndex.toString()).append(',')
+                    writer.append(sample.cornerName).append(',')
+                    writer.append(sample.visitNumber.toString()).append(',')
+                    writer.append(apexStr)
+                    writer.newLine()
+
+                }
+            }
+
+            debugLogToFile(
+                context,
+                "EXPORT share CSV created (rows=${gpsInterpolatedSamples.size}, level=$smoothingLevel, gpsInterp=true)"
+            )
+            return outFile
+        } catch (e: Exception) {
+            Log.e(TAG, "createSmoothedCsvForSharing: failed writing ${outFile.name}", e)
+            return null
         }
-
-        outFile.writeText(sb.toString())
-        debugLogToFile(context, "EXPORT share CSV created (smoothed=${smoothedSamples.size}, level=$smoothingLevel)")
-        return outFile
     }
 
     fun shareEventCsv(context: Context, file: File) {
@@ -651,7 +658,6 @@ object EventStorage {
                 sampleTimeMs = s.utcMs
             )
             val gSum = sqrt(smoothed.latG * smoothed.latG + smoothed.longG * smoothed.longG)
-
             s.copy(latG = smoothed.latG, longG = smoothed.longG, gSum = gSum)
         }
     }
@@ -722,6 +728,105 @@ object EventStorage {
             val s = newSpeeds[idx]
             if (s != null) sample.copy(speedMps = s) else sample
         }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // GPS interpolation (export-only)
+    // ---------------------------------------------------------------------------------------------
+
+    // Local "flat earth" conversion constants (good for race-track-sized regions)
+    private const val METERS_PER_DEG_LAT = 111_320.0
+
+    private data class ENMeters(val eastM: Double, val northM: Double)
+
+    /**
+     * Convert lat/lon degrees into local East/North meters relative to an origin (lat0, lon0).
+     */
+    private fun latLonToENMeters(lat: Double, lon: Double, lat0: Double, lon0: Double): ENMeters {
+        val lat0Rad = Math.toRadians(lat0)
+        val metersPerDegLon = METERS_PER_DEG_LAT * kotlin.math.cos(lat0Rad)
+
+        val east = (lon - lon0) * metersPerDegLon
+        val north = (lat - lat0) * METERS_PER_DEG_LAT
+        return ENMeters(eastM = east, northM = north)
+    }
+
+    /**
+     * Convert local East/North meters back into lat/lon degrees using the same origin.
+     */
+    private fun enMetersToLatLon(
+        eastM: Double,
+        northM: Double,
+        lat0: Double,
+        lon0: Double
+    ): Pair<Double, Double> {
+        val lat0Rad = Math.toRadians(lat0)
+        val metersPerDegLon = METERS_PER_DEG_LAT * kotlin.math.cos(lat0Rad)
+
+        val lat = lat0 + (northM / METERS_PER_DEG_LAT)
+        val lon = lon0 + (eastM / metersPerDegLon)
+        return lat to lon
+    }
+
+    /**
+     * Interpolate gpsLat/gpsLon between anchor GPS fixes (export-only).
+     *
+     * Anchor definition: a row where (gpsLat,gpsLon) changes relative to the previous row.
+     * This matches your current CSV behavior where many accel samples reuse the last GPS fix.
+     */
+    private fun interpolateGpsInSamples(samples: List<EventSample>): List<EventSample> {
+        if (samples.isEmpty()) return samples
+        if (samples.size < 3) return samples
+
+        // We’ll build an output list of copies to avoid mutating the input list.
+        val out = samples.toMutableList()
+
+        var anchorStart = 0
+        var lastLat = samples[0].gpsLat
+        var lastLon = samples[0].gpsLon
+
+        // Walk forward looking for anchor changes
+        for (i in 1 until samples.size) {
+            val lat = samples[i].gpsLat
+            val lon = samples[i].gpsLon
+
+            val isAnchorChange = (lat != lastLat) || (lon != lastLon)
+            if (!isAnchorChange) continue
+
+            // We have an anchor pair: anchorStart .. i
+            val start = samples[anchorStart]
+            val end = samples[i]
+
+            val t0 = start.utcMs.toDouble()
+            val t1 = end.utcMs.toDouble()
+            if (t1 > t0) {
+                val originLat = start.gpsLat
+                val originLon = start.gpsLon
+                val startEN = latLonToENMeters(start.gpsLat, start.gpsLon, originLat, originLon)
+                val endEN = latLonToENMeters(end.gpsLat, end.gpsLon, originLat, originLon)
+
+                // Fill all rows in the segment (including endpoints)
+                for (k in anchorStart..i) {
+                    val tk = samples[k].utcMs.toDouble()
+                    val u = ((tk - t0) / (t1 - t0)).coerceIn(0.0, 1.0)
+
+                    val east = startEN.eastM + u * (endEN.eastM - startEN.eastM)
+                    val north = startEN.northM + u * (endEN.northM - startEN.northM)
+
+                    val (interpLat, interpLon) = enMetersToLatLon(east, north, originLat, originLon)
+                    out[k] = out[k].copy(gpsLat = interpLat, gpsLon = interpLon)
+                }
+            }
+
+            // Move to next segment
+            anchorStart = i
+            lastLat = lat
+            lastLon = lon
+        }
+
+        // Trailing rows after last anchor: keep last known GPS position (no look-ahead)
+        // (They are already set to that value in the recorded data.)
+        return out
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -866,55 +971,18 @@ object EventStorage {
      */
     fun loadEvent(context: Context, eventId: Long): List<EventSample> = emptyList()
 
+    /**
+     * Debug log helper (best-effort; never crashes).
+     */
     private fun debugLogToFile(context: Context, message: String) {
         try {
             val dir = context.getExternalFilesDir("debug_logs")
             if (dir != null && (dir.exists() || dir.mkdirs())) {
-                val file = File(dir, "speed_interp_debug.log")
+                val file = File(dir, "export_debug.log")
                 file.appendText("${System.currentTimeMillis()}, $message\n")
             }
         } catch (_: Exception) {
             // swallow
         }
-    }
-}
-
-/**
- * Simple helper class; currently unused by EventStorage.
- *
- * Left here in case you want to reuse this approach later.
- */
-class SpeedInterpolator {
-
-    private var lastGpsUtc: Long? = null
-    private var lastGpsSpeed: Double? = null
-
-    private var nextGpsUtc: Long? = null
-    private var nextGpsSpeed: Double? = null
-
-    fun registerGpsFix(utc: Long, speed: Double) {
-        // Move next → last
-        if (nextGpsUtc != null) {
-            lastGpsUtc = nextGpsUtc
-            lastGpsSpeed = nextGpsSpeed
-        }
-        nextGpsUtc = utc
-        nextGpsSpeed = speed
-    }
-
-    fun interpolateSpeed(sampleUtc: Long): Double? {
-        val t0 = lastGpsUtc
-        val v0 = lastGpsSpeed
-        val t1 = nextGpsUtc
-        val v1 = nextGpsSpeed
-
-        if (t0 == null || v0 == null || t1 == null || v1 == null) {
-            // Not enough anchors to interpolate test
-            return v1
-        }
-        if (t1 == t0) return v1
-
-        val u = (sampleUtc - t0).toDouble() / (t1 - t0).toDouble()
-        return v0 + u * (v1 - v0)
     }
 }
