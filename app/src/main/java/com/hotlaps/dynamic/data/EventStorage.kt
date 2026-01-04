@@ -1,65 +1,121 @@
 package com.hotlaps.dynamic.data
 
 import android.content.Context
+import android.content.Intent
 import android.util.Log
+import androidx.core.content.FileProvider
 import com.hotlaps.dynamic.model.Event
 import com.hotlaps.dynamic.model.EventSample
+import com.hotlaps.dynamic.util.GForceSmoother
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
-import androidx.core.content.FileProvider
-import android.content.Intent
-import com.hotlaps.dynamic.util.GForceSmoother
 import kotlin.math.sqrt
 
-
 /**
- * Responsible for saving and loading Event sessions.
+ * EventStorage
  *
- * This mirrors TrackStorage:
- *    /Android/data/com.hotlaps.dynamic/files/events/
+ * Responsible for writing/reading telemetry "event" CSV files.
+ *
+ * Key design rules (hard-won 🙂):
+ *  1) The *event CSV* is the source of truth for analysis inside the app.
+ *  2) "Share/export" must NEVER overwrite the event CSV. It should create a separate copy (cache file).
+ *  3) Parsing should be tolerant of Apex encodings ("True", "1", "yes", etc.) so older files still load.
+ *
+ * Events live under the app-private external files directory:
+ *   /Android/data/<package>/files/events/
  */
 object EventStorage {
 
     private const val TAG = "EventStorage"
-    // speedInterpolator is no longer used in appendSample, but we can keep
-    // the class around if we want to reuse it later.
-    private val speedInterpolator = SpeedInterpolator()
 
-    // Single lock for all event CSV file access.
-    // We only write one event at a time, so a global lock is fine.
+    /**
+     * Single lock for all event CSV file access.
+     * We only write one event at a time, so a global lock is fine.
+     */
     private val fileLock = Any()
 
-    // -----------------------
-    // Directory management
-    // -----------------------
+    // ---------------------------------------------------------------------------------------------
+    // CSV schema (single place to keep header + column indices consistent)
+    // ---------------------------------------------------------------------------------------------
+
+    // NOTE: If you add/reorder columns, update BOTH the header and indices below.
+    private const val CSV_HEADER =
+        "timestampMs,deltaMs,localTime,trackName,eventName," +
+                "gpsLat,gpsLon,closestCornerIndex,distanceToClosestCornerM," +
+                "rawLatG,rawLongG,latG,longG,gSum," +
+                "speed," +
+                "cornerIndex,cornerName,visitNumber,Apex\n"
+
+    // Column indices for parsing (must match CSV_HEADER above).
+    private const val IDX_TIMESTAMP_MS = 0
+    private const val IDX_DELTA_MS = 1
+    // IDX_LOCAL_TIME = 2 (ignored)
+    private const val IDX_TRACK_NAME = 3
+    private const val IDX_EVENT_NAME = 4
+    private const val IDX_GPS_LAT = 5
+    private const val IDX_GPS_LON = 6
+    private const val IDX_CLOSEST_CORNER_INDEX = 7
+    private const val IDX_DIST_TO_CLOSEST_CORNER_M = 8
+    private const val IDX_RAW_LAT_G = 9
+    private const val IDX_RAW_LONG_G = 10
+    private const val IDX_LAT_G = 11
+    private const val IDX_LONG_G = 12
+    private const val IDX_GSUM = 13
+    private const val IDX_SPEED = 14
+    private const val IDX_CORNER_INDEX = 15
+    private const val IDX_CORNER_NAME = 16
+    private const val IDX_VISIT_NUMBER = 17
+    private const val IDX_APEX = 18
+
+    private const val EXPECTED_COLS = 19
+
+    // ---------------------------------------------------------------------------------------------
+    // Directory helpers
+    // ---------------------------------------------------------------------------------------------
+
     private fun eventsDir(context: Context): File? =
         FileHelper.eventsDir(context)
 
-    // -----------------------
+    // ---------------------------------------------------------------------------------------------
     // Event creation
-    // -----------------------
-    fun createEvent(context: Context, name: String, trackId: Long, trackName: String): Event {
-        val id = System.currentTimeMillis()  // simple unique ID
-        val now = System.currentTimeMillis()
+    // ---------------------------------------------------------------------------------------------
 
+    /**
+     * Creates an Event model. (Does not write any files.)
+     * Note: `context` currently unused but kept for signature stability.
+     */
+    fun createEvent(context: Context, name: String, trackId: Long, trackName: String): Event {
+        val id = System.currentTimeMillis()
+        val now = System.currentTimeMillis()
         return Event(
             id = id,
             name = name,
             trackId = trackId,
             trackName = trackName,
-            startTime = now,          // event start time
-            displayName = name,       // human-friendly name (same as name for now)
-            createdUtcMs = now,       // when event began
+            startTime = now,
+            displayName = name,
+            createdUtcMs = now,
             notes = null
         )
     }
 
-    // -----------------------
-    // Append a sample (CSV per event)
-    // -----------------------
+    // ---------------------------------------------------------------------------------------------
+    // CSV append (recording)
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Append one telemetry sample to the per-event CSV.
+     *
+     * IMPORTANT:
+     *  - This is called during recording.
+     *  - Keep this fast and simple.
+     *  - We do not do interpolation here; we store speed as-is. (Interpolation can be done later.)
+     *
+     * Note: `cornerTriggerRadiusM` currently unused but kept for signature stability.
+     */
     fun appendSample(
         context: Context,
         sample: EventSample,
@@ -67,69 +123,43 @@ object EventStorage {
     ) {
         synchronized(fileLock) {
             val dir = eventsDir(context) ?: return
-
-            // One CSV file per event:
-            //   event_<eventId>.csv
             val file = File(dir, "event_${sample.eventId}.csv")
             val isNewFile = !file.exists()
 
             try {
-                // If it's a brand-new file, write a header row first.
                 if (isNewFile) {
-                    file.appendText(
-                        "timestampMs,deltaMs,localTime,trackName,eventName," +
-                                "gpsLat,gpsLon,closestCornerIndex,distanceToClosestCornerM," +
-                                "rawLatG,rawLongG,latG,longG,gSum," +
-                                "speed," +
-                                "cornerIndex,cornerName,visitNumber,Apex\n"
-                    )
+                    file.appendText(CSV_HEADER)
                 }
 
                 val localTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
                     .apply { timeZone = TimeZone.getDefault() }
                     .format(Date(sample.utcMs))
 
-                // For now, just write whatever speed was present in the sample.
-                // (Offline interpolation pass will refine this later.)
                 val speedStr = sample.speedMps?.toString() ?: ""
 
-                // Write one CSV line for this sample
+                // Apex column: "True" only for apex samples, blank otherwise
+                val apexStr = if (sample.isApexSample) "True" else ""
+
                 val line = buildString {
-                    // Time: timestampMs (UTC), deltaMs (interval)
-                    append(sample.utcMs); append(',')       // timestampMs
-                    append(sample.intervalMs); append(',')  // deltaMs
-
-                    // Local time (human-readable)
+                    append(sample.utcMs); append(',')
+                    append(sample.intervalMs); append(',')
                     append(localTime); append(',')
-
-                    // Event metadata
                     append(sample.trackName); append(',')
                     append(sample.eventName); append(',')
-
-                    // Position / corner proximity
                     append(sample.gpsLat); append(',')
                     append(sample.gpsLon); append(',')
                     append(sample.closestCornerIndex); append(',')
                     append(sample.distanceToClosestCornerM); append(',')
-
-                    // Raw G then smoothed G
                     append(sample.rawLatG); append(',')
                     append(sample.rawLongG); append(',')
                     append(sample.latG); append(',')
                     append(sample.longG); append(',')
                     append(sample.gSum); append(',')
-
-                    // Speed
                     append(speedStr); append(',')
-
-                    // Corner / apex metadata (apex-only, usually)
                     append(sample.cornerIndex); append(',')
                     append(sample.cornerName); append(',')
                     append(sample.visitNumber); append(',')
-
-                    // Apex column: "True" only on apex sample, blank otherwise
-                    append(if (sample.isApexSample) "True" else "")
-
+                    append(apexStr)
                     append('\n')
                 }
 
@@ -140,42 +170,50 @@ object EventStorage {
         }
     }
 
-    // -----------------------
-    // (Future) Load an event file
-    // -----------------------
-    fun loadEvent(context: Context, eventId: Long): List<EventSample> {
-        // Implementation comes later
-        return emptyList()
+    // ---------------------------------------------------------------------------------------------
+    // Listing / housekeeping
+    // ---------------------------------------------------------------------------------------------
+
+    fun listEventFiles(context: Context): List<File> {
+        val dir = eventsDir(context) ?: return emptyList()
+        val files = dir.listFiles() ?: return emptyList()
+
+        return files
+            .filter { it.isFile && it.name.endsWith(".csv", ignoreCase = true) }
+            .sortedBy { it.name.lowercase(Locale.getDefault()) }
     }
 
-    // -----------------------
-    // Housekeeping helpers
-    // -----------------------
+    fun deleteEvents(context: Context, filesToDelete: List<File>): Int {
+        val dir = eventsDir(context) ?: return 0
+        var deleted = 0
 
-    /**
-     * Delete all files in the events directory.
-     *
-     * @return number of files successfully deleted.
-     */
+        for (f in filesToDelete) {
+            // Safety: only delete files in our eventsDir
+            if (f.parentFile == dir && f.isFile && f.delete()) {
+                deleted++
+            }
+        }
+
+        Log.d(TAG, "deleteEvents: deleted $deleted of ${filesToDelete.size} requested")
+        return deleted
+    }
+
     fun deleteAllEvents(context: Context): Int {
         val dir = eventsDir(context) ?: return 0
         val files = dir.listFiles() ?: return 0
 
         var deleted = 0
         for (f in files) {
-            if (f.isFile && f.delete()) {
-                deleted++
-            }
+            if (f.isFile && f.delete()) deleted++
         }
+
         Log.d(TAG, "deleteAllEvents: deleted $deleted file(s) from ${dir.absolutePath}")
         return deleted
     }
 
     /**
-     * Copies all event files from the app-private directory into:
-     *    /Download/HotLapsDynamic/events/
-     *
-     * Returns the number of files successfully copied.
+     * Copies all event files from app-private events dir into:
+     *   /Download/HotLapsDynamic/events/
      */
     fun exportAllEventsToPublicDownloads(context: Context): Int {
         val srcDir = eventsDir(context) ?: return 0
@@ -186,22 +224,22 @@ object EventStorage {
 
         for (src in files) {
             if (!src.isFile) continue
-
-            val dst = java.io.File(dstDir, src.name)
+            val dst = File(dstDir, src.name)
             try {
                 src.copyTo(dst, overwrite = true)
                 copied++
             } catch (e: Exception) {
-                Log.e(TAG, "exportAllEvents: failed copying ${src.name}", e)
+                Log.e(TAG, "exportAllEventsToPublicDownloads: failed copying ${src.name}", e)
             }
         }
 
-        Log.d(
-            TAG,
-            "exportAllEvents: copied $copied file(s) to ${dstDir.absolutePath}"
-        )
+        Log.d(TAG, "exportAllEventsToPublicDownloads: copied $copied file(s) to ${dstDir.absolutePath}")
         return copied
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // Editing existing event CSV
+    // ---------------------------------------------------------------------------------------------
 
     fun updateEventNameInCsv(context: Context, eventId: Long, newName: String) {
         val dir = eventsDir(context) ?: return
@@ -216,12 +254,11 @@ object EventStorage {
             if (lines.isEmpty()) return
 
             val header = lines[0]
-            val updatedLines = mutableListOf<String>()
+            val updatedLines = ArrayList<String>(lines.size)
             updatedLines.add(header)
 
-            // We know header is:
-            // timestampMs,deltaMs,localTime,trackName,eventName,...
-            val EVENT_NAME_INDEX = 4  // NOTE: index in our new header if needed
+            // Index 4 in our schema: eventName
+            val EVENT_NAME_INDEX = IDX_EVENT_NAME
 
             for (i in 1 until lines.size) {
                 val line = lines[i]
@@ -232,8 +269,7 @@ object EventStorage {
 
                 val parts = line.split(',')
                 if (parts.size <= EVENT_NAME_INDEX) {
-                    // malformed row, keep as-is
-                    updatedLines.add(line)
+                    updatedLines.add(line) // keep malformed row
                     continue
                 }
 
@@ -249,119 +285,6 @@ object EventStorage {
         }
     }
 
-    // listing files to see what events exist
-    fun listEventFiles(context: Context): List<File> {
-        val dir = eventsDir(context) ?: return emptyList()
-        val files = dir.listFiles() ?: return emptyList()
-
-        return files.filter { file ->
-            file.isFile && file.name.endsWith(".csv", ignoreCase = true)
-        }.sortedBy { it.name.lowercase(Locale.getDefault()) }
-    }
-
-    fun loadSamplesFromCsv(file: File): List<EventSample> {
-        val result = mutableListOf<EventSample>()
-
-        try {
-            val lines = file.readLines()
-            if (lines.isEmpty()) return emptyList()
-
-            // First line is the header
-            for (i in 1 until lines.size) {
-                val line = lines[i]
-                if (line.isBlank()) continue
-
-                val parts = line.split(',')
-                // We expect the full 19-column format written by appendSample()
-                if (parts.size < 19) continue
-
-                // Column indices must match the header:
-                // 0 timestampMs (utcMs)
-                // 1 deltaMs (intervalMs)
-                // 2 localTime (ignored here)
-                // 3 trackName
-                // 4 eventName
-                // 5 gpsLat
-                // 6 gpsLon
-                // 7 closestCornerIndex
-                // 8 distanceToClosestCornerM
-                // 9 rawLatG
-                // 10 rawLongG
-                // 11 latG
-                // 12 longG
-                // 13 gSum
-                // 14 speed
-                // 15 cornerIndex
-                // 16 cornerName
-                // 17 visitNumber
-                // 18 Apex ("True" or "")
-
-                val utcMs = parts[0].toLongOrNull() ?: continue
-                val intervalMs = parts[1].toLongOrNull() ?: 0L
-                // parts[2] = localTime (ignored)
-
-                val trackName = parts[3]
-                val eventName = parts[4]
-
-                val gpsLat = parts[5].toDoubleOrNull() ?: 0.0
-                val gpsLon = parts[6].toDoubleOrNull() ?: 0.0
-
-                val closestCornerIndex = parts[7].toIntOrNull() ?: 0
-                val distanceToClosestCornerM = parts[8].toDoubleOrNull() ?: 0.0
-
-                val rawLatG = parts[9].toFloatOrNull() ?: 0f
-                val rawLongG = parts[10].toFloatOrNull() ?: 0f
-                val latG = parts[11].toFloatOrNull() ?: 0f
-                val longG = parts[12].toFloatOrNull() ?: 0f
-                val gSum = parts[13].toFloatOrNull() ?: 0f
-
-                val speedMps = parts[14].toDoubleOrNull()
-
-                val cornerIdx = parts[15].toIntOrNull() ?: 0
-                val cornerName = parts[16]
-                val visitNum = parts[17].toIntOrNull() ?: 0
-
-                val apexToken = parts[18].trim()
-                val isApexSample =
-                    apexToken.equals("true", ignoreCase = true) ||
-                            apexToken.equals("1") ||
-                            apexToken.equals("yes", ignoreCase = true) ||
-                            apexToken.equals("y", ignoreCase = true)
-
-
-                val sample = EventSample(
-                    eventId = 0L,   // arbitrary when loading loose CSV
-                    cornerIndex = cornerIdx,
-                    visitNumber = visitNum,
-                    cornerName = cornerName,
-                    intervalMs = intervalMs,
-                    utcMs = utcMs,
-                    longG = longG,
-                    latG = latG,
-                    zG = 0f,  // zG is no longer stored in CSV; set to 0f or drop from model later
-                    gSum = gSum,
-                    trackName = trackName,
-                    eventName = eventName,
-                    gpsLat = gpsLat,
-                    gpsLon = gpsLon,
-                    speedMps = speedMps,
-                    closestCornerIndex = closestCornerIndex,
-                    distanceToClosestCornerM = distanceToClosestCornerM,
-                    rawLatG = rawLatG,
-                    rawLongG = rawLongG,
-                    isApexSample = isApexSample
-                )
-
-                result.add(sample)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "loadSamplesFromCsv: error reading ${file.name}", e)
-            return emptyList()
-        }
-
-        return result
-    }
-
     fun renameEventFile(context: Context, eventId: Long, newName: String) {
         val dir = eventsDir(context) ?: return
         val oldFile = File(dir, "event_${eventId}.csv")
@@ -371,19 +294,18 @@ object EventStorage {
             return
         }
 
-        // 1) Sanitize the user-entered name for filesystem safety
+        // Sanitize the name for filesystem safety
         val safeBase = newName
             .replace("[^A-Za-z0-9 _-]".toRegex(), "_")
             .replace(" +".toRegex(), " ")
             .trim()
             .ifBlank { "Event" }
 
-        // 2) Start with "<safeBase>.csv"
+        // Attempt "<safeBase>.csv", then "<safeBase> (2).csv", etc.
         var targetName = "$safeBase.csv"
         var newFile = File(dir, targetName)
-
-        // 3) If a file with that name already exists, add "(2)", "(3)", etc.
         var suffix = 2
+
         while (newFile.exists()) {
             targetName = "$safeBase ($suffix).csv"
             newFile = File(dir, targetName)
@@ -402,379 +324,10 @@ object EventStorage {
         }
     }
 
-
-    fun deleteEvents(context: Context, filesToDelete: List<File>): Int {
-        val dir = eventsDir(context) ?: return 0
-        var deleted = 0
-
-        for (f in filesToDelete) {
-            // Safety: only delete files in our eventsDir
-            if (f.parentFile == dir && f.isFile && f.delete()) {
-                deleted++
-            }
-        }
-
-        Log.d(TAG, "deleteEvents: deleted $deleted of ${filesToDelete.size} requested")
-        return deleted
-    }
-
-
-    fun createSmoothedCsvForSharing(
-        context: Context,
-        sourceFile: File,
-        samples: List<EventSample>,
-        smoothingLevel: SmoothingLevel
-    ): File? {
-        if (samples.isEmpty()) return null
-
-        // Put temp files in app cache
-        val shareDir = File(context.cacheDir, "event_share")
-        if (!shareDir.exists()) {
-            shareDir.mkdirs()
-        }
-
-        val baseName = sourceFile.nameWithoutExtension
-        val suffix = when (smoothingLevel) {
-            SmoothingLevel.Off -> "raw"
-            SmoothingLevel.Low -> "low"
-            SmoothingLevel.Medium -> "medium"
-            SmoothingLevel.Heavy -> "heavy"
-        }
-
-        val outFile = File(shareDir, "${baseName}_smooth_$suffix.csv")
-
-        // Clear any existing file with this name
-        if (outFile.exists()) {
-            outFile.delete()
-        }
-
-        // Same header as appendSample()
-        outFile.appendText(
-            "timestampMs,deltaMs,localTime,trackName,eventName," +
-                    "gpsLat,gpsLon,closestCornerIndex,distanceToClosestCornerM," +
-                    "rawLatG,rawLongG,latG,longG,gSum," +
-                    "speed," +
-                    "cornerIndex,cornerName,visitNumber,Apex\n"
-        )
-
-        val localTimeFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).apply {
-            timeZone = TimeZone.getDefault()
-        }
-
-        for (sample in samples) {
-            val localTime = localTimeFormat.format(Date(sample.utcMs))
-            val speedStr = sample.speedMps?.toString() ?: ""
-
-            val line = buildString {
-                // Time: timestampMs (UTC), deltaMs (interval)
-                append(sample.utcMs); append(',')
-                append(sample.intervalMs); append(',')
-
-                // Local time (human-readable)
-                append(localTime); append(',')
-
-                // Event metadata
-                append(sample.trackName); append(',')
-                append(sample.eventName); append(',')
-
-                // GPS + nearest corner info
-                append(sample.gpsLat); append(',')
-                append(sample.gpsLon); append(',')
-                append(sample.closestCornerIndex); append(',')
-                append(sample.distanceToClosestCornerM); append(',')
-
-                // Raw + smoothed G values
-                append(sample.rawLatG); append(',')
-                append(sample.rawLongG); append(',')
-                append(sample.latG); append(',')
-                append(sample.longG); append(',')
-                append(sample.gSum); append(',')
-
-                // Speed
-                append(speedStr); append(',')
-
-                // Corner visit info
-                append(sample.cornerIndex); append(',')
-                append(sample.cornerName); append(',')
-                append(sample.visitNumber); append(',')
-
-                // Apex flag
-                append(if (sample.isApexSample) "1" else "0")
-                append('\n')
-            }
-
-            outFile.appendText(line)
-        }
-
-        return outFile
-    }
-
-    private fun applySmoothingForExport(
-        samples: List<EventSample>,
-        level: SmoothingLevel
-    ): List<EventSample> {
-        if (samples.isEmpty()) return samples
-
-        fun pickRaw(sample: EventSample): Pair<Float, Float> {
-            val hasRaw = (sample.rawLatG != 0f || sample.rawLongG != 0f)
-            return if (hasRaw) {
-                sample.rawLatG to sample.rawLongG
-            } else {
-                sample.latG to sample.longG
-            }
-        }
-
-        // Off = show raw values (no smoothing)
-        if (level == SmoothingLevel.Off) {
-            return samples.map { s ->
-                val (rawLat, rawLong) = pickRaw(s)
-                val gSum = sqrt(rawLat * rawLat + rawLong * rawLong)
-                s.copy(
-                    latG = rawLat,
-                    longG = rawLong,
-                    gSum = gSum
-                )
-            }
-        }
-
-        val tauMsOrNull: Float? = when (level) {
-            SmoothingLevel.Off -> null
-            else -> level.tauMs.coerceAtLeast(1).toFloat()
-        }
-
-        val smoother = GForceSmoother(
-            tauMs = tauMsOrNull,
-            maWindowSize = level.windowSize
-        ).also { it.reset() }
-
-        return samples.map { s ->
-            val (rawLat, rawLong) = pickRaw(s)
-            val smoothed = smoother.addSample(
-                rawLatG = rawLat,
-                rawLongG = rawLong,
-                sampleTimeMs = s.utcMs
-            )
-            val gSum = sqrt(smoothed.latG * smoothed.latG + smoothed.longG * smoothed.longG)
-
-            s.copy(
-                latG = smoothed.latG,
-                longG = smoothed.longG,
-                gSum = gSum
-            )
-        }
-    }
-
-    private fun interpolateSpeedsInSamples(
-        context: Context,
-        samples: List<EventSample>
-    ): List<EventSample> {
-
-        if (samples.isEmpty()) return samples
-
-        val timestamps = samples.map { it.utcMs }
-        val speeds = samples.map { it.speedMps }
-
-        fun approxEqual(a: Double?, b: Double?, eps: Double = 1e-9): Boolean {
-            if (a == null && b == null) return true
-            if (a == null || b == null) return false
-            return kotlin.math.abs(a - b) <= eps
-        }
-
-        val anchorIndices = mutableListOf<Int>()
-        var lastAnchorIndex: Int? = null
-        var lastAnchorSpeed: Double? = null
-
-        for (i in samples.indices) {
-            val s = speeds[i] ?: continue
-            if (lastAnchorIndex == null) {
-                lastAnchorIndex = i
-                lastAnchorSpeed = s
-                anchorIndices.add(i)
-            } else if (!approxEqual(s, lastAnchorSpeed)) {
-                lastAnchorIndex = i
-                lastAnchorSpeed = s
-                anchorIndices.add(i)
-            }
-        }
-
-
-        val lastIndexWithSpeed = (samples.indices).lastOrNull { speeds[it] != null }
-        if (lastIndexWithSpeed != null &&
-            !anchorIndices.contains(lastIndexWithSpeed)
-        ) {
-            anchorIndices.add(lastIndexWithSpeed)
-        }
-
-        val newSpeeds = speeds.toMutableList()
-
-        for (a in 0 until anchorIndices.size - 1) {
-            val i0 = anchorIndices[a]
-            val i1 = anchorIndices[a + 1]
-
-            val v0 = speeds[i0]
-            val v1 = speeds[i1]
-            val t0 = timestamps[i0].toDouble()
-            val t1 = timestamps[i1].toDouble()
-
-
-            if (v0 == null || v1 == null) continue
-            if (t1 <= t0) continue
-
-            val denom = t1 - t0
-            for (i in i0..i1) {
-                val ti = timestamps[i].toDouble()
-                val u = ((ti - t0) / denom).coerceIn(0.0, 1.0)
-                newSpeeds[i] = v0 + (v1 - v0) * u
-            }
-        }
-
-        return samples.mapIndexed { idx, sample ->
-            val s = newSpeeds[idx]
-            if (s != null) sample.copy(speedMps = s) else sample
-        }
-    }
-
-    private fun debugLogToFile(context: Context, message: String) {
-        try {
-            val dir = context.getExternalFilesDir("debug_logs")
-            if (dir != null && (dir.exists() || dir.mkdirs())) {
-                val file = File(dir, "speed_interp_debug.log")
-                file.appendText("${System.currentTimeMillis()}, $message\n")
-            }
-        } catch (_: Exception) {}
-    }
-
-
-    fun createSmoothedCsvForSharing(
-        context: Context,
-        file: File,
-        smoothingLevel: SmoothingLevel
-    ): File? {
-        // 1) Load original samples from the event CSV
-        val samples = loadSamplesFromCsv(file)
-        if (samples.isEmpty()) return null
-
-        // 2) Interpolate speeds in-memory before smoothing Gs
-        val withInterpolatedSpeeds = interpolateSpeedsInSamples(context, samples)
-
-        // 3) Apply the desired smoothing, using rawLatG/rawLongG where available
-        val smoothedSamples = applySmoothingForExport(withInterpolatedSpeeds, smoothingLevel)
-        if (smoothedSamples.isEmpty()) return null
-
-        // 4) Write to a *separate* share file in cache (never overwrite the event file)
-        val shareDir = File(context.cacheDir, "event_share")
-        if (!shareDir.exists()) shareDir.mkdirs()
-
-        val baseName = file.nameWithoutExtension
-        val suffix = when (smoothingLevel) {
-            SmoothingLevel.Off -> "raw"
-            SmoothingLevel.Low -> "low"
-            SmoothingLevel.Medium -> "medium"
-            SmoothingLevel.Heavy -> "heavy"
-        }
-
-        val outFile = File(shareDir, "${baseName}_$suffix.csv")
-        if (outFile.exists()) outFile.delete()
-
-
-        // 5) Build entire CSV in memory, then write once
-        val sb = StringBuilder()
-
-        // Same header as appendSample()
-        sb.append(
-            "timestampMs,deltaMs,localTime,trackName,eventName," +
-                    "gpsLat,gpsLon,closestCornerIndex,distanceToClosestCornerM," +
-                    "rawLatG,rawLongG,latG,longG,gSum," +
-                    "speed," +
-                    "cornerIndex,cornerName,visitNumber,Apex\n"
-        )
-
-        val localTimeFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).apply {
-            timeZone = TimeZone.getDefault()
-        }
-
-        for (sample in smoothedSamples) {
-            val localTime = localTimeFormat.format(Date(sample.utcMs))
-            val speedStr = sample.speedMps?.toString() ?: ""
-
-            // Build a single CSV line for this sample
-            sb.append(sample.utcMs).append(',')
-                .append(sample.intervalMs).append(',')
-                .append(localTime).append(',')
-                .append(sample.trackName).append(',')
-                .append(sample.eventName).append(',')
-                .append(sample.gpsLat).append(',')
-                .append(sample.gpsLon).append(',')
-                .append(sample.closestCornerIndex).append(',')
-                .append(sample.distanceToClosestCornerM).append(',')
-                .append(sample.rawLatG).append(',')
-                .append(sample.rawLongG).append(',')
-                .append(sample.latG).append(',')
-                .append(sample.longG).append(',')
-                .append(sample.gSum).append(',')
-                .append(speedStr).append(',')
-                .append(sample.cornerIndex).append(',')
-                .append(sample.cornerName).append(',')
-                .append(sample.visitNumber).append(',')
-                .append(if (sample.isApexSample) "True" else "")
-                .append('\n')
-        }
-
-        // Single write instead of N appends
-        outFile.writeText(sb.toString())
-
-        debugLogToFile(context, "EXPORT using interpolated speeds (smoothed=${smoothedSamples.size})")
-
-        return outFile
-    }
-
-
-
-
-
-    fun shareEventCsv(context: Context, file: File) {
-        val uri = FileProvider.getUriForFile(
-            context,
-            context.packageName + ".fileprovider",
-            file
-        )
-
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "text/csv"
-            putExtra(Intent.EXTRA_STREAM, uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-
-        context.startActivity(
-            Intent.createChooser(intent, "Share CSV")
-        )
-    }
-
-    fun shareMultipleEventCsv(context: Context, files: List<File>) {
-        if (files.isEmpty()) return
-
-        // Turn files into URIs using the same FileProvider config
-        val uris = ArrayList<android.net.Uri>()
-        files.forEach { file ->
-            val uri = FileProvider.getUriForFile(
-                context,
-                context.packageName + ".fileprovider",
-                file
-            )
-            uris.add(uri)
-        }
-
-        val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
-            type = "text/csv"
-            putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-
-        context.startActivity(
-            Intent.createChooser(intent, "Share CSV files")
-        )
-    }
-
+    /**
+     * Tags a single "best matching" row as the apex sample for a given corner visit.
+     * Writes cornerIndex/cornerName/visitNumber, and sets Apex column to "True".
+     */
     fun tagApexSampleInCsv(
         context: Context,
         eventId: Long,
@@ -794,43 +347,20 @@ object EventStorage {
             val lines = file.readLines()
             if (lines.size <= 1) return
 
-            val dataLines = lines.toMutableList()
+            val dataLines = lines.toMutableList() // includes header at index 0
 
             var bestLineIndex = -1
             var bestError = Long.MAX_VALUE
 
-            // CSV layout (19 columns):
-            // 0  timestampMs (utcMs)
-            // 1  deltaMs
-            // 2  localTime
-            // 3  trackName
-            // 4  eventName
-            // 5  gpsLat
-            // 6  gpsLon
-            // 7  closestCornerIndex
-            // 8  distanceToClosestCornerM
-            // 9  rawLatG
-            // 10 rawLongG
-            // 11 latG
-            // 12 longG
-            // 13 gSum
-            // 14 speed
-            // 15 cornerIndex
-            // 16 cornerName
-            // 17 visitNumber
-            // 18 Apex ("True" or "")
-
-            // Remember: line 0 is header, data starts at 1
+            // Search for nearest timestamp row
             for (i in 1 until dataLines.size) {
                 val line = dataLines[i]
                 if (line.isBlank()) continue
 
                 val parts = line.split(',')
-                if (parts.size < 19) continue   // width check
+                if (parts.size < EXPECTED_COLS) continue
 
-                val utcStr = parts[0]           // timestampMs is column 0
-                val utcMs = utcStr.toLongOrNull() ?: continue
-
+                val utcMs = parts[IDX_TIMESTAMP_MS].toLongOrNull() ?: continue
                 val err = kotlin.math.abs(utcMs - apexUtcMs)
                 if (err < bestError) {
                     bestError = err
@@ -843,19 +373,16 @@ object EventStorage {
                 return
             }
 
-            // Update that one row
-            val originalParts = dataLines[bestLineIndex].split(',').toMutableList()
-            if (originalParts.size < 19) return
+            val parts = dataLines[bestLineIndex].split(',').toMutableList()
+            if (parts.size < EXPECTED_COLS) return
 
-            // Write the corner + visit + Apex flag into the columns
-            originalParts[15] = cornerIndex.toString()  // cornerIndex
-            originalParts[16] = cornerName              // cornerName
-            originalParts[17] = visitNumber.toString()  // visitNumber
-            originalParts[18] = "True"                  // Apex column
+            parts[IDX_CORNER_INDEX] = cornerIndex.toString()
+            parts[IDX_CORNER_NAME] = cornerName
+            parts[IDX_VISIT_NUMBER] = visitNumber.toString()
+            parts[IDX_APEX] = "True"
 
-            dataLines[bestLineIndex] = originalParts.joinToString(",")
+            dataLines[bestLineIndex] = parts.joinToString(",")
 
-            // Rewrite file (keep header + updated data)
             file.writeText(dataLines.joinToString("\n") + "\n")
 
             Log.d(
@@ -868,26 +395,344 @@ object EventStorage {
         }
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // CSV load (analysis)
+    // ---------------------------------------------------------------------------------------------
+
     /**
-     * Offline pass: recompute the `speed` column in an event CSV so that it is
-     * linearly interpolated between "anchor" speeds (rows where speed changes).
-     *
-     * This operates directly on the CSV file:
-     *   - reads all lines
-     *   - finds spans between speed changes
-     *   - rewrites the speed column (index 14) for each row in those spans
-     *
-     * Returns true on success, false on any error.
+     * Load samples from a CSV file. This is used by EventViewerScreen and export smoothing.
+     * We accept multiple Apex encodings for backwards compatibility:
+     *   - "True"/"true"
+     *   - "1"
+     *   - "yes"/"y"
+     *   - blank = false
      */
+    fun loadSamplesFromCsv(file: File): List<EventSample> {
+        val result = mutableListOf<EventSample>()
+
+        try {
+            val lines = file.readLines()
+            if (lines.isEmpty()) return emptyList()
+
+            for (i in 1 until lines.size) {
+                val line = lines[i]
+                if (line.isBlank()) continue
+
+                val parts = line.split(',')
+                if (parts.size < EXPECTED_COLS) continue
+
+                val utcMs = parts[IDX_TIMESTAMP_MS].toLongOrNull() ?: continue
+                val intervalMs = parts[IDX_DELTA_MS].toLongOrNull() ?: 0L
+
+                val trackName = parts[IDX_TRACK_NAME]
+                val eventName = parts[IDX_EVENT_NAME]
+
+                val gpsLat = parts[IDX_GPS_LAT].toDoubleOrNull() ?: 0.0
+                val gpsLon = parts[IDX_GPS_LON].toDoubleOrNull() ?: 0.0
+
+                val closestCornerIndex = parts[IDX_CLOSEST_CORNER_INDEX].toIntOrNull() ?: 0
+                val distanceToClosestCornerM = parts[IDX_DIST_TO_CLOSEST_CORNER_M].toDoubleOrNull() ?: 0.0
+
+                val rawLatG = parts[IDX_RAW_LAT_G].toFloatOrNull() ?: 0f
+                val rawLongG = parts[IDX_RAW_LONG_G].toFloatOrNull() ?: 0f
+                val latG = parts[IDX_LAT_G].toFloatOrNull() ?: 0f
+                val longG = parts[IDX_LONG_G].toFloatOrNull() ?: 0f
+                val gSum = parts[IDX_GSUM].toFloatOrNull() ?: 0f
+
+                val speedMps = parts[IDX_SPEED].toDoubleOrNull()
+
+                val cornerIdx = parts[IDX_CORNER_INDEX].toIntOrNull() ?: 0
+                val cornerName = parts[IDX_CORNER_NAME]
+                val visitNum = parts[IDX_VISIT_NUMBER].toIntOrNull() ?: 0
+
+                val apexToken = parts[IDX_APEX].trim()
+                val isApexSample =
+                    apexToken.equals("true", ignoreCase = true) ||
+                            apexToken == "1" ||
+                            apexToken.equals("yes", ignoreCase = true) ||
+                            apexToken.equals("y", ignoreCase = true)
+
+                result.add(
+                    EventSample(
+                        eventId = 0L, // arbitrary when loading loose CSV
+                        cornerIndex = cornerIdx,
+                        visitNumber = visitNum,
+                        cornerName = cornerName,
+                        intervalMs = intervalMs,
+                        utcMs = utcMs,
+                        longG = longG,
+                        latG = latG,
+                        zG = 0f, // not stored in CSV
+                        gSum = gSum,
+                        trackName = trackName,
+                        eventName = eventName,
+                        gpsLat = gpsLat,
+                        gpsLon = gpsLon,
+                        speedMps = speedMps,
+                        closestCornerIndex = closestCornerIndex,
+                        distanceToClosestCornerM = distanceToClosestCornerM,
+                        rawLatG = rawLatG,
+                        rawLongG = rawLongG,
+                        isApexSample = isApexSample
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "loadSamplesFromCsv: error reading ${file.name}", e)
+            return emptyList()
+        }
+
+        return result
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Share/export (creates a derived CSV in cache, never overwrites event file)
+    // ---------------------------------------------------------------------------------------------
+
     /**
-     * Offline pass: recompute the `speed` column in an event CSV so that it is
-     * linearly interpolated between GPS "anchor" points.
+     * Create a shareable CSV file derived from an existing event CSV:
+     *  1) Load samples from the event file
+     *  2) Interpolate speeds in-memory
+     *  3) Apply smoothing to G values (based on SmoothingLevel)
+     *  4) Write result to a temp file in cache/event_share/
      *
-     * We treat each change in (gpsLat,gpsLon) as an anchor. For each consecutive
-     * pair of anchors [i0, i1], we linearly interpolate speed for ALL rows in
-     * the inclusive range i0..i1 based on their timestamps.
+     * IMPORTANT: This function MUST NOT modify the original event CSV.
+     */
+    fun createSmoothedCsvForSharing(
+        context: Context,
+        file: File,
+        smoothingLevel: SmoothingLevel
+    ): File? {
+
+        // 1) Load original samples from the event CSV
+        val samples = loadSamplesFromCsv(file)
+        if (samples.isEmpty()) return null
+
+        // 2) Interpolate speeds in-memory before smoothing Gs
+        val withInterpolatedSpeeds = interpolateSpeedsInSamples(samples)
+
+        // 3) Apply desired smoothing
+        val smoothedSamples = applySmoothingForExport(withInterpolatedSpeeds, smoothingLevel)
+        if (smoothedSamples.isEmpty()) return null
+
+        // 4) Choose output directory (cache)
+        val shareDir = File(context.cacheDir, "event_share")
+        if (!shareDir.exists()) shareDir.mkdirs()
+
+        val baseName = file.nameWithoutExtension
+        val suffix = when (smoothingLevel) {
+            SmoothingLevel.Off -> "raw"
+            SmoothingLevel.Low -> "low"
+            SmoothingLevel.Medium -> "medium"
+            SmoothingLevel.Heavy -> "heavy"
+        }
+
+        val outFile = File(shareDir, "${baseName}_$suffix.csv")
+        if (outFile.exists()) outFile.delete()
+
+        // 5) Build CSV text in memory then write once
+        val sb = StringBuilder()
+        sb.append(CSV_HEADER)
+
+        val localTimeFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).apply {
+            timeZone = TimeZone.getDefault()
+        }
+
+        for (sample in smoothedSamples) {
+            val localTime = localTimeFormat.format(Date(sample.utcMs))
+            val speedStr = sample.speedMps?.toString() ?: ""
+            val apexStr = if (sample.isApexSample) "True" else ""
+
+            sb.append(sample.utcMs).append(',')
+                .append(sample.intervalMs).append(',')
+                .append(localTime).append(',')
+                .append(sample.trackName).append(',')
+                .append(sample.eventName).append(',')
+                .append(sample.gpsLat).append(',')
+                .append(sample.gpsLon).append(',')
+                .append(sample.closestCornerIndex).append(',')
+                .append(sample.distanceToClosestCornerM).append(',')
+                .append(sample.rawLatG).append(',')
+                .append(sample.rawLongG).append(',')
+                .append(sample.latG).append(',')
+                .append(sample.longG).append(',')
+                .append(sample.gSum).append(',')
+                .append(speedStr).append(',')
+                .append(sample.cornerIndex).append(',')
+                .append(sample.cornerName).append(',')
+                .append(sample.visitNumber).append(',')
+                .append(apexStr)
+                .append('\n')
+        }
+
+        outFile.writeText(sb.toString())
+        debugLogToFile(context, "EXPORT share CSV created (smoothed=${smoothedSamples.size}, level=$smoothingLevel)")
+        return outFile
+    }
+
+    fun shareEventCsv(context: Context, file: File) {
+        val uri = FileProvider.getUriForFile(
+            context,
+            context.packageName + ".fileprovider",
+            file
+        )
+
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/csv"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+
+        context.startActivity(Intent.createChooser(intent, "Share CSV"))
+    }
+
+    fun shareMultipleEventCsv(context: Context, files: List<File>) {
+        if (files.isEmpty()) return
+
+        val uris = ArrayList<android.net.Uri>(files.size)
+        files.forEach { file ->
+            val uri = FileProvider.getUriForFile(
+                context,
+                context.packageName + ".fileprovider",
+                file
+            )
+            uris.add(uri)
+        }
+
+        val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+            type = "text/csv"
+            putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+
+        context.startActivity(Intent.createChooser(intent, "Share CSV files"))
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Smoothing + interpolation helpers (used only for share/export right now)
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Apply smoothing to G values for export/display.
+     * - Off: outputs "raw" G if present; otherwise uses stored smoothed G
+     * - Low/Medium/Heavy: uses GForceSmoother (EMA + moving average)
+     */
+    private fun applySmoothingForExport(
+        samples: List<EventSample>,
+        level: SmoothingLevel
+    ): List<EventSample> {
+        if (samples.isEmpty()) return samples
+
+        fun pickRaw(sample: EventSample): Pair<Float, Float> {
+            val hasRaw = (sample.rawLatG != 0f || sample.rawLongG != 0f)
+            return if (hasRaw) sample.rawLatG to sample.rawLongG else sample.latG to sample.longG
+        }
+
+        if (level == SmoothingLevel.Off) {
+            return samples.map { s ->
+                val (rawLat, rawLong) = pickRaw(s)
+                val gSum = sqrt(rawLat * rawLat + rawLong * rawLong)
+                s.copy(latG = rawLat, longG = rawLong, gSum = gSum)
+            }
+        }
+
+        val tauMsOrNull: Float? = level.tauMs.coerceAtLeast(1).toFloat()
+
+        val smoother = GForceSmoother(
+            tauMs = tauMsOrNull,
+            maWindowSize = level.windowSize
+        ).also { it.reset() }
+
+        return samples.map { s ->
+            val (rawLat, rawLong) = pickRaw(s)
+            val smoothed = smoother.addSample(
+                rawLatG = rawLat,
+                rawLongG = rawLong,
+                sampleTimeMs = s.utcMs
+            )
+            val gSum = sqrt(smoothed.latG * smoothed.latG + smoothed.longG * smoothed.longG)
+
+            s.copy(latG = smoothed.latG, longG = smoothed.longG, gSum = gSum)
+        }
+    }
+
+    /**
+     * Linear speed interpolation between "anchor" speed changes.
+     * This does NOT write back into the event CSV; it only creates derived samples for export.
+     */
+    private fun interpolateSpeedsInSamples(samples: List<EventSample>): List<EventSample> {
+        if (samples.isEmpty()) return samples
+
+        val timestamps = samples.map { it.utcMs }
+        val speeds = samples.map { it.speedMps }
+
+        fun approxEqual(a: Double?, b: Double?, eps: Double = 1e-9): Boolean {
+            if (a == null && b == null) return true
+            if (a == null || b == null) return false
+            return kotlin.math.abs(a - b) <= eps
+        }
+
+        // Anchor indices = points where speed changes (or first valid speed)
+        val anchorIndices = mutableListOf<Int>()
+        var lastAnchorSpeed: Double? = null
+        var lastAnchorIndex: Int? = null
+
+        for (i in samples.indices) {
+            val s = speeds[i] ?: continue
+            if (lastAnchorIndex == null) {
+                lastAnchorIndex = i
+                lastAnchorSpeed = s
+                anchorIndices.add(i)
+            } else if (!approxEqual(s, lastAnchorSpeed)) {
+                lastAnchorIndex = i
+                lastAnchorSpeed = s
+                anchorIndices.add(i)
+            }
+        }
+
+        // Ensure last row with speed is included as anchor
+        val lastIndexWithSpeed = (samples.indices).lastOrNull { speeds[it] != null }
+        if (lastIndexWithSpeed != null && !anchorIndices.contains(lastIndexWithSpeed)) {
+            anchorIndices.add(lastIndexWithSpeed)
+        }
+
+        val newSpeeds = speeds.toMutableList()
+
+        for (a in 0 until anchorIndices.size - 1) {
+            val i0 = anchorIndices[a]
+            val i1 = anchorIndices[a + 1]
+
+            val v0 = speeds[i0]
+            val v1 = speeds[i1]
+            val t0 = timestamps[i0].toDouble()
+            val t1 = timestamps[i1].toDouble()
+
+            if (v0 == null || v1 == null) continue
+            if (t1 <= t0) continue
+
+            val denom = t1 - t0
+            for (i in i0..i1) {
+                val ti = timestamps[i].toDouble()
+                val u = ((ti - t0) / denom).coerceIn(0.0, 1.0)
+                newSpeeds[i] = v0 + (v1 - v0) * u
+            }
+        }
+
+        return samples.mapIndexed { idx, sample ->
+            val s = newSpeeds[idx]
+            if (s != null) sample.copy(speedMps = s) else sample
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Offline speed rewrite (mutates the event CSV by design)
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Offline pass: rewrite the SPEED column (index 14) in the event CSV by linearly
+     * interpolating between speed-change anchors. This function DOES modify the event file.
      *
-     * Returns true on success, false on any error.
+     * NOTE: This is separate from Share/export. Share/export should not call this.
      */
     fun recomputeInterpolatedSpeedForEvent(context: Context, eventId: Long): Boolean {
         val dir = eventsDir(context) ?: return false
@@ -907,28 +752,22 @@ object EventStorage {
             val header = lines[0]
             val dataLines = lines.subList(1, lines.size)
 
-            // Parse data rows into mutable token lists so we can overwrite speed.
             val rows = mutableListOf<MutableList<String>>()
             val timestamps = mutableListOf<Long>()
             val speeds = mutableListOf<Double?>()
-
-            // Column indices (must match header written by appendSample)
-            val IDX_TIMESTAMP = 0
-            val IDX_SPEED = 14
 
             for (line in dataLines) {
                 if (line.isBlank()) continue
 
                 val parts = line.split(',').toMutableList()
                 if (parts.size <= IDX_SPEED) {
-                    // Malformed row, keep as-is and mark as unusable
                     rows.add(parts)
                     timestamps.add(0L)
                     speeds.add(null)
                     continue
                 }
 
-                val utcMs = parts[IDX_TIMESTAMP].toLongOrNull()
+                val utcMs = parts[IDX_TIMESTAMP_MS].toLongOrNull()
                 val speed = parts[IDX_SPEED].toDoubleOrNull()
 
                 rows.add(parts)
@@ -941,56 +780,41 @@ object EventStorage {
                 return false
             }
 
-            // Helper: compare doubles with small tolerance
             fun approxEqual(a: Double?, b: Double?, eps: Double = 1e-9): Boolean {
                 if (a == null && b == null) return true
                 if (a == null || b == null) return false
                 return kotlin.math.abs(a - b) <= eps
             }
 
-            // Build list of anchor indices where SPEED changes (your idea).
             val anchorIndices = mutableListOf<Int>()
-            var lastAnchorIndex: Int? = null
             var lastAnchorSpeed: Double? = null
+            var lastAnchorIndex: Int? = null
 
             for (i in rows.indices) {
-                val s = speeds[i] ?: continue  // skip rows without speed
-
+                val s = speeds[i] ?: continue
                 if (lastAnchorIndex == null) {
-                    // First usable speed row
                     lastAnchorIndex = i
                     lastAnchorSpeed = s
                     anchorIndices.add(i)
-                } else {
-                    if (!approxEqual(s, lastAnchorSpeed)) {
-                        // Speed has changed -> new anchor
-                        lastAnchorIndex = i
-                        lastAnchorSpeed = s
-                        anchorIndices.add(i)
-                    }
+                } else if (!approxEqual(s, lastAnchorSpeed)) {
+                    lastAnchorIndex = i
+                    lastAnchorSpeed = s
+                    anchorIndices.add(i)
                 }
             }
 
             if (anchorIndices.size < 2) {
-                // Not enough distinct speed changes to interpolate; nothing to do.
-                Log.w(
-                    TAG,
-                    "recomputeInterpolatedSpeedForEvent: only ${anchorIndices.size} speed anchor(s); skipping"
-                )
+                Log.w(TAG, "recomputeInterpolatedSpeedForEvent: only ${anchorIndices.size} speed anchor(s); skipping")
                 return false
             }
 
-            // Make sure the last row with a speed is included as an anchor
             val lastIndexWithSpeed = (rows.indices).lastOrNull { speeds[it] != null }
-            if (lastIndexWithSpeed != null &&
-                !anchorIndices.contains(lastIndexWithSpeed)
-            ) {
+            if (lastIndexWithSpeed != null && !anchorIndices.contains(lastIndexWithSpeed)) {
                 anchorIndices.add(lastIndexWithSpeed)
             }
 
             val newSpeeds = speeds.toMutableList()
 
-            // For each consecutive pair of speed anchors, linearly interpolate.
             for (a in 0 until anchorIndices.size - 1) {
                 val i0 = anchorIndices[a]
                 val i1 = anchorIndices[a + 1]
@@ -1002,7 +826,7 @@ object EventStorage {
                 val t1 = timestamps[i1].toDouble()
 
                 if (v0 == null || v1 == null) continue
-                if (t1 <= t0) continue    // degenerate timestamps
+                if (t1 <= t0) continue
 
                 val denom = t1 - t0
                 for (i in i0..i1) {
@@ -1012,13 +836,10 @@ object EventStorage {
                 }
             }
 
-            // Write interpolated speeds back into column 14.
             for (i in rows.indices) {
-                val s = newSpeeds[i]
-                rows[i][IDX_SPEED] = s?.toString() ?: ""
+                rows[i][IDX_SPEED] = newSpeeds[i]?.toString() ?: ""
             }
 
-            // Rebuild file with header + updated data rows.
             val newContent = buildString {
                 append(header); append('\n')
                 for (row in rows) {
@@ -1035,10 +856,34 @@ object EventStorage {
         }
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Misc / placeholders
+    // ---------------------------------------------------------------------------------------------
 
+    /**
+     * Placeholder for a future convenience loader by eventId.
+     * Currently unused; returns empty.
+     */
+    fun loadEvent(context: Context, eventId: Long): List<EventSample> = emptyList()
+
+    private fun debugLogToFile(context: Context, message: String) {
+        try {
+            val dir = context.getExternalFilesDir("debug_logs")
+            if (dir != null && (dir.exists() || dir.mkdirs())) {
+                val file = File(dir, "speed_interp_debug.log")
+                file.appendText("${System.currentTimeMillis()}, $message\n")
+            }
+        } catch (_: Exception) {
+            // swallow
+        }
+    }
 }
 
-// Simple helper class; currently unused by EventStorage, but kept for future use.
+/**
+ * Simple helper class; currently unused by EventStorage.
+ *
+ * Left here in case you want to reuse this approach later.
+ */
 class SpeedInterpolator {
 
     private var lastGpsUtc: Long? = null
@@ -1053,7 +898,6 @@ class SpeedInterpolator {
             lastGpsUtc = nextGpsUtc
             lastGpsSpeed = nextGpsSpeed
         }
-
         nextGpsUtc = utc
         nextGpsSpeed = speed
     }
@@ -1065,18 +909,12 @@ class SpeedInterpolator {
         val v1 = nextGpsSpeed
 
         if (t0 == null || v0 == null || t1 == null || v1 == null) {
-            // Not enough anchors to interpolate
+            // Not enough anchors to interpolate test
             return v1
         }
-
         if (t1 == t0) return v1
 
-        val t = (sampleUtc - t0).toDouble() / (t1 - t0).toDouble()
-        return v0 + t * (v1 - t0)
+        val u = (sampleUtc - t0).toDouble() / (t1 - t0).toDouble()
+        return v0 + u * (v1 - v0)
     }
-
-
-
-
-
 }
