@@ -4,6 +4,9 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
+    <!-- USB host mode: required for the BU-353 10 Hz GPS puck (not required = graceful fallback) -->
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+
 
     <application
         android:allowBackup="true"
@@ -26,6 +29,18 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Broadcast receiver: notifies when BU-353 puck is plugged in -->
+        <receiver
+            android:name=".util.UsbAttachReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/usb_device_filter" />
+        </receiver>
 
         <provider
             android:name="androidx.core.content.FileProvider"

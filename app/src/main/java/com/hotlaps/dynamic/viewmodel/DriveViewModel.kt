@@ -50,6 +50,12 @@ class DriveViewModel : ViewModel() {
     // NEW: Distance-based visit tracking per corner, independent of the old FSM.
     private val geoVisitStates: MutableMap<Int, GeoVisitState> = mutableMapOf()
 
+    // Periodic backup job — launched on startManualEvent(), cancelled on stopEvent()
+    private var backupJob: kotlinx.coroutines.Job? = null
+
+    /** How often to flush + backup the event CSV during recording (5 minutes). */
+    private val BACKUP_INTERVAL_MS = 5 * 60 * 1000L
+
 
 
     fun setAppContext(context: Context) {
@@ -270,6 +276,19 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
         geoVisitStates.clear()
         activeCornerDistanceSamples.clear()
         lastDistanceSampledM = null
+
+        // Start periodic flush + backup every 5 minutes
+        backupJob?.cancel()
+        backupJob = viewModelScope.launch(Dispatchers.IO) {
+            delay(BACKUP_INTERVAL_MS)   // first backup after 5 min, not immediately
+            while (true) {
+                val activeEvent = _currentEvent.value
+                if (activeEvent != null && ::appContext.isInitialized) {
+                    EventStorage.flushAndBackup(appContext, activeEvent.id)
+                }
+                delay(BACKUP_INTERVAL_MS)
+            }
+        }
     }
 
 
@@ -296,13 +315,20 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
         activeCornerDistanceSamples.clear()
         lastDistanceSampledM = null
 
-         // 🔧 NEW: run offline speed interpolation for this event's CSV
+        // Cancel periodic backup job
+        backupJob?.cancel()
+        backupJob = null
+
+        // Flush any remaining buffered samples, then run speed interpolation,
+        // then clean up the in-memory buffer state
         if (event != null && ::appContext.isInitialized) {
             viewModelScope.launch(Dispatchers.IO) {
-                EventStorage.recomputeInterpolatedSpeedForEvent(
-                    appContext,
-                    event.id
-                )
+                // 1) Flush remaining buffer to disk
+                EventStorage.flushBuffer(appContext, event.id)
+                // 2) Run offline speed interpolation (recomputeInterpolated flushes too, but belt+suspenders)
+                EventStorage.recomputeInterpolatedSpeedForEvent(appContext, event.id)
+                // 3) Clean up in-memory buffer state for this event
+                EventStorage.clearBuffer(event.id)
             }
         }
 
@@ -353,6 +379,21 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
     // Optionally keep the most recent raw GPS speed (for debugging if you like)
     // private val _rawSpeedMps = MutableStateFlow<Double?>(null)
 
+
+    // ---- External GPS source flag -------------------------------------------
+
+    /**
+     * True when the BU-353 10 Hz puck is connected and driving sample collection.
+     * GGScreen sets this via [setUsingExternalGps]; the UI uses it to show a status badge.
+     */
+    private val _usingExternalGps = MutableStateFlow(false)
+    val usingExternalGps: StateFlow<Boolean> get() = _usingExternalGps
+
+    fun setUsingExternalGps(active: Boolean) {
+        _usingExternalGps.value = active
+    }
+
+    // -------------------------------------------------------------------------
 
     // Called when GGScreen receives a new GPS update
     fun updateGps(lat: Double, lon: Double, speedMps: Double? = null) {
@@ -484,10 +525,12 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
                     geoState.lastDistanceM = -1.0
                 }
 
-                // Only store a sample when distance changes (GPS-change-only).
-                if (geoState.lastDistanceM < 0.0 ||
+                // With external 10 Hz GPS every sample has a fresh position, so accept all.
+                // With internal GPS (~1 Hz) only accept when distance actually changes to
+                // avoid stacking duplicate samples between GPS fixes.
+                val distanceChanged = geoState.lastDistanceM < 0.0 ||
                     kotlin.math.abs(distanceToClosestCornerM - geoState.lastDistanceM) > 1e-6
-                ) {
+                if (_usingExternalGps.value || distanceChanged) {
                     geoState.currentSamples.add(
                         CornerDistanceSample(
                             utcMs = nowUtc,

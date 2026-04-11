@@ -34,6 +34,19 @@ object EventStorage {
     private val fileLock = Any()
 
     // ---------------------------------------------------------------------------------------------
+    // Write buffer (Option 4: buffered writes + periodic backup)
+    // ---------------------------------------------------------------------------------------------
+
+    /** How many samples to accumulate before flushing to disk (~5 seconds at 10 Hz). */
+    private const val FLUSH_INTERVAL_SAMPLES = 50
+
+    /** In-memory write buffers keyed by eventId. Guarded by fileLock. */
+    private val writeBuffers = mutableMapOf<Long, StringBuilder>()
+
+    /** Running sample count per eventId since last flush. Guarded by fileLock. */
+    private val sampleCounts = mutableMapOf<Long, Int>()
+
+    // ---------------------------------------------------------------------------------------------
     // CSV schema (single source of truth)
     // ---------------------------------------------------------------------------------------------
 
@@ -122,6 +135,8 @@ object EventStorage {
             val isNewFile = !file.exists()
 
             try {
+                // Write CSV header immediately on file creation so the file is always valid
+                // on disk even before the first buffer flush.
                 if (isNewFile) {
                     file.appendText(CSV_HEADER)
                 }
@@ -131,8 +146,6 @@ object EventStorage {
                     .format(Date(sample.utcMs))
 
                 val speedStr = sample.speedMps?.toString() ?: ""
-
-// Apex exported as 0/1 so downstream tools can reliably detect it.
                 val apexStr = if (sample.isApexSample) "1" else "0"
 
                 val line = buildString {
@@ -158,10 +171,76 @@ object EventStorage {
                     append('\n')
                 }
 
-                file.appendText(line)
+                // Accumulate into buffer
+                val buf = writeBuffers.getOrPut(sample.eventId) { StringBuilder() }
+                buf.append(line)
+                val count = (sampleCounts[sample.eventId] ?: 0) + 1
+                sampleCounts[sample.eventId] = count
+
+                // Flush to disk every FLUSH_INTERVAL_SAMPLES (~5 seconds at 10 Hz)
+                if (count >= FLUSH_INTERVAL_SAMPLES) {
+                    file.appendText(buf.toString())
+                    buf.setLength(0)
+                    sampleCounts[sample.eventId] = 0
+                }
+
             } catch (e: Exception) {
                 Log.e(TAG, "appendSample: error writing sample for event ${sample.eventId}", e)
             }
+        }
+    }
+
+    /**
+     * Flushes any buffered samples for [eventId] to disk immediately.
+     * Call this before any operation that reads the CSV (apex tagging, speed
+     * interpolation, export) and when recording stops.
+     */
+    fun flushBuffer(context: Context, eventId: Long) {
+        synchronized(fileLock) {
+            val buf = writeBuffers[eventId] ?: return
+            if (buf.isEmpty()) return
+            val dir = eventsDir(context) ?: return
+            val file = File(dir, "event_${eventId}.csv")
+            try {
+                file.appendText(buf.toString())
+                buf.setLength(0)
+                sampleCounts[eventId] = 0
+                Log.d(TAG, "flushBuffer: flushed buffer for event $eventId")
+            } catch (e: Exception) {
+                Log.e(TAG, "flushBuffer: error flushing event $eventId", e)
+            }
+        }
+    }
+
+    /**
+     * Flushes the buffer then copies the event CSV to a timestamped backup file.
+     * Backup name: event_<id>_backup.csv  (overwritten each time — only the latest is kept).
+     * Safe to call from a background coroutine every N minutes during recording.
+     */
+    fun flushAndBackup(context: Context, eventId: Long) {
+        flushBuffer(context, eventId)
+        synchronized(fileLock) {
+            val dir = eventsDir(context) ?: return
+            val src = File(dir, "event_${eventId}.csv")
+            if (!src.exists()) return
+            val backup = File(dir, "event_${eventId}_backup.csv")
+            try {
+                src.copyTo(backup, overwrite = true)
+                Log.d(TAG, "flushAndBackup: backup written for event $eventId (${src.length() / 1024} KB)")
+            } catch (e: Exception) {
+                Log.e(TAG, "flushAndBackup: failed for event $eventId", e)
+            }
+        }
+    }
+
+    /**
+     * Cleans up in-memory buffer state for a finished event.
+     * Call after stopEvent() once all flushes are complete.
+     */
+    fun clearBuffer(eventId: Long) {
+        synchronized(fileLock) {
+            writeBuffers.remove(eventId)
+            sampleCounts.remove(eventId)
         }
     }
 
@@ -328,6 +407,9 @@ object EventStorage {
         apexUtcMs: Long,
         cornerName: String
     ) {
+        // Flush any buffered samples first so this read sees the full dataset
+        flushBuffer(context, eventId)
+
         val dir = eventsDir(context) ?: return
         val file = File(dir, "event_${eventId}.csv")
         if (!file.exists()) {
@@ -1031,6 +1113,9 @@ object EventStorage {
      * NOTE: This is separate from Share/export. Share/export should not call this.
      */
     fun recomputeInterpolatedSpeedForEvent(context: Context, eventId: Long): Boolean {
+        // Flush any buffered samples before reading the full file
+        flushBuffer(context, eventId)
+
         val dir = eventsDir(context) ?: return false
         val file = File(dir, "event_${eventId}.csv")
         if (!file.exists()) {

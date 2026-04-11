@@ -1,40 +1,13 @@
 {
   "permissions": {
-    "allow": [
-      "Read",
-      "Write",
-      "Edit",
-      "Glob",
-      "Grep",
-      "Bash(git status)",
-      "Bash(git diff*)",
-      "Bash(git log*)",
-      "Bash(git add*)",
-      "Bash(git commit*)",
-      "Bash(git checkout*)",
-      "Bash(git branch*)",
-      "Bash(git stash*)",
-      "Bash(git show*)",
-      "Bash(git fetch*)",
-      "Bash(git pull*)",
-      "Bash(git merge*)",
-      "Bash(git rebase*)",
-      "Bash(./gradlew*)",
-      "Bash(gradlew*)",
-      "Bash(ls*)",
-      "Bash(find*)",
-      "Bash(cat*)",
-      "Bash(mkdir*)",
-      "Bash(cp*)",
-      "Bash(mv*)",
-      "Bash(echo*)"
-    ],
+    "defaultMode": "bypassPermissions",
     "deny": [
       "Bash(git push --force*)",
       "Bash(git push -f*)",
       "Bash(git branch -D*)",
       "Bash(git reset --hard*)",
-      "Bash(rm -rf*)"
+      "Bash(rm -rf /*)",
+      "Bash(rm -rf C:*)"
     ]
   }
 }

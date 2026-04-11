@@ -104,6 +104,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberUpdatedState
+
+import com.hotlaps.dynamic.util.UsbPuckGpsSource
 
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -375,15 +378,21 @@ fun GGScreen(
             val speedMps: Double? =
                 if (loc.hasSpeed()) loc.speed.toDouble() else null
 
-            gpsLat = lat   // UI only
+            gpsLat = lat   // UI only (Raw GPS debug display)
             gpsLon = lon
 
-            // Send all 3 to the ViewModel
-            driveViewModel.updateGps(
-                lat = lat,
-                lon = lon,
-                speedMps = speedMps
-            )
+            // Only forward to ViewModel when the external puck is NOT connected.
+            // When the puck is active it owns VM GPS exclusively at 10 Hz.
+            // Use driveViewModel.usingExternalGps rather than usbGpsSource directly
+            // to avoid capture ordering issues inside the DisposableEffect lambda.
+            val externalActive = driveViewModel.usingExternalGps.value
+            if (externalActive == false) {
+                driveViewModel.updateGps(
+                    lat = lat,
+                    lon = lon,
+                    speedMps = speedMps
+                )
+            }
         }
 
 
@@ -412,7 +421,41 @@ fun GGScreen(
         }
     }
 
-    // 3) 10 Hz publisher: convert to g's + small EMA smoothing, then tick
+    // 3) External USB GPS puck (BU-353 10 Hz, Prolific PL2303)
+    val usbGpsSource = remember { UsbPuckGpsSource(context) }
+    val usingExternalGps by driveViewModel.usingExternalGps.collectAsState()
+
+    // Start/stop the puck reader with this screen's lifecycle
+    DisposableEffect(Unit) {
+        usbGpsSource.start()
+        onDispose { usbGpsSource.stop() }
+    }
+
+    // Mirror puck connection state into the ViewModel so DriveViewModel & UI can react
+    LaunchedEffect(Unit) {
+        usbGpsSource.isConnected.collect { connected ->
+            driveViewModel.setUsingExternalGps(connected)
+        }
+    }
+
+    // GPS-gated sampling: each puck fix drives one EventSample (replaces the timer trigger)
+    // rememberUpdatedState ensures we always call with the latest activeTrack value
+    val currentActiveTrack by rememberUpdatedState(activeTrack)
+    LaunchedEffect(Unit) {
+        usbGpsSource.fixes.collect { fix ->
+            // Push GPS into ViewModel (speed comes directly from NMEA RMC)
+            driveViewModel.updateGps(
+                lat = fix.lat,
+                lon = fix.lon,
+                speedMps = fix.speedMps
+            )
+            // Gate recording on this GPS fix instead of the 10 Hz timer
+            driveViewModel.recordCurrentSample()
+            driveViewModel.updateCornerCaptureState(currentActiveTrack)
+        }
+    }
+
+    // 4) 10 Hz publisher: convert to g's + EMA smoothing, then tick
     // --- 10 Hz loop: project sensors into calibrated car axes, smooth, and publish ---
     LaunchedEffect(calibState.vec, smoothingLevel) {
         val g = SensorManager.GRAVITY_EARTH           // 9.80665 m/s^2
@@ -520,15 +563,21 @@ fun GGScreen(
             latG = smoothed.latG
             longG = smoothed.longG
 
-            // Feed into ViewModel, just like before
+            // Always push the latest G values so ViewModel state is fresh for UI + puck callbacks
             driveViewModel.updateGForces(
                 smoothedLat = latG,
                 smoothedLong = longG,
                 rawLat = rawLatG,
                 rawLong = rawLongG
             )
-            driveViewModel.recordCurrentSample()
-            driveViewModel.updateCornerCaptureState(activeTrack)
+
+            // Sample recording is gated by the GPS source:
+            //  • External puck present → each GPS fix callback (above) triggers the sample
+            //  • Internal GPS          → the timer triggers the sample here at ~10 Hz
+            if (driveViewModel.usingExternalGps.value == false) {
+                driveViewModel.recordCurrentSample()
+                driveViewModel.updateCornerCaptureState(activeTrack)
+            }
 
             ticks++
 
@@ -728,6 +777,32 @@ fun GGScreen(
                                         }
                                     }
 
+
+// --- GPS source badge ---
+                                    Surface(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 4.dp),
+                                        color = if (usingExternalGps)
+                                            MaterialTheme.colorScheme.primaryContainer
+                                        else
+                                            MaterialTheme.colorScheme.surfaceVariant,
+                                        shape = MaterialTheme.shapes.small
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = if (usingExternalGps) "GPS: External 10 Hz puck" else "GPS: Internal",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = if (usingExternalGps)
+                                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                                else
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
 
 // === END SESSION HEADER SECTIONS =====================================
 
@@ -970,9 +1045,56 @@ fun GGScreen(
                             1 -> {
                                 if (BuildConfig.DEBUG) {
 
+                                    // --- GPS Hz tracking state (debug page only) ---
+                                    var phoneGpsHz by remember { mutableStateOf(0f) }
+                                    var externalGpsHz by remember { mutableStateOf(0f) }
+
+                                    // Count phone GPS updates per second
+                                    LaunchedEffect(gpsLat, gpsLon) {
+                                        // Each recompose here = one phone GPS fix; we measure rate below
+                                    }
+                                    LaunchedEffect(Unit) {
+                                        var phoneCount = 0
+                                        var externalCount = 0
+                                        var windowStart = System.currentTimeMillis()
+
+                                        // Collect external GPS fix count
+                                        launch {
+                                            usbGpsSource.fixes.collect {
+                                                externalCount++
+                                            }
+                                        }
+
+                                        // Every second, snapshot both counts into Hz display
+                                        while (true) {
+                                            kotlinx.coroutines.delay(1000)
+                                            val now = System.currentTimeMillis()
+                                            val elapsed = (now - windowStart) / 1000f
+                                            if (elapsed > 0f) {
+                                                externalGpsHz = externalCount / elapsed
+                                            }
+                                            externalCount = 0
+                                            windowStart = now
+                                        }
+                                    }
+                                    // Phone GPS Hz: count state changes to gpsLat
+                                    var phoneGpsCount by remember { mutableStateOf(0) }
+                                    var phoneGpsWindowStart by remember { mutableStateOf(System.currentTimeMillis()) }
+                                    LaunchedEffect(gpsLat) {
+                                        phoneGpsCount++
+                                        val now = System.currentTimeMillis()
+                                        val elapsed = (now - phoneGpsWindowStart) / 1000f
+                                        if (elapsed >= 1f) {
+                                            phoneGpsHz = phoneGpsCount / elapsed
+                                            phoneGpsCount = 0
+                                            phoneGpsWindowStart = now
+                                        }
+                                    }
+
                                     Column(
                                         modifier = Modifier
                                             .fillMaxSize()
+                                            .verticalScroll(rememberScrollState())
                                             .padding(12.dp),
                                         verticalArrangement = Arrangement.Top,
                                         horizontalAlignment = Alignment.Start
@@ -994,18 +1116,10 @@ fun GGScreen(
                                         Spacer(Modifier.height(8.dp))
 
                                         Text(
-                                            "Raw GPS (screen): ${"%.6f".format(gpsLat)}, ${
-                                                "%.6f".format(
-                                                    gpsLon
-                                                )
-                                            }"
+                                            "Phone GPS ${if (!usingExternalGps) "★ ACTIVE" else "(standby)"} @ ${"%.1f".format(phoneGpsHz)} Hz: ${"%.6f".format(gpsLat)}, ${"%.6f".format(gpsLon)}"
                                         )
                                         Text(
-                                            "VM GPS: ${"%.6f".format(vmGpsLat)}, ${
-                                                "%.6f".format(
-                                                    vmGpsLon
-                                                )
-                                            }"
+                                            "External GPS ${if (usingExternalGps) "★ ACTIVE" else "(not connected)"} @ ${"%.1f".format(externalGpsHz)} Hz: ${"%.6f".format(vmGpsLat)}, ${"%.6f".format(vmGpsLon)}"
                                         )
                                         Text(
                                             "VM G: lat=${"%.2f".format(vmLatG)}, long=${

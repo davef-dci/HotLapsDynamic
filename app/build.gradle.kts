@@ -100,6 +100,9 @@ dependencies {
     // DataStore (prefs for ggMaxAbsG, trailSeconds)
     implementation("androidx.datastore:datastore-preferences:1.1.1")
 
+    // USB serial — for BU-353 10 Hz GPS puck (Prolific PL2303 chip)
+    implementation("com.github.mik3y:usb-serial-for-android:3.8.0")
+
     // --- Test / Tooling ---
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
