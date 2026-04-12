@@ -30,6 +30,7 @@ import java.io.File
 import com.hotlaps.dynamic.data.FileHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import com.hotlaps.dynamic.util.DriveUploadHelper
 
 
 /**
@@ -285,6 +286,7 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
                 val activeEvent = _currentEvent.value
                 if (activeEvent != null && ::appContext.isInitialized) {
                     EventStorage.flushAndBackup(appContext, activeEvent.id)
+                    DriveUploadHelper.uploadBackupFile(appContext, activeEvent.id)
                 }
                 delay(BACKUP_INTERVAL_MS)
             }

@@ -65,6 +65,10 @@ class UsbPuckGpsSource(private val context: Context) {
     /** True while the puck is connected and producing data. */
     val isConnected: StateFlow<Boolean> = _isConnected
 
+    private val _statusMessage = MutableStateFlow("USB GPS: not started")
+    /** Diagnostic status — shown in the debug panel. */
+    val statusMessage: StateFlow<String> = _statusMessage
+
     // ---- Internals -----------------------------------------------------------
 
     private val usb = context.getSystemService(Context.USB_SERVICE) as UsbManager
@@ -95,6 +99,7 @@ class UsbPuckGpsSource(private val context: Context) {
             context.registerReceiver(permReceiver, filter)
         }
 
+        _statusMessage.value = "USB GPS: scanning..."
         readJob = s.launch { runReader() }
     }
 
@@ -104,17 +109,41 @@ class UsbPuckGpsSource(private val context: Context) {
         scope?.cancel()
         scope = null
         _isConnected.value = false
+        _statusMessage.value = "USB GPS: stopped"
+        receivedFirstFix = false
         try { context.unregisterReceiver(permReceiver) } catch (_: Exception) {}
     }
 
     // ---- Core read loop ------------------------------------------------------
 
     private suspend fun runReader() {
-        val device = findProlific()
-        if (device == null) {
-            Log.d(TAG, "No Prolific PL2303 device found — internal GPS will be used")
-            return
+        // Retry loop — polls every 2 s until the puck appears.
+        // This handles: puck plugged in after app start, Samsung OTG enumeration delay,
+        // and the occasional transient "no devices" glitch seen on Pixel phones.
+        var device: UsbDevice? = null
+        var attempt = 0
+        while (currentCoroutineContext().isActive) {
+            val allDevices = usb.deviceList.values
+            val deviceSummary = if (allDevices.isEmpty()) "none"
+            else allDevices.joinToString { d ->
+                "${d.productName ?: "unknown"} [vid=0x%04X]".format(d.vendorId)
+            }
+
+            device = findProlific()
+            if (device != null) break
+
+            attempt++
+            val msg = if (allDevices.isEmpty())
+                "USB GPS: no USB devices — plug in puck (attempt $attempt)"
+            else
+                "USB GPS: puck not found. Devices: $deviceSummary (attempt $attempt)"
+            _statusMessage.value = msg
+            if (attempt == 1) Log.d(TAG, msg)   // log once to avoid spam
+            kotlinx.coroutines.delay(2000)
         }
+        if (device == null) return   // coroutine was cancelled
+
+        _statusMessage.value = "USB GPS: Prolific device found, requesting permission..."
 
         // Request permission if needed
         if (!usb.hasPermission(device)) {
@@ -126,25 +155,33 @@ class UsbPuckGpsSource(private val context: Context) {
                 kotlinx.coroutines.delay(100)
             }
             if (!granted) {
-                Log.w(TAG, "USB permission denied by user")
+                val msg = "USB GPS: permission denied by user"
+                _statusMessage.value = msg
+                Log.w(TAG, msg)
                 return
             }
         }
 
         val driver = UsbSerialProber.getDefaultProber().probeDevice(device)
         if (driver == null) {
-            Log.w(TAG, "No driver found for device (unexpected for PL2303)")
+            val msg = "USB GPS: no serial driver for device (unexpected for PL2303)"
+            _statusMessage.value = msg
+            Log.w(TAG, msg)
             return
         }
 
         val connection = usb.openDevice(device)
         if (connection == null) {
-            Log.w(TAG, "Could not open USB device")
+            val msg = "USB GPS: could not open USB connection"
+            _statusMessage.value = msg
+            Log.w(TAG, msg)
             return
         }
 
         val port = driver.ports.firstOrNull()
         if (port == null) {
+            val msg = "USB GPS: driver has no ports"
+            _statusMessage.value = msg
             connection.close()
             return
         }
@@ -156,6 +193,7 @@ class UsbPuckGpsSource(private val context: Context) {
             port.rts = true
 
             _isConnected.value = true
+            _statusMessage.value = "USB GPS: connected at $BAUD baud — waiting for fix..."
             Log.i(TAG, "BU-353 connected at $BAUD baud — GPS-gated recording active")
 
             val readBuf = ByteArray(1024)
@@ -191,13 +229,21 @@ class UsbPuckGpsSource(private val context: Context) {
 
     // ---- NMEA parsing --------------------------------------------------------
 
+    private var receivedFirstFix = false
+
     private fun handleLine(line: String) {
         // Accept only $GPRMC — the BU-353 also outputs $GNRMC for the same fix,
         // which would double the apparent rate to ~20 Hz. Pinning to GPRMC gives
         // clean 10 Hz output with one fix per GPS epoch.
         if (!line.startsWith("\$GPRMC,")) return
         if (!checksumOk(line)) return
-        parseRmc(line)?.let { fix -> _fixes.tryEmit(fix) }
+        parseRmc(line)?.let { fix ->
+            if (!receivedFirstFix) {
+                receivedFirstFix = true
+                _statusMessage.value = "USB GPS: receiving fixes — 10 Hz active"
+            }
+            _fixes.tryEmit(fix)
+        }
     }
 
     private fun checksumOk(s: String): Boolean {

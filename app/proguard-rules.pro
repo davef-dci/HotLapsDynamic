@@ -1,4 +1,10 @@
 # Add project specific ProGuard rules here.
+
+# Google Sign-In (play-services-auth) — keep classes used via reflection
+-keep class com.google.android.gms.auth.** { *; }
+-keep class com.google.android.gms.common.** { *; }
+-keepattributes Signature
+-keepattributes *Annotation*
 # You can control the set of applied configuration files using the
 # proguardFiles setting in build.gradle.
 #

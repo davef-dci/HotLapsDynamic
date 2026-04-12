@@ -103,6 +103,9 @@ dependencies {
     // USB serial — for BU-353 10 Hz GPS puck (Prolific PL2303 chip)
     implementation("com.github.mik3y:usb-serial-for-android:3.8.0")
 
+    // Google Drive upload — OAuth2 sign-in; REST API called directly (no heavy API client lib)
+    implementation("com.google.android.gms:play-services-auth:21.2.0")
+
     // --- Test / Tooling ---
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

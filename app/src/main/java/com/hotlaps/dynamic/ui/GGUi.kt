@@ -107,6 +107,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberUpdatedState
 
 import com.hotlaps.dynamic.util.UsbPuckGpsSource
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.hotlaps.dynamic.util.DriveUploadHelper
 
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -454,6 +458,13 @@ fun GGScreen(
             driveViewModel.updateCornerCaptureState(currentActiveTrack)
         }
     }
+
+    // Drive backup — sign-in state and activity-result launcher
+    var driveConnected by remember { mutableStateOf(DriveUploadHelper.hasDrivePermission(context)) }
+    val signInClient = remember(context) { GoogleSignIn.getClient(context, DriveUploadHelper.getSignInOptions()) }
+    val driveSignInLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { driveConnected = DriveUploadHelper.hasDrivePermission(context) }
 
     // 4) 10 Hz publisher: convert to g's + EMA smoothing, then tick
     // --- 10 Hz loop: project sensors into calibrated car axes, smooth, and publish ---
@@ -804,6 +815,38 @@ fun GGScreen(
                                         }
                                     }
 
+// --- Drive backup badge ---
+                                    Surface(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 4.dp)
+                                            .clickable(enabled = !driveConnected) {
+                                                driveSignInLauncher.launch(signInClient.signInIntent)
+                                            },
+                                        color = if (driveConnected)
+                                            MaterialTheme.colorScheme.primaryContainer
+                                        else
+                                            MaterialTheme.colorScheme.surfaceVariant,
+                                        shape = MaterialTheme.shapes.small
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = if (driveConnected)
+                                                    "Drive: ${DriveUploadHelper.getSignedInEmail(context) ?: "connected"} — uploads every 5 min"
+                                                else
+                                                    "Drive backup: tap to connect",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = if (driveConnected)
+                                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                                else
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+
 // === END SESSION HEADER SECTIONS =====================================
 
                                     Spacer(modifier = Modifier.height(24.dp))
@@ -1120,6 +1163,16 @@ fun GGScreen(
                                         )
                                         Text(
                                             "External GPS ${if (usingExternalGps) "★ ACTIVE" else "(not connected)"} @ ${"%.1f".format(externalGpsHz)} Hz: ${"%.6f".format(vmGpsLat)}, ${"%.6f".format(vmGpsLon)}"
+                                        )
+                                        val usbStatus by usbGpsSource.statusMessage.collectAsState()
+                                        Text(
+                                            text = usbStatus,
+                                            color = when {
+                                                usbStatus.contains("10 Hz") -> Color(0xFF4CAF50)
+                                                usbStatus.contains("no USB") || usbStatus.contains("denied") || usbStatus.contains("no Prolific") -> Color(0xFFFF5252)
+                                                else -> MaterialTheme.colorScheme.onSurface
+                                            },
+                                            modifier = Modifier.padding(top = 2.dp)
                                         )
                                         Text(
                                             "VM G: lat=${"%.2f".format(vmLatG)}, long=${

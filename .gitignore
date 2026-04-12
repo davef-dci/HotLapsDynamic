@@ -20,3 +20,10 @@ local.properties
 *.bak
 app/release/
 app/debug/
+
+# Android Studio local deployment config (changes per machine)
+.idea/deploymentTargetSelector.xml
+
+# Claude Code session data (never commit)
+.claude/
+**/.claude/
