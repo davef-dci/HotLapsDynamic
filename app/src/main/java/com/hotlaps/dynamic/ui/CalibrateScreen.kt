@@ -7,6 +7,8 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
@@ -157,6 +159,7 @@ fun CalibrateScreen(onBack: () -> Unit) {
             modifier = Modifier
                 .padding(pad)
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -311,8 +314,68 @@ fun CalibrateScreen(onBack: () -> Unit) {
 
 
 
+            // ----------------------------------------
+            // PRESET POSITIONS (no driving required)
+            // ----------------------------------------
+            // Each button saves a known forward vector directly, bypassing the
+            // sensor-based calibration run entirely.  Useful when:
+            //   • The phone is in a well-known fixed mount (e.g. flat on the dash)
+            //   • The sensor calibration routine doesn't work reliably on this device
+            //
+            // The forward vector is expressed in the phone's sensor frame:
+            //   +Y = toward top of phone
+            //   -Y = toward bottom of phone
+            //   +X = toward right edge of phone
+            //   -X = toward left edge of phone
+            //
+            // These work for any physical tilt (flat, upright, angled) — only the
+            // edge-of-phone → car-forward relationship matters.
+
+            HorizontalDivider()
+
+            Text(
+                "— or choose a known position —",
+                style = MaterialTheme.typography.labelLarge
+            )
+            Text(
+                "Pick whichever edge of your phone faces the front of the car. " +
+                "The app reads the live gravity sensor to handle tilt automatically, " +
+                "so this works whether the phone is flat, upright, or at any angle — " +
+                "as long as the chosen edge keeps pointing forward.",
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Start
+            )
+
+            val presetButtonMod = Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+
+            val presets = listOf(
+                CalibPreset("Top of phone  →  front of car",    floatArrayOf( 0f,  1f, 0f)),
+                CalibPreset("Bottom of phone  →  front of car", floatArrayOf( 0f, -1f, 0f)),
+                CalibPreset("Right edge  →  front of car",      floatArrayOf( 1f,  0f, 0f)),
+                CalibPreset("Left edge  →  front of car",       floatArrayOf(-1f,  0f, 0f)),
+            )
+
+            presets.forEach { preset ->
+                OutlinedButton(
+                    enabled = !collecting && countdown == null,
+                    modifier = presetButtonMod,
+                    onClick = {
+                        scope.launch {
+                            calibRepo.save(preset.vec)
+                            status = "Preset saved ✓  ${preset.label}"
+                        }
+                    }
+                ) {
+                    Text(preset.label, fontSize = 15.sp)
+                }
+            }
+
+            HorizontalDivider()
+
             // Delete calibration from storage.
-// This can be useful if you want to force a re-calibration.
+            // This can be useful if you want to force a re-calibration.
             OutlinedButton(
                 enabled = !collecting && countdown == null,
                 modifier = bigButtonMod,
@@ -330,6 +393,8 @@ fun CalibrateScreen(onBack: () -> Unit) {
         }
     }
 }
+
+private data class CalibPreset(val label: String, val vec: FloatArray)
 
 private fun ema(prev: Float, x: Float, alpha: Float): Float =
     if (prev == 0f) x else (alpha * x + (1f - alpha) * prev)
