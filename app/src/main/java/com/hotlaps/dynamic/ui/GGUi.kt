@@ -118,6 +118,10 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.foundation.background
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.outlined.Cloud
+import androidx.compose.material.icons.filled.GpsFixed
+import androidx.compose.material.icons.filled.GpsNotFixed
 
 import androidx.compose.ui.graphics.toArgb
 import com.hotlaps.dynamic.AccentLime
@@ -355,14 +359,14 @@ fun GGScreen(
             sensorManager.registerListener(
                 listener,
                 lin,
-                SensorManager.SENSOR_DELAY_GAME
+                SensorManager.SENSOR_DELAY_UI
             )
         }
         if (grav != null) {
             sensorManager.registerListener(
                 listener,
                 grav,
-                SensorManager.SENSOR_DELAY_GAME
+                SensorManager.SENSOR_DELAY_UI
             )
         }
 
@@ -372,8 +376,11 @@ fun GGScreen(
     }
 
 
-    // 2) GPS Location Updates
-    DisposableEffect(Unit) {
+    // Collect puck connection state early — used both to gate internal GPS and as a DisposableEffect key
+    val usingExternalGps by driveViewModel.usingExternalGps.collectAsState()
+
+    // 2) GPS Location Updates — paused while the USB puck is active to save battery
+    DisposableEffect(usingExternalGps) {
         val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
         val listener = LocationListener { loc: Location ->
@@ -400,24 +407,26 @@ fun GGScreen(
         }
 
 
-        try {
-            if (
-                ActivityCompat.checkSelfPermission(
-                    ctx,
-                    android.Manifest.permission.ACCESS_FINE_LOCATION
-                )
-                == PackageManager.PERMISSION_GRANTED
-            ) {
-                lm.requestLocationUpdates(
-                    LocationManager.GPS_PROVIDER,
-                    200L,
-                    0f,
-                    listener
-                )
+        // Only power up the internal GPS radio when the puck is not connected
+        if (!usingExternalGps) {
+            try {
+                if (
+                    ActivityCompat.checkSelfPermission(
+                        ctx,
+                        android.Manifest.permission.ACCESS_FINE_LOCATION
+                    )
+                    == PackageManager.PERMISSION_GRANTED
+                ) {
+                    lm.requestLocationUpdates(
+                        LocationManager.GPS_PROVIDER,
+                        200L,
+                        0f,
+                        listener
+                    )
+                }
+            } catch (e: SecurityException) {
+                e.printStackTrace()
             }
-
-        } catch (e: SecurityException) {
-            e.printStackTrace()
         }
 
         onDispose {
@@ -427,7 +436,6 @@ fun GGScreen(
 
     // 3) External USB GPS puck (BU-353 10 Hz, Prolific PL2303)
     val usbGpsSource = remember { UsbPuckGpsSource(context) }
-    val usingExternalGps by driveViewModel.usingExternalGps.collectAsState()
 
     // Start/stop the puck reader with this screen's lifecycle
     DisposableEffect(Unit) {
@@ -719,7 +727,7 @@ fun GGScreen(
 // === SESSION HEADER SECTIONS =========================================
                                     val t = activeTrack
 
-// --- Track section ---
+// --- Track row with GPS + Drive status icons ---
                                     Surface(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -732,7 +740,7 @@ fun GGScreen(
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .clickable { onSelectTrack() }
-                                                .padding(12.dp),
+                                                .padding(horizontal = 12.dp, vertical = 10.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text(
@@ -747,110 +755,50 @@ fun GGScreen(
                                                 fontWeight = FontWeight.SemiBold,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f),
                                                 color = if (t != null)
                                                     MaterialTheme.colorScheme.onSurface
                                                 else
                                                     Color.Red
                                             )
-                                        }
-                                    }
-
-// --- Event section ---
-                                    Surface(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(top = 8.dp),
-                                        color = MaterialTheme.colorScheme.surface,
-                                        tonalElevation = 4.dp,
-                                        shape = MaterialTheme.shapes.medium
-                                    ) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(12.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = "Event:",
-                                                style = MaterialTheme.typography.labelMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                            Spacer(Modifier.width(6.dp))
-                                            Text(
-                                                text = currentEvent?.displayName
-                                                    ?.takeIf { it.isNotBlank() }
-                                                    ?: currentEvent?.name
-                                                    ?: "(none)",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-                                    }
-
-
-// --- GPS source badge ---
-                                    Surface(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(top = 4.dp),
-                                        color = if (usingExternalGps)
-                                            MaterialTheme.colorScheme.primaryContainer
-                                        else
-                                            MaterialTheme.colorScheme.surfaceVariant,
-                                        shape = MaterialTheme.shapes.small
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = if (usingExternalGps) "GPS: External 10 Hz puck" else "GPS: Internal",
-                                                style = MaterialTheme.typography.labelMedium,
-                                                color = if (usingExternalGps)
-                                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                            Spacer(Modifier.width(8.dp))
+                                            // GPS source icon
+                                            Icon(
+                                                imageVector = if (usingExternalGps)
+                                                    Icons.Filled.GpsFixed
                                                 else
-                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                                    Icons.Filled.GpsNotFixed,
+                                                contentDescription = if (usingExternalGps) "External GPS puck" else "Internal GPS",
+                                                tint = if (usingExternalGps)
+                                                    MaterialTheme.colorScheme.primary
+                                                else
+                                                    MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(20.dp)
                                             )
-                                        }
-                                    }
-
-// --- Drive backup badge ---
-                                    Surface(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(top = 4.dp)
-                                            .clickable(enabled = !driveConnected) {
-                                                driveSignInLauncher.launch(signInClient.signInIntent)
-                                            },
-                                        color = if (driveConnected)
-                                            MaterialTheme.colorScheme.primaryContainer
-                                        else
-                                            MaterialTheme.colorScheme.surfaceVariant,
-                                        shape = MaterialTheme.shapes.small
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = if (driveConnected)
-                                                    "Drive: ${DriveUploadHelper.getSignedInEmail(context) ?: "connected"} — uploads every 5 min"
+                                            Spacer(Modifier.width(8.dp))
+                                            // Drive backup icon — tap to connect if not yet authorised
+                                            Icon(
+                                                imageVector = if (driveConnected)
+                                                    Icons.Filled.Cloud
                                                 else
-                                                    "Drive backup: tap to connect",
-                                                style = MaterialTheme.typography.labelMedium,
-                                                color = if (driveConnected)
-                                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                                    Icons.Outlined.Cloud,
+                                                contentDescription = if (driveConnected) "Drive backup active" else "Drive backup: tap to connect",
+                                                tint = if (driveConnected)
+                                                    MaterialTheme.colorScheme.primary
                                                 else
-                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                                    MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier
+                                                    .size(20.dp)
+                                                    .clickable(enabled = !driveConnected) {
+                                                        driveSignInLauncher.launch(signInClient.signInIntent)
+                                                    }
                                             )
                                         }
                                     }
 
 // === END SESSION HEADER SECTIONS =====================================
 
-                                    Spacer(modifier = Modifier.height(24.dp))
-
+                                    Spacer(modifier = Modifier.height(8.dp))
 
                                     nearestCornerInfo?.let { (label, distM) ->
                                         Text(

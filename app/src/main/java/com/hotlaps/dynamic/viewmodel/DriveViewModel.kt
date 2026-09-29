@@ -327,9 +327,13 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
             viewModelScope.launch(Dispatchers.IO) {
                 // 1) Flush remaining buffer to disk
                 EventStorage.flushBuffer(appContext, event.id)
-                // 2) Run offline speed interpolation (recomputeInterpolated flushes too, but belt+suspenders)
+                // 2) Run offline speed interpolation (rewrites the main CSV)
                 EventStorage.recomputeInterpolatedSpeedForEvent(appContext, event.id)
-                // 3) Clean up in-memory buffer state for this event
+                // 3) Copy final CSV to backup file (captures post-interpolation data)
+                EventStorage.flushAndBackup(appContext, event.id)
+                // 4) Upload the final backup to Drive so nothing is missing
+                DriveUploadHelper.uploadBackupFile(appContext, event.id)
+                // 5) Clean up in-memory buffer state for this event
                 EventStorage.clearBuffer(event.id)
             }
         }
