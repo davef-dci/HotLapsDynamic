@@ -28,9 +28,11 @@ import com.hotlaps.dynamic.data.SettingsRepo
 import kotlinx.coroutines.launch
 import java.io.File
 import com.hotlaps.dynamic.data.FileHelper
+import com.hotlaps.dynamic.data.EventCsvFormat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import com.hotlaps.dynamic.util.DriveUploadHelper
+import com.hotlaps.dynamic.util.RecordingHealth
 
 
 /**
@@ -46,7 +48,11 @@ class DriveViewModel : ViewModel() {
 
     private lateinit var appContext: Context
     private var settingsRepo: SettingsRepo? = null
-    private var isDeskSimulationRunning: Boolean = false
+    @Volatile private var isDeskSimulationRunning: Boolean = false
+
+    /** Desk-simulation progress for the debug page ("" when idle). */
+    private val _simStatus = MutableStateFlow("")
+    val simStatus: StateFlow<String> get() = _simStatus
 
     // NEW: Distance-based visit tracking per corner, independent of the old FSM.
     private val geoVisitStates: MutableMap<Int, GeoVisitState> = mutableMapOf()
@@ -61,6 +67,7 @@ class DriveViewModel : ViewModel() {
 
     fun setAppContext(context: Context) {
         appContext = context.applicationContext
+        RecordingHealth.init(appContext)
 
         // Lazily create SettingsRepo the first time we get a Context
         if (settingsRepo == null) {
@@ -96,6 +103,7 @@ class DriveViewModel : ViewModel() {
     private data class GeoVisitState(
         var isInsideRadius: Boolean = false,
         var visitCount: Int = 0,
+        var entryUtcMs: Long = 0L,
         var lastDistanceM: Double = -1.0,
         val currentSamples: MutableList<CornerDistanceSample> = mutableListOf()
     )
@@ -199,11 +207,6 @@ class DriveViewModel : ViewModel() {
     private val _recordingState = MutableStateFlow(RecordingState.Idle)
     val recordingState: StateFlow<RecordingState> get() = _recordingState
 
-    // In-memory buffer of samples for the current Event.
-// (We'll later stream these to disk / export.)
-    private val _samples = mutableListOf<EventSample>()
-    val samples: List<EventSample> get() = _samples
-
     // Corner capture state machine
     private var cornerCaptureState: CornerCaptureState = CornerCaptureState.Idle
 
@@ -265,6 +268,7 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
 
         _currentEvent.value = event
         _recordingState.value = RecordingState.Recording
+        RecordingHealth.log("START event=${event.id} track=${track?.name ?: "(none)"}")
 
         // Reset any corner-related state
         cornerCaptureState = CornerCaptureState.Idle
@@ -295,7 +299,11 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
 
 
 
-    fun stopEvent() {
+    /**
+     * Stops recording. If [finalName] is given, the session is renamed as part of the
+     * finishing pass (after the last rows are written), so the file can't be split.
+     */
+    fun stopEvent(finalName: String? = null) {
         // Capture the current event (if any) before we clear it
         val event = _currentEvent.value
 
@@ -321,20 +329,16 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
         backupJob?.cancel()
         backupJob = null
 
-        // Flush any remaining buffered samples, then run speed interpolation,
-        // then clean up the in-memory buffer state
+        // Write the remaining rows, run the finishing pass (speed interpolation, name,
+        // late apex tags), rename, refresh the backup — all off the main thread, in order.
         if (event != null && ::appContext.isInitialized) {
+            val name = finalName?.takeIf { it.isNotBlank() }
+            RecordingHealth.log("STOP event=${event.id} name=${name ?: "(default)"}")
             viewModelScope.launch(Dispatchers.IO) {
-                // 1) Flush remaining buffer to disk
-                EventStorage.flushBuffer(appContext, event.id)
-                // 2) Run offline speed interpolation (rewrites the main CSV)
-                EventStorage.recomputeInterpolatedSpeedForEvent(appContext, event.id)
-                // 3) Copy final CSV to backup file (captures post-interpolation data)
-                EventStorage.flushAndBackup(appContext, event.id)
-                // 4) Upload the final backup to Drive so nothing is missing
+                val file = EventStorage.finishEvent(appContext, event.id, name)
+                RecordingHealth.log("FINISHED event=${event.id} file=${file?.name} bytes=${file?.length()}")
+                // Upload the final backup to Drive so nothing is missing
                 DriveUploadHelper.uploadBackupFile(appContext, event.id)
-                // 5) Clean up in-memory buffer state for this event
-                EventStorage.clearBuffer(event.id)
             }
         }
 
@@ -354,18 +358,6 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
     }
 
 
-
-
-    // Placeholder for receiving new samples (later)
-    fun addSample(sample: EventSample) {
-        // Only record if we actually have an active Event
-        if (_currentEvent.value == null) return
-
-        // NEW: only save when actively Recording (not Idle/Paused)
-        if (_recordingState.value != RecordingState.Recording) return
-
-        _samples.add(sample)
-    }
 
 
     // ------------------------
@@ -402,7 +394,10 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
     // -------------------------------------------------------------------------
 
     // Called when GGScreen receives a new GPS update
-    fun updateGps(lat: Double, lon: Double, speedMps: Double? = null) {
+    fun updateGps(lat: Double, lon: Double, speedMps: Double? = null, fromSimulation: Boolean = false) {
+        // During a desk simulation, ignore the phone's real GPS so it can't teleport the car
+        if (isDeskSimulationRunning && !fromSimulation) return
+
         _gpsLat.value = lat
         _gpsLon.value = lon
 
@@ -444,8 +439,12 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
         smoothedLong: Float,
         rawLat: Float,
         rawLong: Float,
-        z: Float = 0f
+        z: Float = 0f,
+        fromSimulation: Boolean = false
     ) {
+        // During a desk simulation, ignore the phone's real accelerometer
+        if (isDeskSimulationRunning && !fromSimulation) return
+
         _latG.value = smoothedLat
         _longG.value = smoothedLong
         _zG.value = z
@@ -467,6 +466,9 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
 
 
         val event = _currentEvent.value ?: return   // no active event -> do nothing
+
+        // Paused: nothing is written and no corner visits are tracked
+        if (_recordingState.value != RecordingState.Recording) return
 
         // Use override if provided, else wall-clock
         val nowUtc = utcMsOverride ?: System.currentTimeMillis()
@@ -527,6 +529,7 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
                 if (!geoState.isInsideRadius) {
                     geoState.isInsideRadius = true
                     geoState.visitCount += 1
+                    geoState.entryUtcMs = nowUtc
                     geoState.currentSamples.clear()
                     geoState.lastDistanceM = -1.0
                 }
@@ -618,11 +621,17 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
 
 
 
+        // Keep rows from the earliest open corner visit in memory so its apex row can be
+        // tagged before it is written (the file is never rewritten).
+        val holdFromUtcMs = geoVisitStates.values
+            .filter { it.isInsideRadius }
+            .minOfOrNull { it.entryUtcMs }
+
         if (::appContext.isInitialized) {
             EventStorage.appendSample(
                 context = appContext,
                 sample = sample,
-                cornerTriggerRadiusM = _cornerTriggerRadiusM.value
+                holdFromUtcMs = holdFromUtcMs
             )
         } else {
             Log.w("DriveViewModel", "appendSample: appContext not initialized yet")
@@ -631,7 +640,6 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
 
 
 
-        addSample(sample)
     }
 
 
@@ -881,16 +889,10 @@ fun updateCornerCaptureState(
             // Time-based stop: once we're past the end of this visit's window, stop capturing.
             if (nowUtc > activeVisitEndUtcMs) {
 
-                val samplesForVisit = _samples.count { sample ->
-                    sample.eventId == event.id &&
-                            sample.cornerIndex == activeCorner &&
-                            sample.visitNumber == activeVisit
-                }
-
                 Log.d(
                     "CornerFSM",
                     "Stopped capturing corner=$activeCorner visit=$activeVisit at nowUtc=$nowUtc " +
-                            "(window end=$activeVisitEndUtcMs), samplesForVisit=$samplesForVisit"
+                            "(window end=$activeVisitEndUtcMs)"
                 )
 
 
@@ -917,21 +919,10 @@ fun updateCornerCaptureState(
     }
 }
 
-    fun renameCurrentEvent(context: Context, newName: String) {
+    /** Renames the session. Stop with stopEvent(finalName) instead when ending the session. */
+    fun renameCurrentEvent(newName: String) {
         val current = _currentEvent.value ?: return
-
-        val updated = current.copy(
-            name = newName,
-            displayName = newName
-        )
-
-        _currentEvent.value = updated
-
-        // Also update the CSV on disk
-        EventStorage.updateEventNameInCsv(context, current.id, newName)
-
-        // NEW: rename the actual .csv file
-        EventStorage.renameEventFile(context, current.id, newName)
+        _currentEvent.value = current.copy(name = newName, displayName = newName)
     }
 
 
@@ -1245,24 +1236,8 @@ fun updateCornerCaptureState(
 
 
     /**
-     * Given an apex time (UTC) for a specific corner visit, find the sample in
-     * _samples for (eventId, cornerIndex, visitNumber) whose intervalMs is
-     * closest to that apex time, and:
-     *
-     *  - Mark exactly one sample as isApexSample = true, timeFromApexMs = 0
-     *  - For all other samples in that visit, set timeFromApexMs relative to
-     *    the same apexIntervalMs and isApexSample = false.
-     */
-    /**
-     * Given an apex time (UTC) for a specific corner visit:
-     *
-     *  - Find the sample in this EVENT whose utcMs is closest to the apexUtcMs
-     *  - On that ONE sample:
-     *      * set cornerIndex / visitNumber
-     *      * set cornerName
-     *      * set isApexSample = true
-     *
-     *  - All other samples are left untouched (cornerIndex/visitNumber remain 0).
+     * Tags the apex for one corner visit. The recorder marks the row closest to [apexUtcMs]
+     * while it is still held in memory; the CSV is never rewritten (see EventCsvWriter).
      */
     private fun markApexSampleForVisit(
         event: Event,
@@ -1270,33 +1245,6 @@ fun updateCornerCaptureState(
         visitNumber: Int,
         apexUtcMs: Long
     ) {
-        // 1) Find the sample in this event whose utcMs is closest to apexUtcMs
-        var bestIndex = -1
-        var bestError = Long.MAX_VALUE
-
-        for (i in _samples.indices) {
-            val s = _samples[i]
-            if (s.eventId != event.id) continue
-
-            val err = kotlin.math.abs(s.utcMs - apexUtcMs)
-            if (err < bestError) {
-                bestError = err
-                bestIndex = i
-            }
-        }
-
-        if (bestIndex == -1) {
-            Log.w(
-                "ApexDetect",
-                "markApexSampleForVisit: no samples found for event=${event.id} " +
-                        "corner=$cornerIndex visit=$visitNumber"
-            )
-            return
-        }
-
-        val original = _samples[bestIndex]
-
-        // Compute a human-friendly corner name
         val cornerName = currentTrack
             ?.corners
             ?.firstOrNull { it.index == cornerIndex }
@@ -1304,30 +1252,20 @@ fun updateCornerCaptureState(
             ?.takeIf { it.isNotBlank() }
             ?: "Corner $cornerIndex"
 
-        // 2) Update only this one sample
-        _samples[bestIndex] = original.copy(
-            cornerIndex = cornerIndex,
-            visitNumber = visitNumber,
-            cornerName = cornerName,
-            isApexSample = true
-        )
-
-        // 3) Also tag the corresponding row in the CSV on disk
         if (::appContext.isInitialized) {
-            EventStorage.tagApexSampleInCsv(
+            EventStorage.tagApex(
                 context = appContext,
                 eventId = event.id,
+                apexUtcMs = apexUtcMs,
                 cornerIndex = cornerIndex,
                 visitNumber = visitNumber,
-                apexUtcMs = apexUtcMs,
                 cornerName = cornerName
             )
         }
 
         Log.d(
             "ApexDetect",
-            "Marked apex sample index=$bestIndex for corner=$cornerIndex " +
-                    "visit=$visitNumber, apexUtcMs=$apexUtcMs (error=${bestError}ms)"
+            "Apex for corner=$cornerIndex visit=$visitNumber at apexUtcMs=$apexUtcMs"
         )
     }
 
@@ -1468,29 +1406,39 @@ fun updateCornerCaptureState(
 
 
     /**
-     * Debug-only: replay simulation3.csv which has schema:
+     * Debug-only desk simulation: feeds a recorded drive through the normal recording pipeline
+     * (smoothing, corner visits, apex tagging, CSV writing, finishing pass).
      *
-     *   deltaMs,gpsLat,gpsLon,speed,rawLatG,rawLongG
+     * Source:
+     *  - [sourceFile] if given, else assets/simulation3.csv
      *
-     * This will:
-     *  - create a new simulated event (if none exists)
-     *  - feed GPS + Gs through the normal pipeline
-     *  - let recordCurrentSample() write out a normal event CSV
+     * Accepted formats (auto-detected per row):
+     *  - 6 columns:  deltaMs,gpsLat,gpsLon,speed,rawLatG,rawLongG
+     *  - 19 columns: a recorded event CSV (timestampMs,deltaMs,...,rawLatG,rawLongG,...,speed,...)
+     *
+     * The file is streamed, so a full race (30+ MB) can be replayed. [playbackSpeed] 20.0 replays
+     * a 3 h race in ~9 min; 0 = as fast as possible. Per-row processing time is reported to
+     * RecordingHealth ("replay" STALL lines).
      */
     fun startSimulationFromTruncatedCsv(
         context: Context,
         track: Track?,
         playbackSpeed: Double = 1.0,
         emaTauMs: Float? = null,
-        maWindowSize: Int = 1
+        maWindowSize: Int = 1,
+        sourceFile: File? = null
     ) {
         val currentTrack = track
         if (currentTrack == null) {
             Log.w("DebugSim", "startSimulationFromTruncatedCsv called with null track")
             return
         }
+        if (isDeskSimulationRunning) {
+            Log.w("DebugSim", "Simulation already running")
+            return
+        }
 
-        // Tell the VM we're in desk simulation mode (suppress 10 Hz samples)
+        // Tell the VM we're in desk simulation mode (suppress live 20 Hz samples)
         isDeskSimulationRunning = true
 
         // Start a new simulated event
@@ -1498,148 +1446,138 @@ fun updateCornerCaptureState(
 
         val event = _currentEvent.value
         if (event == null) {
-            Log.w(
-                "DebugSim",
-                "No current event after startManualEvent; aborting truncated simulation"
-            )
+            Log.w("DebugSim", "No current event after startManualEvent; aborting simulation")
             isDeskSimulationRunning = false
             return
         }
 
         // Use the same smoothing behaviour as the live app
-        val simTauMs = emaTauMs
-        val simMaWindow = maWindowSize.coerceAtLeast(1)
         val simSmoother = com.hotlaps.dynamic.util.GForceSmoother(
-            tauMs = simTauMs,
-            maWindowSize = simMaWindow
+            tauMs = emaTauMs,
+            maWindowSize = maWindowSize.coerceAtLeast(1)
         )
+        val sourceName = sourceFile?.name ?: "simulation3.csv"
 
         viewModelScope.launch(Dispatchers.IO) {
+            var rows = 0
+            var skipped = 0
+            var worstRowMs = 0L
+            val wallStart = System.currentTimeMillis()
+            RecordingHealth.log("REPLAY start source=$sourceName speed=$playbackSpeed event=${event.id}")
             try {
-                val allLines = try {
-                    context.assets.open("simulation3.csv")
-                        .bufferedReader()
-                        .readLines()
-                        .map { it.trim() }
-                        .filter { it.isNotEmpty() }
+                val reader = try {
+                    sourceFile?.bufferedReader()
+                        ?: context.assets.open("simulation3.csv").bufferedReader()
                 } catch (e: Exception) {
-                    Log.e("DebugSim", "Failed to load simulation3.csv from assets", e)
+                    Log.e("DebugSim", "Failed to open $sourceName", e)
+                    RecordingHealth.log("REPLAY failed to open $sourceName: ${e.message}")
+                    _simStatus.value = "Replay failed: ${e.message}"
+                    stopEvent()
                     return@launch
                 }
 
-
-                // Strip header row if present (intervalMs OR deltaMs)
-                val dataLines =
-                    if (allLines.first().startsWith("intervalMs", ignoreCase = true) ||
-                        allLines.first().startsWith("deltaMs", ignoreCase = true)
-                    ) {
-                        allLines.drop(1)
-                    } else {
-                        allLines
-                    }
-
-                if (dataLines.isEmpty()) {
-                    Log.w("DebugSim", "simulation3.csv has no data rows")
-                    return@launch
-                }
-
-                Log.d(
-                    "DebugSim",
-                    "Starting truncated simulation from simulation3.csv with ${dataLines.size} rows " +
-                            "into eventId=${event.id}, track=${currentTrack.name}, playbackSpeed=$playbackSpeed"
-                )
-
+                var firstTimestampMs: Long? = null
                 var lastIntervalMs: Long? = null
 
-                for (line in dataLines) {
-                    val parts = line.split(',')
-                    if (parts.size < 6) {
-                        Log.w(
-                            "DebugSim",
-                            "Skipping malformed line (expected 6 columns): '$line'"
+                reader.useLines { lines ->
+                    for (raw in lines) {
+                        val line = raw.trim()
+                        if (line.isEmpty()) continue
+                        if (line.startsWith("intervalMs", ignoreCase = true) ||
+                            line.startsWith("deltaMs", ignoreCase = true) ||
+                            line.startsWith("timestampMs", ignoreCase = true)
+                        ) continue
+
+                        val p = line.split(',')
+                        val intervalMs: Long?
+                        val gpsLat: Double?
+                        val gpsLon: Double?
+                        val gpsSpeed: Double?
+                        val rawLat: Float?
+                        val rawLong: Float?
+                        if (p.size >= EventCsvFormat.EXPECTED_COLS) {
+                            val ts = p[EventCsvFormat.IDX_TIMESTAMP_MS].toLongOrNull()
+                            if (ts != null && firstTimestampMs == null) firstTimestampMs = ts
+                            intervalMs = ts?.let { it - firstTimestampMs!! }
+                            gpsLat = p[EventCsvFormat.IDX_GPS_LAT].toDoubleOrNull()
+                            gpsLon = p[EventCsvFormat.IDX_GPS_LON].toDoubleOrNull()
+                            gpsSpeed = p[EventCsvFormat.IDX_SPEED].toDoubleOrNull() ?: 0.0
+                            rawLat = p[EventCsvFormat.IDX_RAW_LAT_G].toFloatOrNull()
+                            rawLong = p[EventCsvFormat.IDX_RAW_LONG_G].toFloatOrNull()
+                        } else if (p.size >= 6) {
+                            intervalMs = p[0].toLongOrNull()
+                            gpsLat = p[1].toDoubleOrNull()
+                            gpsLon = p[2].toDoubleOrNull()
+                            gpsSpeed = p[3].toDoubleOrNull()
+                            rawLat = p[4].toFloatOrNull()
+                            rawLong = p[5].toFloatOrNull()
+                        } else {
+                            skipped++
+                            continue
+                        }
+
+                        if (intervalMs == null || gpsLat == null || gpsLon == null ||
+                            gpsSpeed == null || rawLat == null || rawLong == null
+                        ) {
+                            skipped++
+                            continue
+                        }
+
+                        // Pace the replay by the recorded time deltas
+                        if (playbackSpeed > 0.0) {
+                            lastIntervalMs?.let { last ->
+                                val delayMs = ((intervalMs - last) / playbackSpeed).toLong()
+                                if (delayMs > 0L) delay(delayMs)
+                            }
+                        }
+                        lastIntervalMs = intervalMs
+
+                        // Stop early if the user pressed Stop during the replay
+                        if (_currentEvent.value?.id != event.id) break
+
+                        val rowStart = System.currentTimeMillis()
+                        val simUtc = event.createdUtcMs + intervalMs
+
+                        // Run raw Gs through the same EMA + MA pipeline as live driving
+                        val smoothedSample = simSmoother.addSample(
+                            rawLatG = rawLat,
+                            rawLongG = rawLong,
+                            sampleTimeMs = simUtc
                         )
-                        continue
+                        updateGps(lat = gpsLat, lon = gpsLon, speedMps = gpsSpeed, fromSimulation = true)
+                        updateGForces(
+                            smoothedLat = smoothedSample.latG,
+                            smoothedLong = smoothedSample.longG,
+                            rawLat = smoothedSample.rawLatG,
+                            rawLong = smoothedSample.rawLongG,
+                            z = 0f,
+                            fromSimulation = true
+                        )
+                        updateCornerCaptureState(track = currentTrack, utcMsOverride = simUtc)
+                        recordCurrentSample(utcMsOverride = simUtc, intervalMsOverride = intervalMs)
+
+                        val rowMs = System.currentTimeMillis() - rowStart
+                        if (rowMs > worstRowMs) worstRowMs = rowMs
+                        if (rowMs > 250L) RecordingHealth.log("STALL replay row=$rows rowMs=$rowMs")
+                        rows++
+                        if (rows % 200 == 0) {
+                            _simStatus.value = "Replaying $sourceName: $rows rows, " +
+                                    "${intervalMs / 60_000} min of drive, worst row ${worstRowMs} ms"
+                        }
                     }
-
-                    // 0: deltaMs / intervalMs
-                    val intervalMs = parts[0].toLongOrNull()
-                    // 1–2: GPS position
-                    val gpsLat = parts[1].toDoubleOrNull()
-                    val gpsLon = parts[2].toDoubleOrNull()
-                    // 3: speed in m/s  👈 NEW
-                    val gpsSpeed = parts[3].toDoubleOrNull()
-                    // 4–5: raw G's
-                    val rawLat = parts[4].toFloatOrNull()
-                    val rawLong = parts[5].toFloatOrNull()
-
-                    if (intervalMs == null || gpsLat == null || gpsLon == null ||
-                        gpsSpeed == null || rawLat == null || rawLong == null
-                    ) {
-                        Log.w("DebugSim", "Skipping line with parse error: '$line'")
-                        continue
-                    }
-
-                    // Delay based on delta intervalMs (optional for playbackSpeed)
-                    val delayMs: Long = if (playbackSpeed <= 0.0) {
-                        0L
-                    } else {
-                        lastIntervalMs?.let { last ->
-                            val delta = intervalMs - last
-                            val scaled = (delta / playbackSpeed).toLong()
-                            scaled.coerceAtLeast(1L)
-                        } ?: 0L
-                    }
-
-                    if (delayMs > 0L) {
-                        delay(delayMs)
-                    }
-                    lastIntervalMs = intervalMs
-
-                    // Simulated UTC time for this sample
-                    val simUtc = event.createdUtcMs + intervalMs
-
-                    // Run raw Gs through the same EMA + MA pipeline as live driving
-                    val smoothedSample = simSmoother.addSample(
-                        rawLatG = rawLat,
-                        rawLongG = rawLong,
-                        sampleTimeMs = simUtc
-                    )
-
-                    // 👇 NEW: feed GPS *with speed* into VM
-                    updateGps(
-                        lat = gpsLat,
-                        lon = gpsLon,
-                        speedMps = gpsSpeed
-                    )
-
-                    // Feed smoothed + raw G-forces into VM
-                    updateGForces(
-                        smoothedLat = smoothedSample.latG,
-                        smoothedLong = smoothedSample.longG,
-                        rawLat = smoothedSample.rawLatG,
-                        rawLong = smoothedSample.rawLongG,
-                        z = 0f
-                    )
-
-                    // Corner FSM using simulated time
-                    updateCornerCaptureState(
-                        track = currentTrack,
-                        utcMsOverride = simUtc
-                    )
-
-                    // Sample logging using simulated time + interval
-                    recordCurrentSample(
-                        utcMsOverride = simUtc,
-                        intervalMsOverride = intervalMs
-                    )
                 }
 
-                Log.d(
-                    "DebugSim",
-                    "Finished truncated simulation from simulation3.csv into eventId=${event.id}"
+                RecordingHealth.log(
+                    "REPLAY done source=$sourceName rows=$rows skipped=$skipped " +
+                            "worstRowMs=$worstRowMs wallSec=${(System.currentTimeMillis() - wallStart) / 1000}"
                 )
-
-                stopEvent()
+                _simStatus.value = "Replay done: $rows rows, worst row ${worstRowMs} ms"
+                if (_currentEvent.value?.id == event.id) stopEvent()
+            } catch (e: Exception) {
+                _simStatus.value = "Replay error: ${e.message}"
+                if (_currentEvent.value?.id == event.id) stopEvent()
+                Log.e("DebugSim", "Replay failed", e)
+                RecordingHealth.log("REPLAY error after rows=$rows: ${e.javaClass.simpleName}: ${e.message}")
             } finally {
                 // Always clear the flag even if something fails
                 isDeskSimulationRunning = false

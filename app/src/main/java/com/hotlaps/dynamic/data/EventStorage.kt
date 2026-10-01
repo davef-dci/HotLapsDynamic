@@ -12,6 +12,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import java.util.concurrent.Executors
 import kotlin.math.sqrt
 
 /**
@@ -28,58 +29,46 @@ object EventStorage {
 
     private const val TAG = "EventStorage"
 
+    // ---------------------------------------------------------------------------------------------
+    // Recording writer thread
+    // ---------------------------------------------------------------------------------------------
+
     /**
-     * Single lock for event CSV access. Recording appends should be serialized.
+     * All recording-time disk work (appends, apex tagging, backups, finishing) runs on this one
+     * thread, in submission order. The sampling loop only enqueues, so it never waits on storage.
      */
-    private val fileLock = Any()
+    private val recordingExecutor = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "EventRecorder").apply { isDaemon = true }
+    }
+
+    /** Open writers keyed by eventId. Only touched on [recordingExecutor]. */
+    private val writers = HashMap<Long, EventCsvWriter>()
 
     // ---------------------------------------------------------------------------------------------
-    // Write buffer (Option 4: buffered writes + periodic backup)
+    // CSV schema (see EventCsvFormat)
     // ---------------------------------------------------------------------------------------------
 
-    /** How many samples to accumulate before flushing to disk (~5 seconds at 10 Hz). */
-    private const val FLUSH_INTERVAL_SAMPLES = 50
+    private const val CSV_HEADER = EventCsvFormat.HEADER
+    private const val IDX_TIMESTAMP_MS = EventCsvFormat.IDX_TIMESTAMP_MS
+    private const val IDX_DELTA_MS = EventCsvFormat.IDX_DELTA_MS
+    private const val IDX_TRACK_NAME = EventCsvFormat.IDX_TRACK_NAME
+    private const val IDX_EVENT_NAME = EventCsvFormat.IDX_EVENT_NAME
+    private const val IDX_GPS_LAT = EventCsvFormat.IDX_GPS_LAT
+    private const val IDX_GPS_LON = EventCsvFormat.IDX_GPS_LON
+    private const val IDX_CLOSEST_CORNER_INDEX = EventCsvFormat.IDX_CLOSEST_CORNER_INDEX
+    private const val IDX_DIST_TO_CLOSEST_CORNER_M = EventCsvFormat.IDX_DIST_TO_CLOSEST_CORNER_M
+    private const val IDX_RAW_LAT_G = EventCsvFormat.IDX_RAW_LAT_G
+    private const val IDX_RAW_LONG_G = EventCsvFormat.IDX_RAW_LONG_G
+    private const val IDX_LAT_G = EventCsvFormat.IDX_LAT_G
+    private const val IDX_LONG_G = EventCsvFormat.IDX_LONG_G
+    private const val IDX_GSUM = EventCsvFormat.IDX_GSUM
+    private const val IDX_SPEED = EventCsvFormat.IDX_SPEED
+    private const val IDX_CORNER_INDEX = EventCsvFormat.IDX_CORNER_INDEX
+    private const val IDX_CORNER_NAME = EventCsvFormat.IDX_CORNER_NAME
+    private const val IDX_VISIT_NUMBER = EventCsvFormat.IDX_VISIT_NUMBER
+    private const val IDX_APEX = EventCsvFormat.IDX_APEX
 
-    /** In-memory write buffers keyed by eventId. Guarded by fileLock. */
-    private val writeBuffers = mutableMapOf<Long, StringBuilder>()
-
-    /** Running sample count per eventId since last flush. Guarded by fileLock. */
-    private val sampleCounts = mutableMapOf<Long, Int>()
-
-    // ---------------------------------------------------------------------------------------------
-    // CSV schema (single source of truth)
-    // ---------------------------------------------------------------------------------------------
-
-    // NOTE: If you add/reorder columns, update BOTH the header and indices below.
-    private const val CSV_HEADER =
-        "timestampMs,deltaMs,localTime,trackName,eventName," +
-                "gpsLat,gpsLon,closestCornerIndex,distanceToClosestCornerM," +
-                "rawLatG,rawLongG,latG,longG,gSum," +
-                "speed," +
-                "cornerIndex,cornerName,visitNumber,Apex\n"
-
-    // Column indices for parsing (must match CSV_HEADER above).
-    private const val IDX_TIMESTAMP_MS = 0
-    private const val IDX_DELTA_MS = 1
-    // IDX_LOCAL_TIME = 2 (stored but not parsed)
-    private const val IDX_TRACK_NAME = 3
-    private const val IDX_EVENT_NAME = 4
-    private const val IDX_GPS_LAT = 5
-    private const val IDX_GPS_LON = 6
-    private const val IDX_CLOSEST_CORNER_INDEX = 7
-    private const val IDX_DIST_TO_CLOSEST_CORNER_M = 8
-    private const val IDX_RAW_LAT_G = 9
-    private const val IDX_RAW_LONG_G = 10
-    private const val IDX_LAT_G = 11
-    private const val IDX_LONG_G = 12
-    private const val IDX_GSUM = 13
-    private const val IDX_SPEED = 14
-    private const val IDX_CORNER_INDEX = 15
-    private const val IDX_CORNER_NAME = 16
-    private const val IDX_VISIT_NUMBER = 17
-    private const val IDX_APEX = 18
-
-    private const val EXPECTED_COLS = 19
+    private const val EXPECTED_COLS = EventCsvFormat.EXPECTED_COLS
 
     // ---------------------------------------------------------------------------------------------
     // Directory helpers
@@ -111,121 +100,76 @@ object EventStorage {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // CSV append (recording path)
+    // Recording path
     // ---------------------------------------------------------------------------------------------
 
+    private fun apexSidecarFile(dir: File, eventId: Long) = File(dir, "event_${eventId}_apex.txt")
+
+    private fun backupFile(dir: File, eventId: Long) = File(dir, "event_${eventId}_backup.csv")
+
+    /** Call only on [recordingExecutor]. */
+    private fun writerFor(context: Context, eventId: Long): EventCsvWriter? {
+        writers[eventId]?.let { return it }
+        val dir = eventsDir(context) ?: return null
+        return EventCsvWriter(
+            file = File(dir, "event_${eventId}.csv"),
+            apexSidecar = apexSidecarFile(dir, eventId)
+        ).also { writers[eventId] = it }
+    }
+
     /**
-     * Append one telemetry sample to the per-event CSV.
+     * Queue one telemetry sample for the event CSV. Returns immediately.
      *
-     * IMPORTANT:
-     *  - Called during recording; keep fast.
-     *  - We store whatever GPS values exist at record time.
-     *  - We do NOT do interpolation here.
-     *
-     * Note: `cornerTriggerRadiusM` currently unused but kept for signature stability.
+     * @param holdFromUtcMs start of the earliest open corner visit (null if none), so the
+     *        apex row is still in memory when [tagApex] runs. See [EventCsvWriter].
      */
-    fun appendSample(
-        context: Context,
-        sample: EventSample,
-        cornerTriggerRadiusM: Double
-    ) {
-        synchronized(fileLock) {
-            val dir = eventsDir(context) ?: return
-            val file = File(dir, "event_${sample.eventId}.csv")
-            val isNewFile = !file.exists()
-
+    fun appendSample(context: Context, sample: EventSample, holdFromUtcMs: Long?) {
+        val appContext = context.applicationContext
+        recordingExecutor.execute {
             try {
-                // Write CSV header immediately on file creation so the file is always valid
-                // on disk even before the first buffer flush.
-                if (isNewFile) {
-                    file.appendText(CSV_HEADER)
-                }
-
-                val localTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-                    .apply { timeZone = TimeZone.getDefault() }
-                    .format(Date(sample.utcMs))
-
-                val speedStr = sample.speedMps?.toString() ?: ""
-                val apexStr = if (sample.isApexSample) "1" else "0"
-
-                val line = buildString {
-                    append(sample.utcMs); append(',')
-                    append(sample.intervalMs); append(',')
-                    append(localTime); append(',')
-                    append(sample.trackName); append(',')
-                    append(sample.eventName); append(',')
-                    append(sample.gpsLat); append(',')
-                    append(sample.gpsLon); append(',')
-                    append(sample.closestCornerIndex); append(',')
-                    append(sample.distanceToClosestCornerM); append(',')
-                    append(sample.rawLatG); append(',')
-                    append(sample.rawLongG); append(',')
-                    append(sample.latG); append(',')
-                    append(sample.longG); append(',')
-                    append(sample.gSum); append(',')
-                    append(speedStr); append(',')
-                    append(sample.cornerIndex); append(',')
-                    append(sample.cornerName); append(',')
-                    append(sample.visitNumber); append(',')
-                    append(apexStr)
-                    append('\n')
-                }
-
-                // Accumulate into buffer
-                val buf = writeBuffers.getOrPut(sample.eventId) { StringBuilder() }
-                buf.append(line)
-                val count = (sampleCounts[sample.eventId] ?: 0) + 1
-                sampleCounts[sample.eventId] = count
-
-                // Flush to disk every FLUSH_INTERVAL_SAMPLES (~5 seconds at 10 Hz)
-                if (count >= FLUSH_INTERVAL_SAMPLES) {
-                    file.appendText(buf.toString())
-                    buf.setLength(0)
-                    sampleCounts[sample.eventId] = 0
-                }
-
+                writerFor(appContext, sample.eventId)?.append(sample, holdFromUtcMs)
             } catch (e: Exception) {
                 Log.e(TAG, "appendSample: error writing sample for event ${sample.eventId}", e)
             }
         }
     }
 
-    /**
-     * Flushes any buffered samples for [eventId] to disk immediately.
-     * Call this before any operation that reads the CSV (apex tagging, speed
-     * interpolation, export) and when recording stops.
-     */
-    fun flushBuffer(context: Context, eventId: Long) {
-        synchronized(fileLock) {
-            val buf = writeBuffers[eventId] ?: return
-            if (buf.isEmpty()) return
-            val dir = eventsDir(context) ?: return
-            val file = File(dir, "event_${eventId}.csv")
+    /** Queue an apex tag for one corner visit. Returns immediately; never rewrites the file. */
+    fun tagApex(
+        context: Context,
+        eventId: Long,
+        apexUtcMs: Long,
+        cornerIndex: Int,
+        visitNumber: Int,
+        cornerName: String
+    ) {
+        val appContext = context.applicationContext
+        recordingExecutor.execute {
             try {
-                file.appendText(buf.toString())
-                buf.setLength(0)
-                sampleCounts[eventId] = 0
-                Log.d(TAG, "flushBuffer: flushed buffer for event $eventId")
+                val inMemory = writerFor(appContext, eventId)
+                    ?.tagApex(apexUtcMs, cornerIndex, visitNumber, cornerName)
+                if (inMemory == false) {
+                    Log.w(TAG, "tagApex: corner=$cornerIndex visit=$visitNumber missed held rows; sidecar")
+                }
             } catch (e: Exception) {
-                Log.e(TAG, "flushBuffer: error flushing event $eventId", e)
+                Log.e(TAG, "tagApex: failed for event $eventId", e)
             }
         }
     }
 
     /**
-     * Flushes the buffer then copies the event CSV to a timestamped backup file.
-     * Backup name: event_<id>_backup.csv  (overwritten each time — only the latest is kept).
-     * Safe to call from a background coroutine every N minutes during recording.
+     * Writes rows that are no longer taggable, then copies the event CSV to
+     * event_<id>_backup.csv. Blocks until done, so call from a background thread.
      */
     fun flushAndBackup(context: Context, eventId: Long) {
-        flushBuffer(context, eventId)
-        synchronized(fileLock) {
-            val dir = eventsDir(context) ?: return
+        val appContext = context.applicationContext
+        runOnRecorder {
+            writers[eventId]?.flushReady()
+            val dir = eventsDir(appContext) ?: return@runOnRecorder
             val src = File(dir, "event_${eventId}.csv")
-            if (!src.exists()) return
-            val backup = File(dir, "event_${eventId}_backup.csv")
+            if (!src.exists()) return@runOnRecorder
             try {
-                src.copyTo(backup, overwrite = true)
+                src.copyTo(backupFile(dir, eventId), overwrite = true)
                 Log.d(TAG, "flushAndBackup: backup written for event $eventId (${src.length() / 1024} KB)")
             } catch (e: Exception) {
                 Log.e(TAG, "flushAndBackup: failed for event $eventId", e)
@@ -234,13 +178,47 @@ object EventStorage {
     }
 
     /**
-     * Cleans up in-memory buffer state for a finished event.
-     * Call after stopEvent() once all flushes are complete.
+     * Ends recording for [eventId]: writes all remaining rows, runs the finishing pass
+     * (speed interpolation, event name, late apex tags), renames the file to [finalName]
+     * if given, and refreshes the backup copy. Blocks, so call from a background thread.
+     *
+     * Everything happens in this order on purpose: renaming before the last rows were written
+     * used to split the tail of the session into a separate headerless file.
+     *
+     * @return the final event file, or null if nothing was recorded.
      */
-    fun clearBuffer(eventId: Long) {
-        synchronized(fileLock) {
-            writeBuffers.remove(eventId)
-            sampleCounts.remove(eventId)
+    fun finishEvent(context: Context, eventId: Long, finalName: String?): File? {
+        val appContext = context.applicationContext
+        runOnRecorder { writers.remove(eventId)?.close() }
+
+        val dir = eventsDir(appContext) ?: return null
+        var file = File(dir, "event_${eventId}.csv")
+        if (!file.exists()) return null
+
+        try {
+            val result = EventPostProcessor.finish(file, finalName, apexSidecarFile(dir, eventId))
+            Log.d(TAG, "finishEvent: event $eventId finished: $result")
+        } catch (e: Exception) {
+            Log.e(TAG, "finishEvent: finishing pass failed for event $eventId; raw file kept", e)
+        }
+
+        if (!finalName.isNullOrBlank()) {
+            renameEventFile(file, finalName)?.let { file = it }
+        }
+
+        try {
+            file.copyTo(backupFile(dir, eventId), overwrite = true)
+        } catch (e: Exception) {
+            Log.e(TAG, "finishEvent: backup copy failed for event $eventId", e)
+        }
+        return file
+    }
+
+    private fun runOnRecorder(block: () -> Unit) {
+        try {
+            recordingExecutor.submit(block).get()
+        } catch (e: Exception) {
+            Log.e(TAG, "runOnRecorder: task failed", e)
         }
     }
 
@@ -293,6 +271,10 @@ object EventStorage {
         val srcDir = eventsDir(context) ?: return 0
         val dstDir = FileHelper.publicEventsExportDir() ?: return 0
 
+        // Events are already recorded into the public folder. Copying a file onto itself with
+        // copyTo(overwrite = true) deletes the target first, i.e. deletes the event.
+        if (srcDir.canonicalPath == dstDir.canonicalPath) return 0
+
         val files = srcDir.listFiles() ?: return 0
         var copied = 0
 
@@ -312,58 +294,15 @@ object EventStorage {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // Editing existing event CSV (mutates event files by design)
+    // Renaming
     // ---------------------------------------------------------------------------------------------
 
-    fun updateEventNameInCsv(context: Context, eventId: Long, newName: String) {
-        val dir = eventsDir(context) ?: return
-        val file = File(dir, "event_${eventId}.csv")
-        if (!file.exists()) {
-            Log.w(TAG, "updateEventNameInCsv: no CSV found for eventId=$eventId")
-            return
-        }
-
-        try {
-            val lines = file.readLines()
-            if (lines.isEmpty()) return
-
-            val header = lines[0]
-            val updatedLines = ArrayList<String>(lines.size)
-            updatedLines.add(header)
-
-            for (i in 1 until lines.size) {
-                val line = lines[i]
-                if (line.isBlank()) {
-                    updatedLines.add(line)
-                    continue
-                }
-
-                val parts = line.split(',')
-                if (parts.size <= IDX_EVENT_NAME) {
-                    updatedLines.add(line) // keep malformed row
-                    continue
-                }
-
-                val mutable = parts.toMutableList()
-                mutable[IDX_EVENT_NAME] = newName
-                updatedLines.add(mutable.joinToString(","))
-            }
-
-            file.writeText(updatedLines.joinToString("\n") + "\n")
-            Log.d(TAG, "updateEventNameInCsv: updated eventName for eventId=$eventId")
-        } catch (e: Exception) {
-            Log.e(TAG, "updateEventNameInCsv: error updating CSV for eventId=$eventId", e)
-        }
-    }
-
-    fun renameEventFile(context: Context, eventId: Long, newName: String) {
-        val dir = eventsDir(context) ?: return
-        val oldFile = File(dir, "event_${eventId}.csv")
-
-        if (!oldFile.exists()) {
-            Log.w(TAG, "renameEventFile: old file not found for eventId=$eventId at ${oldFile.absolutePath}")
-            return
-        }
+    /**
+     * Renames [oldFile] to "<sanitized name>.csv" (adding " (2)", " (3)"... if taken).
+     * Returns the new file, or null if the rename failed.
+     */
+    private fun renameEventFile(oldFile: File, newName: String): File? {
+        val dir = oldFile.parentFile ?: return null
 
         // Sanitize the name for filesystem safety
         val safeBase = newName
@@ -372,99 +311,19 @@ object EventStorage {
             .trim()
             .ifBlank { "Event" }
 
-        // Attempt "<safeBase>.csv", then "<safeBase> (2).csv", etc.
-        var targetName = "$safeBase.csv"
-        var newFile = File(dir, targetName)
+        var newFile = File(dir, "$safeBase.csv")
         var suffix = 2
-
         while (newFile.exists()) {
-            targetName = "$safeBase ($suffix).csv"
-            newFile = File(dir, targetName)
+            newFile = File(dir, "$safeBase ($suffix).csv")
             suffix++
         }
 
-        try {
-            val ok = oldFile.renameTo(newFile)
-            if (ok) {
-                Log.d(TAG, "renameEventFile: renamed to ${newFile.name}")
-            } else {
-                Log.e(TAG, "renameEventFile: renameTo() failed for ${oldFile.absolutePath}")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "renameEventFile: exception while renaming", e)
-        }
-    }
-
-    /**
-     * Tags a single "best matching" row as the apex sample for a given corner visit.
-     * Writes cornerIndex/cornerName/visitNumber, and sets Apex column to "True".
-     */
-    fun tagApexSampleInCsv(
-        context: Context,
-        eventId: Long,
-        cornerIndex: Int,
-        visitNumber: Int,
-        apexUtcMs: Long,
-        cornerName: String
-    ) {
-        // Flush any buffered samples first so this read sees the full dataset
-        flushBuffer(context, eventId)
-
-        val dir = eventsDir(context) ?: return
-        val file = File(dir, "event_${eventId}.csv")
-        if (!file.exists()) {
-            Log.w(TAG, "tagApexSampleInCsv: CSV not found for eventId=$eventId")
-            return
-        }
-
-        try {
-            val lines = file.readLines()
-            if (lines.size <= 1) return
-
-            val dataLines = lines.toMutableList() // includes header at index 0
-            var bestLineIndex = -1
-            var bestError = Long.MAX_VALUE
-
-            // Search for nearest timestamp row
-            for (i in 1 until dataLines.size) {
-                val line = dataLines[i]
-                if (line.isBlank()) continue
-
-                val parts = line.split(',')
-                if (parts.size < EXPECTED_COLS) continue
-
-                val utcMs = parts[IDX_TIMESTAMP_MS].toLongOrNull() ?: continue
-                val err = kotlin.math.abs(utcMs - apexUtcMs)
-                if (err < bestError) {
-                    bestError = err
-                    bestLineIndex = i
-                }
-            }
-
-            if (bestLineIndex == -1) {
-                Log.w(TAG, "tagApexSampleInCsv: no matching row for apexUtcMs=$apexUtcMs")
-                return
-            }
-
-            val parts = dataLines[bestLineIndex].split(',').toMutableList()
-            if (parts.size < EXPECTED_COLS) return
-
-            parts[IDX_CORNER_INDEX] = cornerIndex.toString()
-            parts[IDX_CORNER_NAME] = cornerName
-            parts[IDX_VISIT_NUMBER] = visitNumber.toString()
-            parts[IDX_APEX] = "True"
-
-            dataLines[bestLineIndex] = parts.joinToString(",")
-
-            file.writeText(dataLines.joinToString("\n") + "\n")
-
-            Log.d(
-                TAG,
-                "tagApexSampleInCsv: tagged apex at line=$bestLineIndex " +
-                        "for eventId=$eventId, corner=$cornerIndex, visit=$visitNumber"
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "tagApexSampleInCsv: error updating CSV for eventId=$eventId", e)
+        return if (oldFile.renameTo(newFile)) {
+            Log.d(TAG, "renameEventFile: renamed to ${newFile.name}")
+            newFile
+        } else {
+            Log.e(TAG, "renameEventFile: renameTo() failed for ${oldFile.absolutePath}")
+            null
         }
     }
 
@@ -1102,140 +961,6 @@ object EventStorage {
 
 
 
-    // ---------------------------------------------------------------------------------------------
-    // Offline speed rewrite (mutates the event CSV by design)
-    // ---------------------------------------------------------------------------------------------
-
-    /**
-     * Offline pass: rewrite the SPEED column (index 14) in the event CSV by linearly
-     * interpolating between speed-change anchors. This function DOES modify the event file.
-     *
-     * NOTE: This is separate from Share/export. Share/export should not call this.
-     */
-    fun recomputeInterpolatedSpeedForEvent(context: Context, eventId: Long): Boolean {
-        // Flush any buffered samples before reading the full file
-        flushBuffer(context, eventId)
-
-        val dir = eventsDir(context) ?: return false
-        val file = File(dir, "event_${eventId}.csv")
-        if (!file.exists()) {
-            Log.w(TAG, "recomputeInterpolatedSpeedForEvent: no CSV found for eventId=$eventId")
-            return false
-        }
-
-        try {
-            val lines = file.readLines()
-            if (lines.size <= 1) {
-                Log.w(TAG, "recomputeInterpolatedSpeedForEvent: file has no data rows")
-                return false
-            }
-
-            val header = lines[0]
-            val dataLines = lines.subList(1, lines.size)
-
-            val rows = mutableListOf<MutableList<String>>()
-            val timestamps = mutableListOf<Long>()
-            val speeds = mutableListOf<Double?>()
-
-            for (line in dataLines) {
-                if (line.isBlank()) continue
-
-                val parts = line.split(',').toMutableList()
-                if (parts.size <= IDX_SPEED) {
-                    rows.add(parts)
-                    timestamps.add(0L)
-                    speeds.add(null)
-                    continue
-                }
-
-                val utcMs = parts[IDX_TIMESTAMP_MS].toLongOrNull()
-                val speed = parts[IDX_SPEED].toDoubleOrNull()
-
-                rows.add(parts)
-                timestamps.add(utcMs ?: 0L)
-                speeds.add(speed)
-            }
-
-            if (rows.isEmpty()) {
-                Log.w(TAG, "recomputeInterpolatedSpeedForEvent: no parsable rows")
-                return false
-            }
-
-            fun approxEqual(a: Double?, b: Double?, eps: Double = 1e-9): Boolean {
-                if (a == null && b == null) return true
-                if (a == null || b == null) return false
-                return kotlin.math.abs(a - b) <= eps
-            }
-
-            val anchorIndices = mutableListOf<Int>()
-            var lastAnchorSpeed: Double? = null
-            var lastAnchorIndex: Int? = null
-
-            for (i in rows.indices) {
-                val s = speeds[i] ?: continue
-                if (lastAnchorIndex == null) {
-                    lastAnchorIndex = i
-                    lastAnchorSpeed = s
-                    anchorIndices.add(i)
-                } else if (!approxEqual(s, lastAnchorSpeed)) {
-                    lastAnchorIndex = i
-                    lastAnchorSpeed = s
-                    anchorIndices.add(i)
-                }
-            }
-
-            if (anchorIndices.size < 2) {
-                Log.w(TAG, "recomputeInterpolatedSpeedForEvent: only ${anchorIndices.size} speed anchor(s); skipping")
-                return false
-            }
-
-            val lastIndexWithSpeed = (rows.indices).lastOrNull { speeds[it] != null }
-            if (lastIndexWithSpeed != null && !anchorIndices.contains(lastIndexWithSpeed)) {
-                anchorIndices.add(lastIndexWithSpeed)
-            }
-
-            val newSpeeds = speeds.toMutableList()
-
-            for (a in 0 until anchorIndices.size - 1) {
-                val i0 = anchorIndices[a]
-                val i1 = anchorIndices[a + 1]
-                if (i0 < 0 || i1 <= i0 || i1 >= rows.size) continue
-
-                val v0 = speeds[i0]
-                val v1 = speeds[i1]
-                val t0 = timestamps[i0].toDouble()
-                val t1 = timestamps[i1].toDouble()
-
-                if (v0 == null || v1 == null) continue
-                if (t1 <= t0) continue
-
-                val denom = t1 - t0
-                for (i in i0..i1) {
-                    val ti = timestamps[i].toDouble()
-                    val u = ((ti - t0) / denom).coerceIn(0.0, 1.0)
-                    newSpeeds[i] = v0 + (v1 - v0) * u
-                }
-            }
-
-            for (i in rows.indices) {
-                rows[i][IDX_SPEED] = newSpeeds[i]?.toString() ?: ""
-            }
-
-            val newContent = buildString {
-                append(header); append('\n')
-                for (row in rows) {
-                    append(row.joinToString(",")); append('\n')
-                }
-            }
-
-            file.writeText(newContent)
-            Log.d(TAG, "recomputeInterpolatedSpeedForEvent: updated speeds for eventId=$eventId")
-            return true
-        } catch (e: Exception) {
-            Log.e(TAG, "recomputeInterpolatedSpeedForEvent: error processing CSV for eventId=$eventId", e)
-            return false
-        }
-    }
 
     // ---------------------------------------------------------------------------------------------
     // Misc / placeholders

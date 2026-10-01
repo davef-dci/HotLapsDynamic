@@ -67,6 +67,15 @@ android {
         // Avoid common META-INF collisions if they pop up later
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1,LICENSE*,NOTICE*}"
     }
+
+    testOptions {
+        unitTests.all {
+            // RecordingSoakTest replay: gradlew testDebugUnitTest -DreplayCsv=<event.csv>
+            it.systemProperty("replayCsv", System.getProperty("replayCsv") ?: "")
+            it.systemProperty("replayRadiusM", System.getProperty("replayRadiusM") ?: "")
+            it.testLogging { showStandardStreams = true }
+        }
+    }
 }
 
 dependencies {

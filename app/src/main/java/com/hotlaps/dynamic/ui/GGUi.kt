@@ -107,6 +107,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberUpdatedState
 
 import com.hotlaps.dynamic.util.UsbPuckGpsSource
+import com.hotlaps.dynamic.util.RecordingHealth
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.google.android.gms.auth.api.signin.GoogleSignIn
@@ -488,9 +489,14 @@ fun GGScreen(
         var latEma = 0f
         var longEma = 0f
         var lastUpdateMs = System.currentTimeMillis()
+        RecordingHealth.resetTicks()
 
         while (true) {
             kotlinx.coroutines.delay(50) // ~20 Hz world tick
+            RecordingHealth.onTick(
+                label = "live",
+                recording = driveViewModel.recordingState.value == DriveViewModel.RecordingState.Recording
+            )
 
             // Pick forward vector: use calibration if present, else guess
             val forward = normalize3(
@@ -632,10 +638,9 @@ fun GGScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        // Save the new name (and update CSV), then stop the event
-                        driveViewModel.renameCurrentEvent(context, pendingEventName)
+                        // Stop and name the session (renamed after the last rows are written)
                         showRenameDialog = false
-                        driveViewModel.stopEvent()
+                        driveViewModel.stopEvent(finalName = pendingEventName)
                     }
 
                 ) {
@@ -1235,6 +1240,41 @@ fun GGScreen(
                                                 modifier = Modifier.padding(bottom = 8.dp)
                                             ) {
                                                 Text("Replay simulation.csv")
+                                            }
+
+                                            // Full-race replay for reliability testing. Must be in the
+                                            // app's own folder (shared Downloads files pushed by adb
+                                            // aren't readable by the app):
+                                            //   adb push <event>.csv /sdcard/Android/data/com.hotlaps.dynamic/files/sim/replay.csv
+                                            val replayFile = remember {
+                                                java.io.File(context.getExternalFilesDir("sim"), "replay.csv")
+                                            }
+                                            val simStatus by driveViewModel.simStatus.collectAsState()
+                                            Button(
+                                                onClick = {
+                                                    driveViewModel.startSimulationFromTruncatedCsv(
+                                                        context = context,
+                                                        track = activeTrack,
+                                                        playbackSpeed = 20.0,
+                                                        emaTauMs = tauMsOrNull,
+                                                        maWindowSize = smoothingLevel.windowSize,
+                                                        sourceFile = replayFile
+                                                    )
+                                                },
+                                                enabled = replayFile.exists(),
+                                                modifier = Modifier.padding(bottom = 8.dp)
+                                            ) {
+                                                Text(
+                                                    if (replayFile.exists()) "Replay race file at 20×"
+                                                    else "No files/sim/replay.csv"
+                                                )
+                                            }
+                                            if (simStatus.isNotEmpty()) {
+                                                Text(
+                                                    text = simStatus,
+                                                    fontSize = 14.sp,
+                                                    modifier = Modifier.padding(bottom = 8.dp)
+                                                )
                                             }
                                         } else {
                                             Text(

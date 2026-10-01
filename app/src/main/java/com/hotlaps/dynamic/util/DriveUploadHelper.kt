@@ -12,7 +12,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -192,7 +191,19 @@ object DriveUploadHelper {
                 put("parents", JSONArray().put(folderId))
             }.toString()
 
-            conn.outputStream.write(buildMultipartBody(boundary, meta, file.readBytes()))
+            // Stream the file: a race CSV reaches 30+ MB, and without a fixed length
+            // HttpURLConnection buffers the whole body in memory.
+            val crlf = "\r\n"
+            val head = ("--$boundary${crlf}Content-Type: application/json; charset=UTF-8$crlf$crlf" +
+                    meta +
+                    "$crlf--$boundary${crlf}Content-Type: text/csv$crlf$crlf").toByteArray(Charsets.UTF_8)
+            val tail = "$crlf--$boundary--$crlf".toByteArray(Charsets.UTF_8)
+            conn.setFixedLengthStreamingMode(head.size + file.length() + tail.size)
+            conn.outputStream.use { out ->
+                out.write(head)
+                file.inputStream().use { it.copyTo(out) }
+                out.write(tail)
+            }
 
             val code = conn.responseCode
             if (code == 200 || code == 201) {
@@ -210,18 +221,9 @@ object DriveUploadHelper {
             conn.setRequestProperty("Authorization", "Bearer $token")
             conn.setRequestProperty("Content-Type", "text/csv")
             conn.doOutput = true
-            conn.outputStream.write(file.readBytes())
+            conn.setFixedLengthStreamingMode(file.length())
+            conn.outputStream.use { out -> file.inputStream().use { it.copyTo(out) } }
             conn.responseCode in 200..299
         } finally { conn.disconnect() }
-    }
-
-    private fun buildMultipartBody(boundary: String, meta: String, fileBytes: ByteArray): ByteArray {
-        val baos = ByteArrayOutputStream()
-        baos.write("--$boundary\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n".toByteArray(Charsets.UTF_8))
-        baos.write(meta.toByteArray(Charsets.UTF_8))
-        baos.write("\r\n--$boundary\r\nContent-Type: text/csv\r\n\r\n".toByteArray(Charsets.UTF_8))
-        baos.write(fileBytes)
-        baos.write("\r\n--$boundary--\r\n".toByteArray(Charsets.UTF_8))
-        return baos.toByteArray()
     }
 }
