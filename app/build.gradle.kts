@@ -73,6 +73,8 @@ android {
             // RecordingSoakTest replay: gradlew testDebugUnitTest -DreplayCsv=<event.csv>
             it.systemProperty("replayCsv", System.getProperty("replayCsv") ?: "")
             it.systemProperty("replayRadiusM", System.getProperty("replayRadiusM") ?: "")
+            it.systemProperty("trackJson", System.getProperty("trackJson") ?: "")
+            it.systemProperty("finishOut", System.getProperty("finishOut") ?: "")
             it.testLogging { showStandardStreams = true }
         }
     }

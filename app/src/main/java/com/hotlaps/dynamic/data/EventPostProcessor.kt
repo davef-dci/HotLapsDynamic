@@ -6,7 +6,10 @@ import java.io.File
  * One-time finishing pass over an event CSV after recording stops:
  *  - linear speed interpolation between speed-change anchors (same algorithm as before)
  *  - optional event name for every row
- *  - apex tags from the writer's sidecar (apexes that missed the in-memory hold)
+ *  - corner apexes and laps re-detected from interpolated positions (CornerLapDetector) when the
+ *    track's corners are given; these replace the live tags, whose lap numbering breaks when a
+ *    corner pass is missed. Otherwise: live tags + the writer's sidecar (apexes that missed the
+ *    in-memory hold)
  *
  * Streams the file twice and holds only one long + one double per row (~8 MB for 500k rows),
  * where the old readLines()/joinToString approach needed several copies of the whole file.
@@ -17,7 +20,12 @@ object EventPostProcessor {
     data class Result(
         val rows: Int,
         val speedAnchors: Int,
-        val apexTagsApplied: Int
+        val apexTagsApplied: Int,
+        /** Apex rows tagged live during recording (before this pass). */
+        val liveApexRows: Int = 0,
+        /** True if apexes/laps came from offline re-detection. */
+        val redetected: Boolean = false,
+        val laps: Int = 0
     )
 
     private data class ApexTag(
@@ -27,13 +35,22 @@ object EventPostProcessor {
         val cornerName: String
     )
 
-    fun finish(file: File, eventName: String?, apexSidecar: File?): Result {
+    fun finish(
+        file: File,
+        eventName: String?,
+        apexSidecar: File?,
+        corners: List<CornerLapDetector.CornerSpec>? = null,
+        radiusM: Double = CornerLapDetector.DEFAULT_RADIUS_M
+    ): Result {
         require(file.exists()) { "Event CSV not found: ${file.absolutePath}" }
 
         // ---- Pass 1: timestamps + speeds -------------------------------------------------
         var timestamps = LongArray(4096)
         var speeds = DoubleArray(4096)   // NaN = no speed
+        var lats = DoubleArray(4096)
+        var lons = DoubleArray(4096)
         var n = 0
+        var liveApexRows = 0
 
         file.bufferedReader().useLines { lines ->
             lines.forEachIndexed { lineNo, line ->
@@ -42,23 +59,41 @@ object EventPostProcessor {
                 if (n == timestamps.size) {
                     timestamps = timestamps.copyOf(n * 2)
                     speeds = speeds.copyOf(n * 2)
+                    lats = lats.copyOf(n * 2)
+                    lons = lons.copyOf(n * 2)
                 }
                 val parts = line.split(',')
                 timestamps[n] = parts.getOrNull(EventCsvFormat.IDX_TIMESTAMP_MS)?.toLongOrNull() ?: 0L
                 speeds[n] = if (parts.size > EventCsvFormat.IDX_SPEED)
                     parts[EventCsvFormat.IDX_SPEED].toDoubleOrNull() ?: Double.NaN
                 else Double.NaN
+                if (parts.size >= EventCsvFormat.EXPECTED_COLS) {
+                    lats[n] = parts[EventCsvFormat.IDX_GPS_LAT].toDoubleOrNull() ?: 0.0
+                    lons[n] = parts[EventCsvFormat.IDX_GPS_LON].toDoubleOrNull() ?: 0.0
+                    val apexToken = parts[EventCsvFormat.IDX_APEX].trim()
+                    if (apexToken == "1" || apexToken.equals("true", ignoreCase = true)) liveApexRows++
+                }
                 n++
             }
         }
 
         val speedAnchors = interpolateSpeeds(timestamps, speeds, n)
 
-        // ---- Apex sidecar -> row index ---------------------------------------------------
+        // ---- Apexes: offline re-detection, else live tags + sidecar ---------------------
         val apexByRow = HashMap<Int, ApexTag>()
-        readSidecar(apexSidecar).forEach { tag ->
-            nearestIndex(timestamps, n, tag.utcMs)?.let { apexByRow[it] = tag }
+        val detected = if (corners.isNullOrEmpty()) emptyList()
+        else CornerLapDetector.detect(timestamps, lats, lons, n, corners, radiusM)
+        val redetected = detected.isNotEmpty()
+        if (redetected) {
+            detected.forEach { a ->
+                apexByRow[a.row] = ApexTag(a.utcMs, a.cornerIndex, a.lap, a.cornerName)
+            }
+        } else {
+            readSidecar(apexSidecar).forEach { tag ->
+                nearestIndex(timestamps, n, tag.utcMs)?.let { apexByRow[it] = tag }
+            }
         }
+        val cleanCornerNames = apexByRow.mapValues { (_, t) -> EventCsvFormat.sanitizeField(t.cornerName) }
 
         // ---- Pass 2: rewrite to temp, then swap ------------------------------------------
         val tmp = File(file.parentFile, file.name + ".tmp")
@@ -78,9 +113,16 @@ object EventPostProcessor {
                         val s = speeds[row]
                         parts[EventCsvFormat.IDX_SPEED] = if (s.isNaN()) "" else s.toString()
                         if (cleanName != null) parts[EventCsvFormat.IDX_EVENT_NAME] = cleanName
+                        if (redetected) {
+                            // Offline detection replaces all live corner tags
+                            parts[EventCsvFormat.IDX_CORNER_INDEX] = "0"
+                            parts[EventCsvFormat.IDX_CORNER_NAME] = ""
+                            parts[EventCsvFormat.IDX_VISIT_NUMBER] = "0"
+                            parts[EventCsvFormat.IDX_APEX] = "0"
+                        }
                         apexByRow[row]?.let { tag ->
                             parts[EventCsvFormat.IDX_CORNER_INDEX] = tag.cornerIndex.toString()
-                            parts[EventCsvFormat.IDX_CORNER_NAME] = tag.cornerName
+                            parts[EventCsvFormat.IDX_CORNER_NAME] = cleanCornerNames.getValue(row)
                             parts[EventCsvFormat.IDX_VISIT_NUMBER] = tag.visitNumber.toString()
                             parts[EventCsvFormat.IDX_APEX] = "1"
                         }
@@ -105,7 +147,14 @@ object EventPostProcessor {
         bak.delete()
         apexSidecar?.delete()
 
-        return Result(rows = n, speedAnchors = speedAnchors, apexTagsApplied = apexByRow.size)
+        return Result(
+            rows = n,
+            speedAnchors = speedAnchors,
+            apexTagsApplied = apexByRow.size,
+            liveApexRows = liveApexRows,
+            redetected = redetected,
+            laps = detected.maxOfOrNull { it.lap } ?: 0
+        )
     }
 
     /**

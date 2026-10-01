@@ -327,9 +327,11 @@ fun CalibrateScreen(onBack: () -> Unit) {
             //   -Y = toward bottom of phone
             //   +X = toward right edge of phone
             //   -X = toward left edge of phone
+            //   -Z = out of the BACK of the phone (upright windscreen/dash mount, screen facing driver)
+            //   +Z = out of the SCREEN
             //
-            // These work for any physical tilt (flat, upright, angled) — only the
-            // edge-of-phone → car-forward relationship matters.
+            // RecordingEngine levels the chosen axis against live gravity, so moderate tilt is
+            // fine. The chosen axis must not point (nearly) straight up or down.
 
             HorizontalDivider()
 
@@ -338,7 +340,8 @@ fun CalibrateScreen(onBack: () -> Unit) {
                 style = MaterialTheme.typography.labelLarge
             )
             Text(
-                "Pick whichever edge of your phone faces the front of the car. " +
+                "Pick whichever side of your phone faces the front of the car. " +
+                "For an upright mount with the screen facing the driver, choose \"Back of phone\". " +
                 "The app reads the live gravity sensor to handle tilt automatically, " +
                 "so this works whether the phone is flat, upright, or at any angle — " +
                 "as long as the chosen edge keeps pointing forward.",
@@ -355,6 +358,8 @@ fun CalibrateScreen(onBack: () -> Unit) {
                 CalibPreset("Bottom of phone  →  front of car", floatArrayOf( 0f, -1f, 0f)),
                 CalibPreset("Right edge  →  front of car",      floatArrayOf( 1f,  0f, 0f)),
                 CalibPreset("Left edge  →  front of car",       floatArrayOf(-1f,  0f, 0f)),
+                CalibPreset("Back of phone  →  front of car",   floatArrayOf( 0f,  0f, -1f)),
+                CalibPreset("Screen  →  front of car",          floatArrayOf( 0f,  0f, 1f)),
             )
 
             presets.forEach { preset ->

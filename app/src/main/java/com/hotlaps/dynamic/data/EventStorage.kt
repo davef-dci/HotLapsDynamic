@@ -7,6 +7,7 @@ import androidx.core.content.FileProvider
 import com.hotlaps.dynamic.model.Event
 import com.hotlaps.dynamic.model.EventSample
 import com.hotlaps.dynamic.util.GForceSmoother
+import com.hotlaps.dynamic.util.RecordingHealth
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -179,7 +180,7 @@ object EventStorage {
 
     /**
      * Ends recording for [eventId]: writes all remaining rows, runs the finishing pass
-     * (speed interpolation, event name, late apex tags), renames the file to [finalName]
+     * (speed interpolation, event name, corner apexes + laps from [corners]), renames the file to [finalName]
      * if given, and refreshes the backup copy. Blocks, so call from a background thread.
      *
      * Everything happens in this order on purpose: renaming before the last rows were written
@@ -187,7 +188,13 @@ object EventStorage {
      *
      * @return the final event file, or null if nothing was recorded.
      */
-    fun finishEvent(context: Context, eventId: Long, finalName: String?): File? {
+    fun finishEvent(
+        context: Context,
+        eventId: Long,
+        finalName: String?,
+        corners: List<CornerLapDetector.CornerSpec>? = null,
+        cornerRadiusM: Double = CornerLapDetector.DEFAULT_RADIUS_M
+    ): File? {
         val appContext = context.applicationContext
         runOnRecorder { writers.remove(eventId)?.close() }
 
@@ -196,8 +203,14 @@ object EventStorage {
         if (!file.exists()) return null
 
         try {
-            val result = EventPostProcessor.finish(file, finalName, apexSidecarFile(dir, eventId))
+            val result = EventPostProcessor.finish(
+                file, finalName, apexSidecarFile(dir, eventId), corners, cornerRadiusM
+            )
             Log.d(TAG, "finishEvent: event $eventId finished: $result")
+            RecordingHealth.log(
+                "FINISH PASS event=$eventId rows=${result.rows} liveApexes=${result.liveApexRows} " +
+                        "apexes=${result.apexTagsApplied} laps=${result.laps} redetected=${result.redetected}"
+            )
         } catch (e: Exception) {
             Log.e(TAG, "finishEvent: finishing pass failed for event $eventId; raw file kept", e)
         }

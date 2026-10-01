@@ -63,6 +63,35 @@ class EventPostProcessorTest {
     }
 
     @Test
+    fun withTrackCorners_offlineApexesReplaceLiveTags() {
+        // Car drives north along lon=-89.0 at 20 m/s, passing a corner at (43.001, -89.0001)
+        val rows = (0 until 200).map { i ->
+            val t = i * 100L
+            val lat = 43.0 + (20.0 * i * 0.1) / 111_320.0
+            // A wrong live tag (corner 9, lap 5) on row 10
+            val tag = if (i == 10) "9,Old,5,1" else "0,,0,0"
+            "$t,$t,2026-04-17 10:00:00,T,E,$lat,-89.0,1,50.0,0.1,0.2,0.1,0.2,0.3,20.0,$tag"
+        }
+        val f = write("e.csv", EventCsvFormat.HEADER.trim(), *rows.toTypedArray())
+        val corner = CornerLapDetector.CornerSpec(1, "Turn 1, fast", 43.001, -89.0001)
+
+        val result = EventPostProcessor.finish(f, null, null, listOf(corner))
+
+        assertTrue(result.redetected)
+        assertEquals(1, result.liveApexRows)
+        val apexRows = cols(f).filter { it[EventCsvFormat.IDX_APEX] == "1" }
+        assertEquals(1, apexRows.size)
+        val a = apexRows.single()
+        assertEquals("1", a[EventCsvFormat.IDX_CORNER_INDEX])
+        assertEquals("Turn 1  fast", a[EventCsvFormat.IDX_CORNER_NAME])
+        assertEquals("1", a[EventCsvFormat.IDX_VISIT_NUMBER])
+        // closest approach: 111.32 m north of start -> row ~56 (5.6 s at 20 m/s)
+        val t = a[EventCsvFormat.IDX_TIMESTAMP_MS].toLong()
+        assertTrue("apex at $t", t in 5_400L..5_800L)
+        assertTrue(cols(f).all { it.size == EventCsvFormat.EXPECTED_COLS })
+    }
+
+    @Test
     fun headerlessAndMalformedRowsSurvive() {
         val f = write("e.csv", row(0, "5.0"), "garbage,row", row(100, "6.0"))
         EventPostProcessor.finish(f, eventName = null, apexSidecar = null)

@@ -526,6 +526,26 @@ fun GGScreen(
                                         }
                                     }
 
+// --- Phone-GPS warning: corner/lap analysis needs the 10 Hz puck ---
+                                    if (!usingExternalGps) {
+                                        Surface(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(top = 6.dp),
+                                            color = Color(0xFFFFB300),
+                                            shape = MaterialTheme.shapes.small
+                                        ) {
+                                            Text(
+                                                text = "No GPS puck: phone GPS (~1 Hz). G-forces are fine, " +
+                                                        "but corner/lap timing is approximate. Plug in the puck.",
+                                                color = Color.Black,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                            )
+                                        }
+                                    }
+
 // === END SESSION HEADER SECTIONS =====================================
 
                                     Spacer(modifier = Modifier.height(8.dp))

@@ -29,6 +29,7 @@ import kotlinx.coroutines.launch
 import java.io.File
 import com.hotlaps.dynamic.data.FileHelper
 import com.hotlaps.dynamic.data.EventCsvFormat
+import com.hotlaps.dynamic.data.CornerLapDetector
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import com.hotlaps.dynamic.util.DriveUploadHelper
@@ -312,8 +313,17 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
      */
     @Synchronized
     fun stopEvent(finalName: String? = null) {
-        // Capture the current event (if any) before we clear it
+        // Capture the current event (if any) and its track before we clear them
         val event = _currentEvent.value
+        val trackCorners = currentTrack?.corners?.map { c ->
+            CornerLapDetector.CornerSpec(
+                index = c.index,
+                name = c.name?.takeIf { it.isNotBlank() } ?: "Corner ${c.index}",
+                lat = c.lat,
+                lon = c.lon
+            )
+        }
+        val radiusM = _cornerTriggerRadiusM.value
 
         // Clear event & recording state
         _currentEvent.value = null
@@ -343,7 +353,7 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
             val name = finalName?.takeIf { it.isNotBlank() }
             RecordingHealth.log("STOP event=${event.id} name=${name ?: "(default)"}")
             viewModelScope.launch(Dispatchers.IO) {
-                val file = EventStorage.finishEvent(appContext, event.id, name)
+                val file = EventStorage.finishEvent(appContext, event.id, name, trackCorners, radiusM)
                 RecordingHealth.log("FINISHED event=${event.id} file=${file?.name} bytes=${file?.length()}")
                 // Release the foreground service only once the file is safely finished
                 if (_currentEvent.value == null) RecordingService.stop(appContext)
@@ -413,14 +423,11 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
         _gpsLat.value = lat
         _gpsLon.value = lon
 
+        // Raw GPS speed (Doppler/SOG is already filtered by the receiver). An EMA here made the
+        // recorded speed lag G by ~1.9 s with the phone's 1 Hz GPS; the finishing pass
+        // interpolates between fixes instead.
         if (speedMps != null && speedMps >= 0.0) {
-            val alpha = 0.4  // EMA smoothing factor
-            val prev = _speedMps.value
-            val smoothed =
-                if (prev <= 0.0) speedMps
-                else alpha * speedMps + (1.0 - alpha) * prev
-
-            _speedMps.value = smoothed
+            _speedMps.value = speedMps
         }
     }
 

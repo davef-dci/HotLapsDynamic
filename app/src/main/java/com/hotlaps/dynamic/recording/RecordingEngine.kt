@@ -75,10 +75,17 @@ class RecordingEngine(
     private val settingsRepo = SettingsRepo(appContext)
     val usbGps = UsbPuckGpsSource(appContext)
 
-    // Latest raw sensor readings (device axes, m/s^2)
+    // Linear acceleration accumulated since the last tick (device axes, m/s^2). The tick uses
+    // the MEAN of all readings in its window, not just the latest one: point-sampling a
+    // vibrating car aliases engine/road vibration into false low-frequency G.
+    private var accelSumX = 0f
+    private var accelSumY = 0f
+    private var accelSumZ = 0f
+    private var accelCount = 0
     private var accelX = 0f
     private var accelY = 0f
     private var accelZ = 0f
+    private var warnedDegenerateAxis = false
     private var gravX = 0f
     private var gravY = 0f
     private var gravZ = 0f
@@ -190,8 +197,17 @@ class RecordingEngine(
                 recording = drive.recordingState.value == DriveViewModel.RecordingState.Recording
             )
 
+            // Mean linear acceleration over this tick's window (hold the last value if none arrived)
+            if (accelCount > 0) {
+                accelX = accelSumX / accelCount
+                accelY = accelSumY / accelCount
+                accelZ = accelSumZ / accelCount
+                accelSumX = 0f; accelSumY = 0f; accelSumZ = 0f
+                accelCount = 0
+            }
+
             // Pick forward vector: use calibration if present, else guess (-Y forward)
-            val forward = normalize3(
+            val calibForward = normalize3(
                 calibVec?.getOrNull(0) ?: 0f,
                 calibVec?.getOrNull(1) ?: -1f,
                 calibVec?.getOrNull(2) ?: 0f
@@ -200,6 +216,22 @@ class RecordingEngine(
             // Gravity vector -> "down"; "up" is opposite
             val down = normalize3(gravX, gravY, gravZ) ?: floatArrayOf(0f, 0f, 1f)
             val up = floatArrayOf(-down[0], -down[1], -down[2])
+
+            // Level the forward axis: remove its vertical component so a tilted mount doesn't
+            // mix vertical acceleration (bumps, kerbs, pitch) into longitudinal G
+            val fUp = dot3(calibForward[0], calibForward[1], calibForward[2], up[0], up[1], up[2])
+            val forward = normalize3(
+                calibForward[0] - fUp * up[0],
+                calibForward[1] - fUp * up[1],
+                calibForward[2] - fUp * up[2]
+            ) ?: run {
+                // Calibrated "forward" points (almost) straight up/down: wrong preset for this mount
+                if (!warnedDegenerateAxis) {
+                    warnedDegenerateAxis = true
+                    RecordingHealth.log("CALIBRATION forward axis is vertical for this mount; G axes invalid")
+                }
+                calibForward
+            }
 
             // Right = up x forward (lateral axis)
             val rightRaw = cross(up, forward)
@@ -243,7 +275,8 @@ class RecordingEngine(
         override fun onSensorChanged(e: SensorEvent) {
             when (e.sensor.type) {
                 Sensor.TYPE_LINEAR_ACCELERATION -> {
-                    accelX = e.values[0]; accelY = e.values[1]; accelZ = e.values[2]
+                    accelSumX += e.values[0]; accelSumY += e.values[1]; accelSumZ += e.values[2]
+                    accelCount++
                 }
                 Sensor.TYPE_GRAVITY -> {
                     gravX = e.values[0]; gravY = e.values[1]; gravZ = e.values[2]
@@ -256,10 +289,10 @@ class RecordingEngine(
 
     private fun registerSensors() {
         sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)?.let {
-            sensorManager.registerListener(sensorListener, it, SensorManager.SENSOR_DELAY_UI, handler)
+            sensorManager.registerListener(sensorListener, it, SensorManager.SENSOR_DELAY_GAME, handler)
         }
         sensorManager.getDefaultSensor(Sensor.TYPE_GRAVITY)?.let {
-            sensorManager.registerListener(sensorListener, it, SensorManager.SENSOR_DELAY_UI, handler)
+            sensorManager.registerListener(sensorListener, it, SensorManager.SENSOR_DELAY_GAME, handler)
         }
     }
 
