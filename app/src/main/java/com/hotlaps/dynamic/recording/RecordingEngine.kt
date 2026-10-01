@@ -1,0 +1,323 @@
+package com.hotlaps.dynamic.recording
+
+import android.content.Context
+import android.content.pm.PackageManager
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.os.Handler
+import android.os.HandlerThread
+import android.os.Process
+import android.util.Log
+import androidx.annotation.MainThread
+import androidx.core.content.ContextCompat
+import com.hotlaps.dynamic.data.CalibRepo
+import com.hotlaps.dynamic.data.SettingsRepo
+import com.hotlaps.dynamic.data.SmoothingLevel
+import com.hotlaps.dynamic.util.GForceSmoother
+import com.hotlaps.dynamic.util.RecordingHealth
+import com.hotlaps.dynamic.util.UsbPuckGpsSource
+import com.hotlaps.dynamic.viewmodel.DriveViewModel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.android.asCoroutineDispatcher
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.launch
+
+/**
+ * Owns everything that produces telemetry: accelerometer + gravity sensors, phone GPS,
+ * the USB GPS puck, and the 20 Hz loop that projects, smooths and records samples.
+ *
+ * This used to live inside the drive screen (GGScreen), so leaving that screen (Settings,
+ * track picker...) silently stopped sampling while the event still said "Recording".
+ * Now it lives for the whole process and runs while anyone holds it:
+ *  - the drive screen, while visible (live G-G display)
+ *  - [RecordingService], while an event is recording (screen off / app in background)
+ *
+ * Everything runs on its own thread ("RecordingEngine"), never the UI thread: in testing,
+ * screen redraws (waking the phone, reopening the app, switching screens) blocked the main
+ * thread for up to 2.5 s, and sampling with it. DriveViewModel's recording methods are
+ * synchronized for this.
+ */
+class RecordingEngine(
+    private val appContext: Context,
+    private val drive: DriveViewModel
+) {
+    private companion object {
+        const val TAG = "RecordingEngine"
+        const val TICK_MS = 50L          // ~20 Hz world tick
+        const val G_CLAMP = 2.0f         // +/- 2g should be plenty
+    }
+
+    private val holders = mutableSetOf<String>()
+    private var scope: CoroutineScope? = null
+
+    /** Dedicated thread for sensor/GPS callbacks and the tick loop. */
+    private val thread = HandlerThread("RecordingEngine", Process.THREAD_PRIORITY_FOREGROUND)
+        .apply { start() }
+    private val handler = Handler(thread.looper)
+    private val dispatcher = handler.asCoroutineDispatcher("RecordingEngine")
+
+    private val sensorManager = appContext.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+    private val locationManager = appContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    private val calibRepo = CalibRepo(appContext)
+    private val settingsRepo = SettingsRepo(appContext)
+    val usbGps = UsbPuckGpsSource(appContext)
+
+    // Latest raw sensor readings (device axes, m/s^2)
+    private var accelX = 0f
+    private var accelY = 0f
+    private var accelZ = 0f
+    private var gravX = 0f
+    private var gravY = 0f
+    private var gravZ = 0f
+
+    // ---- State for the UI ---------------------------------------------------
+
+    /** Increments every tick; the G-G trail samples on this. */
+    private val _ticks = MutableStateFlow(0L)
+    val ticks: StateFlow<Long> get() = _ticks
+
+    /** Raw phone GPS fix (debug display), even while the puck owns recording. */
+    private val _phoneGpsLat = MutableStateFlow(0.0)
+    val phoneGpsLat: StateFlow<Double> get() = _phoneGpsLat
+    private val _phoneGpsLon = MutableStateFlow(0.0)
+    val phoneGpsLon: StateFlow<Double> get() = _phoneGpsLon
+
+    /** Emits once per USB puck fix (debug Hz display). */
+    private val _puckFixes = MutableSharedFlow<Unit>(extraBufferCapacity = 64)
+    val puckFixes: SharedFlow<Unit> get() = _puckFixes
+
+    /** Debug-page override for the moving-average window (null = use the preset). */
+    private val smoothingWindowOverride = MutableStateFlow<Int?>(null)
+
+    // ---- Holders ------------------------------------------------------------
+
+    @MainThread
+    fun acquire(holder: String) {
+        if (holders.add(holder)) {
+            Log.d(TAG, "acquire($holder) holders=$holders")
+            if (holders.size == 1) start()
+        }
+    }
+
+    @MainThread
+    fun release(holder: String) {
+        if (holders.remove(holder)) {
+            Log.d(TAG, "release($holder) holders=$holders")
+            if (holders.isEmpty()) stop()
+        }
+    }
+
+    fun setSmoothingWindow(samples: Int?) {
+        smoothingWindowOverride.value = samples
+    }
+
+    // ---- Lifecycle ----------------------------------------------------------
+
+    private fun start() {
+        val s = CoroutineScope(SupervisorJob() + dispatcher)
+        scope = s
+        RecordingHealth.log("ENGINE start")
+
+        registerSensors()
+        usbGps.start()
+
+        // Puck connection decides who drives GPS (and sample timing)
+        s.launch {
+            usbGps.isConnected.collect { connected ->
+                drive.setUsingExternalGps(connected)
+                // Only power up the internal GPS radio when the puck is not connected
+                if (connected) stopPhoneGps() else startPhoneGps()
+            }
+        }
+
+        // GPS-gated sampling: each puck fix drives one sample (replaces the timer trigger)
+        s.launch {
+            usbGps.fixes.collect { fix ->
+                _puckFixes.tryEmit(Unit)
+                drive.updateGps(lat = fix.lat, lon = fix.lon, speedMps = fix.speedMps)
+                drive.recordCurrentSample()
+                drive.updateCornerCaptureState()
+            }
+        }
+
+        // 20 Hz loop, restarted when calibration or smoothing settings change
+        s.launch {
+            combine(calibRepo.state, settingsRepo.smoothingLevel, smoothingWindowOverride) { calib, level, window ->
+                Triple(calib.vec, SmoothingLevel.fromIndex(level), window)
+            }.collectLatest { (calibVec, level, window) ->
+                runTickLoop(calibVec, level, window)
+            }
+        }
+    }
+
+    private fun stop() {
+        RecordingHealth.log("ENGINE stop")
+        sensorManager.unregisterListener(sensorListener)
+        stopPhoneGps()
+        usbGps.stop()
+        drive.setUsingExternalGps(false)
+        scope?.cancel()
+        scope = null
+    }
+
+    // ---- 20 Hz loop ---------------------------------------------------------
+
+    private suspend fun runTickLoop(calibVec: FloatArray?, level: SmoothingLevel, windowOverride: Int?) {
+        val g = SensorManager.GRAVITY_EARTH
+        val smoother = GForceSmoother(
+            tauMs = if (level == SmoothingLevel.Off) null else level.tauMs.coerceAtLeast(1).toFloat(),
+            maWindowSize = windowOverride ?: level.windowSize
+        )
+        RecordingHealth.resetTicks()
+
+        while (true) {
+            delay(TICK_MS)
+            RecordingHealth.onTick(
+                label = "live",
+                recording = drive.recordingState.value == DriveViewModel.RecordingState.Recording
+            )
+
+            // Pick forward vector: use calibration if present, else guess (-Y forward)
+            val forward = normalize3(
+                calibVec?.getOrNull(0) ?: 0f,
+                calibVec?.getOrNull(1) ?: -1f,
+                calibVec?.getOrNull(2) ?: 0f
+            ) ?: floatArrayOf(0f, -1f, 0f)
+
+            // Gravity vector -> "down"; "up" is opposite
+            val down = normalize3(gravX, gravY, gravZ) ?: floatArrayOf(0f, 0f, 1f)
+            val up = floatArrayOf(-down[0], -down[1], -down[2])
+
+            // Right = up x forward (lateral axis)
+            val rightRaw = cross(up, forward)
+            val right = normalize3(rightRaw[0], rightRaw[1], rightRaw[2]) ?: floatArrayOf(1f, 0f, 0f)
+
+            val longNow = dot3(accelX, accelY, accelZ, forward[0], forward[1], forward[2]) / g  // + accel, - brake
+            val latNow = dot3(accelX, accelY, accelZ, right[0], right[1], right[2]) / g        // + right, - left
+
+            // Raw values for logging: clamped, but before EMA/MA
+            val rawLongG = longNow.coerceIn(-G_CLAMP, G_CLAMP)
+            val rawLatG = latNow.coerceIn(-G_CLAMP, G_CLAMP)
+
+            val smoothed = smoother.addSample(
+                rawLatG = rawLatG,
+                rawLongG = rawLongG,
+                sampleTimeMs = System.currentTimeMillis()
+            )
+
+            drive.updateGForces(
+                smoothedLat = smoothed.latG,
+                smoothedLong = smoothed.longG,
+                rawLat = rawLatG,
+                rawLong = rawLongG
+            )
+
+            // Sample recording is gated by the GPS source:
+            //  - External puck present -> each GPS fix triggers the sample (above)
+            //  - Internal GPS          -> this timer triggers the sample
+            if (!drive.usingExternalGps.value) {
+                drive.recordCurrentSample()
+                drive.updateCornerCaptureState()
+            }
+
+            _ticks.value++
+        }
+    }
+
+    // ---- Sensors ------------------------------------------------------------
+
+    private val sensorListener = object : SensorEventListener {
+        override fun onSensorChanged(e: SensorEvent) {
+            when (e.sensor.type) {
+                Sensor.TYPE_LINEAR_ACCELERATION -> {
+                    accelX = e.values[0]; accelY = e.values[1]; accelZ = e.values[2]
+                }
+                Sensor.TYPE_GRAVITY -> {
+                    gravX = e.values[0]; gravY = e.values[1]; gravZ = e.values[2]
+                }
+            }
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    }
+
+    private fun registerSensors() {
+        sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)?.let {
+            sensorManager.registerListener(sensorListener, it, SensorManager.SENSOR_DELAY_UI, handler)
+        }
+        sensorManager.getDefaultSensor(Sensor.TYPE_GRAVITY)?.let {
+            sensorManager.registerListener(sensorListener, it, SensorManager.SENSOR_DELAY_UI, handler)
+        }
+    }
+
+    // ---- Phone GPS ----------------------------------------------------------
+
+    private var phoneGpsActive = false
+
+    private val locationListener = LocationListener { loc: Location ->
+        _phoneGpsLat.value = loc.latitude
+        _phoneGpsLon.value = loc.longitude
+        // When the puck is active it owns VM GPS exclusively at 10 Hz
+        if (!drive.usingExternalGps.value) {
+            drive.updateGps(
+                lat = loc.latitude,
+                lon = loc.longitude,
+                speedMps = if (loc.hasSpeed()) loc.speed.toDouble() else null
+            )
+        }
+    }
+
+    @Synchronized
+    private fun startPhoneGps() {
+        if (phoneGpsActive) return
+        val granted = ContextCompat.checkSelfPermission(
+            appContext, android.Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!granted) return
+        try {
+            locationManager.requestLocationUpdates(
+                LocationManager.GPS_PROVIDER, 200L, 0f, locationListener, thread.looper
+            )
+            phoneGpsActive = true
+        } catch (e: SecurityException) {
+            Log.e(TAG, "startPhoneGps", e)
+        }
+    }
+
+    @Synchronized
+    private fun stopPhoneGps() {
+        if (!phoneGpsActive) return
+        locationManager.removeUpdates(locationListener)
+        phoneGpsActive = false
+    }
+
+    // ---- Vector math --------------------------------------------------------
+
+    private fun normalize3(x: Float, y: Float, z: Float): FloatArray? {
+        val n = kotlin.math.sqrt(x * x + y * y + z * z)
+        if (n < 1e-4f) return null
+        return floatArrayOf(x / n, y / n, z / n)
+    }
+
+    private fun dot3(ax: Float, ay: Float, az: Float, bx: Float, by: Float, bz: Float): Float =
+        ax * bx + ay * by + az * bz
+
+    private fun cross(a: FloatArray, b: FloatArray): FloatArray = floatArrayOf(
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0]
+    )
+}

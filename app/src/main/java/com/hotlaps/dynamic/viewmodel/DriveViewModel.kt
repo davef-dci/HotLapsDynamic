@@ -33,6 +33,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import com.hotlaps.dynamic.util.DriveUploadHelper
 import com.hotlaps.dynamic.util.RecordingHealth
+import com.hotlaps.dynamic.recording.RecordingService
 
 
 /**
@@ -46,6 +47,8 @@ import com.hotlaps.dynamic.util.RecordingHealth
  */
 class DriveViewModel : ViewModel() {
 
+    // Recording methods (start/stop/pause/resume, recordCurrentSample, updateCornerCaptureState)
+    // are @Synchronized: RecordingEngine calls them from its own thread, the UI from main.
     private lateinit var appContext: Context
     private var settingsRepo: SettingsRepo? = null
     @Volatile private var isDeskSimulationRunning: Boolean = false
@@ -250,6 +253,7 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
     private var currentTrack: Track? = null
 
     // Track associated with the current event (if any)
+    @Synchronized
     fun startManualEvent(context: Context, track: Track?) {
 
         // Remember which track this event is associated with
@@ -269,6 +273,9 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
         _currentEvent.value = event
         _recordingState.value = RecordingState.Recording
         RecordingHealth.log("START event=${event.id} track=${track?.name ?: "(none)"}")
+
+        // Keep sampling alive with the screen off / app in background / other screens open
+        RecordingService.start(context.applicationContext, eventName)
 
         // Reset any corner-related state
         cornerCaptureState = CornerCaptureState.Idle
@@ -303,6 +310,7 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
      * Stops recording. If [finalName] is given, the session is renamed as part of the
      * finishing pass (after the last rows are written), so the file can't be split.
      */
+    @Synchronized
     fun stopEvent(finalName: String? = null) {
         // Capture the current event (if any) before we clear it
         val event = _currentEvent.value
@@ -337,6 +345,8 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
             viewModelScope.launch(Dispatchers.IO) {
                 val file = EventStorage.finishEvent(appContext, event.id, name)
                 RecordingHealth.log("FINISHED event=${event.id} file=${file?.name} bytes=${file?.length()}")
+                // Release the foreground service only once the file is safely finished
+                if (_currentEvent.value == null) RecordingService.stop(appContext)
                 // Upload the final backup to Drive so nothing is missing
                 DriveUploadHelper.uploadBackupFile(appContext, event.id)
             }
@@ -345,12 +355,14 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
     }
 
 
+    @Synchronized
     fun pauseRecording() {
         if (_recordingState.value == RecordingState.Recording) {
             _recordingState.value = RecordingState.Paused
         }
     }
 
+    @Synchronized
     fun resumeRecording() {
         if (_recordingState.value == RecordingState.Paused) {
             _recordingState.value = RecordingState.Recording
@@ -454,6 +466,7 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
     }
 
 
+    @Synchronized
     fun recordCurrentSample(
         utcMsOverride: Long? = null,
         intervalMsOverride: Long? = null
@@ -784,6 +797,10 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
  *  - After a visit ends, we require MIN_CORNER_GAP_MS before that corner
  *    can trigger again. This works even for tracks with a single corner.
  */
+/** Corner FSM step for the current event's own track (used by RecordingEngine). */
+fun updateCornerCaptureState() = updateCornerCaptureState(currentTrack)
+
+@Synchronized
 fun updateCornerCaptureState(
     track: Track?,
     utcMsOverride: Long? = null

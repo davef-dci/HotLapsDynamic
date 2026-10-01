@@ -106,8 +106,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberUpdatedState
 
-import com.hotlaps.dynamic.util.UsbPuckGpsSource
-import com.hotlaps.dynamic.util.RecordingHealth
+import com.hotlaps.dynamic.HotLapsApp
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.google.android.gms.auth.api.signin.GoogleSignIn
@@ -232,28 +231,30 @@ fun GGScreen(
         else -> smoothingLevel.tauMs.coerceAtLeast(1).toFloat()
     }
 
-    // Single “master” smoother for live driving (in this screen)
-    val gSmoother = remember(smoothingLevel) {
-        GForceSmoother(
-            tauMs = tauMsOrNull,
-            maWindowSize = smoothingLevel.windowSize
-        )
+    // Telemetry engine (sensors, GPS, puck, 20 Hz loop). Process-wide; this screen holds it
+    // while visible for the live display, and RecordingService holds it while recording.
+    val recordingEngine = remember(context) {
+        (context.applicationContext as HotLapsApp).recordingEngine
     }
+    DisposableEffect(recordingEngine) {
+        recordingEngine.acquire("drive-screen")
+        onDispose { recordingEngine.release("drive-screen") }
+    }
+    val usbGpsSource = recordingEngine.usbGps
 
-    // Keep UI slider and smoother window in sync with preset
+    // Keep the debug slider in sync with the preset (engine follows the preset again)
     LaunchedEffect(smoothingLevel) {
         smoothingSamples = smoothingLevel.windowSize
-        gSmoother.setWindowSize(smoothingLevel.windowSize)
-        gSmoother.reset()
+        recordingEngine.setSmoothingWindow(null)
     }
 
 
 
 
     // --- Sensor hookup: keep the same states you already have ---
-    var ticks by remember { mutableStateOf(0L) }
-    var latG by remember { mutableStateOf(0f) }
-    var longG by remember { mutableStateOf(0f) }
+    val ticks by recordingEngine.ticks.collectAsState()
+    val latG by driveViewModel.latG.collectAsState()
+    val longG by driveViewModel.longG.collectAsState()
 
     // Latest raw linear-accel sample in m/s^2 (device axes)
     var latestX by remember { mutableStateOf(0f) }
@@ -278,18 +279,10 @@ fun GGScreen(
     val isCalibrated = calibState.vec != null
 
 
-    // Latest sensor readings
-    var latestAccelX by remember { mutableStateOf(0f) }
-    var latestAccelY by remember { mutableStateOf(0f) }
-    var latestAccelZ by remember { mutableStateOf(0f) }
-
-    var latestGravX by remember { mutableStateOf(0f) }
-    var latestGravY by remember { mutableStateOf(0f) }
-    var latestGravZ by remember { mutableStateOf(0f) }
 
     // === GPS values in the screen (local copy) ===
-    var gpsLat by remember { mutableStateOf(0.0) }
-    var gpsLon by remember { mutableStateOf(0.0) }
+    val gpsLat by recordingEngine.phoneGpsLat.collectAsState()
+    val gpsLon by recordingEngine.phoneGpsLon.collectAsState()
 
     // === ViewModel GPS / G values ===
     val vmGpsLat by driveViewModel.gpsLat.collectAsState()
@@ -329,144 +322,8 @@ fun GGScreen(
     )
 
 
-    // 1) Register a sensor listener (Linear Acceleration preferred)
-    val ctx = LocalContext.current
-    // --- Sensor listener: linear accel + gravity (no projection here yet) ---
-    DisposableEffect(Unit) {
-        val lin = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
-        val grav = sensorManager.getDefaultSensor(Sensor.TYPE_GRAVITY)
-
-        val listener = object : SensorEventListener {
-            override fun onSensorChanged(e: SensorEvent) {
-                when (e.sensor.type) {
-                    Sensor.TYPE_LINEAR_ACCELERATION -> {
-                        latestAccelX = e.values[0]
-                        latestAccelY = e.values[1]
-                        latestAccelZ = e.values[2]
-                    }
-
-                    Sensor.TYPE_GRAVITY -> {
-                        latestGravX = e.values[0]
-                        latestGravY = e.values[1]
-                        latestGravZ = e.values[2]
-                    }
-                }
-            }
-
-            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
-        }
-
-        if (lin != null) {
-            sensorManager.registerListener(
-                listener,
-                lin,
-                SensorManager.SENSOR_DELAY_UI
-            )
-        }
-        if (grav != null) {
-            sensorManager.registerListener(
-                listener,
-                grav,
-                SensorManager.SENSOR_DELAY_UI
-            )
-        }
-
-        onDispose {
-            sensorManager.unregisterListener(listener)
-        }
-    }
-
-
-    // Collect puck connection state early — used both to gate internal GPS and as a DisposableEffect key
+    // Sensors, phone GPS and the USB puck are owned by RecordingEngine (see above).
     val usingExternalGps by driveViewModel.usingExternalGps.collectAsState()
-
-    // 2) GPS Location Updates — paused while the USB puck is active to save battery
-    DisposableEffect(usingExternalGps) {
-        val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-
-        val listener = LocationListener { loc: Location ->
-            val lat = loc.latitude
-            val lon = loc.longitude
-            val speedMps: Double? =
-                if (loc.hasSpeed()) loc.speed.toDouble() else null
-
-            gpsLat = lat   // UI only (Raw GPS debug display)
-            gpsLon = lon
-
-            // Only forward to ViewModel when the external puck is NOT connected.
-            // When the puck is active it owns VM GPS exclusively at 10 Hz.
-            // Use driveViewModel.usingExternalGps rather than usbGpsSource directly
-            // to avoid capture ordering issues inside the DisposableEffect lambda.
-            val externalActive = driveViewModel.usingExternalGps.value
-            if (externalActive == false) {
-                driveViewModel.updateGps(
-                    lat = lat,
-                    lon = lon,
-                    speedMps = speedMps
-                )
-            }
-        }
-
-
-        // Only power up the internal GPS radio when the puck is not connected
-        if (!usingExternalGps) {
-            try {
-                if (
-                    ActivityCompat.checkSelfPermission(
-                        ctx,
-                        android.Manifest.permission.ACCESS_FINE_LOCATION
-                    )
-                    == PackageManager.PERMISSION_GRANTED
-                ) {
-                    lm.requestLocationUpdates(
-                        LocationManager.GPS_PROVIDER,
-                        200L,
-                        0f,
-                        listener
-                    )
-                }
-            } catch (e: SecurityException) {
-                e.printStackTrace()
-            }
-        }
-
-        onDispose {
-            lm.removeUpdates(listener)
-        }
-    }
-
-    // 3) External USB GPS puck (BU-353 10 Hz, Prolific PL2303)
-    val usbGpsSource = remember { UsbPuckGpsSource(context) }
-
-    // Start/stop the puck reader with this screen's lifecycle
-    DisposableEffect(Unit) {
-        usbGpsSource.start()
-        onDispose { usbGpsSource.stop() }
-    }
-
-    // Mirror puck connection state into the ViewModel so DriveViewModel & UI can react
-    LaunchedEffect(Unit) {
-        usbGpsSource.isConnected.collect { connected ->
-            driveViewModel.setUsingExternalGps(connected)
-        }
-    }
-
-    // GPS-gated sampling: each puck fix drives one EventSample (replaces the timer trigger)
-    // rememberUpdatedState ensures we always call with the latest activeTrack value
-    val currentActiveTrack by rememberUpdatedState(activeTrack)
-    LaunchedEffect(Unit) {
-        usbGpsSource.fixes.collect { fix ->
-            // Push GPS into ViewModel (speed comes directly from NMEA RMC)
-            driveViewModel.updateGps(
-                lat = fix.lat,
-                lon = fix.lon,
-                speedMps = fix.speedMps
-            )
-            // Gate recording on this GPS fix instead of the 10 Hz timer
-            driveViewModel.recordCurrentSample()
-            driveViewModel.updateCornerCaptureState(currentActiveTrack)
-        }
-    }
 
     // Drive backup — sign-in state and activity-result launcher
     var driveConnected by remember { mutableStateOf(DriveUploadHelper.hasDrivePermission(context)) }
@@ -475,140 +332,8 @@ fun GGScreen(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { driveConnected = DriveUploadHelper.hasDrivePermission(context) }
 
-    // 4) 10 Hz publisher: convert to g's + EMA smoothing, then tick
-    // --- 10 Hz loop: project sensors into calibrated car axes, smooth, and publish ---
-    LaunchedEffect(calibState.vec, smoothingLevel) {
-        val g = SensorManager.GRAVITY_EARTH           // 9.80665 m/s^2
-// If Off: no EMA at all (just pass clamped values through)
-        val tauMsOrNull: Float? = when (smoothingLevel) {
-            SmoothingLevel.Off -> null
-            else -> smoothingLevel.tauMs.coerceAtLeast(1).toFloat()
-        }
-
-
-        var latEma = 0f
-        var longEma = 0f
-        var lastUpdateMs = System.currentTimeMillis()
-        RecordingHealth.resetTicks()
-
-        while (true) {
-            kotlinx.coroutines.delay(50) // ~20 Hz world tick
-            RecordingHealth.onTick(
-                label = "live",
-                recording = driveViewModel.recordingState.value == DriveViewModel.RecordingState.Recording
-            )
-
-            // Pick forward vector: use calibration if present, else guess
-            val forward = normalize3(
-                calibState.vec?.getOrNull(0) ?: 0f,
-                calibState.vec?.getOrNull(1) ?: -1f,   // assume -Y is forward if no calib
-                calibState.vec?.getOrNull(2) ?: 0f
-            ) ?: floatArrayOf(0f, -1f, 0f)
-
-            // Gravity vector → "down" direction
-            val down = normalize3(latestGravX, latestGravY, latestGravZ)
-                ?: floatArrayOf(0f, 0f, 1f)
-
-            // "Up" is opposite of gravity
-            val up = floatArrayOf(-down[0], -down[1], -down[2])
-
-            // Right = up × forward (lateral axis)
-            val rightRaw = cross(up, forward)
-            val right = normalize3(rightRaw[0], rightRaw[1], rightRaw[2])
-                ?: floatArrayOf(1f, 0f, 0f)
-
-            // Current linear acceleration vector
-            val ax = latestAccelX
-            val ay = latestAccelY
-            val az = latestAccelZ
-
-            val longMs2 = dot3(ax, ay, az, forward[0], forward[1], forward[2])
-            val latMs2 = dot3(ax, ay, az, right[0], right[1], right[2])
-
-            val longNow = longMs2 / g       // + = accel, - = brake
-            val latNow = latMs2 / g        // + = right, - = left
-
-            // 1) Clamp crazy spikes
-            val G_CLAMP = 2.0f            // +/- 2g should be plenty
-            val longClamped = longNow.coerceIn(-G_CLAMP, G_CLAMP)
-            val latClamped = latNow.coerceIn(-G_CLAMP, G_CLAMP)
-
-            // Raw values for logging (clamped, but before EMA/deadband/MA)
-            val rawLongG = longClamped
-            val rawLatG  = latClamped
-
-
-            // Use the shared smoother (EMA + moving average)
-            val nowMs = System.currentTimeMillis()
-            val smoothed = gSmoother.addSample(
-                rawLatG = rawLatG,
-                rawLongG = rawLongG,
-                sampleTimeMs = nowMs
-            )
-
-/*
-            // 2) Time-aware EMA on clamped values
-            val nowMs = System.currentTimeMillis()
-
-
-            val dtMs = (nowMs - lastUpdateMs).coerceAtLeast(1L)
-            lastUpdateMs = nowMs
-
-            // 2) Time-aware EMA on clamped values (or bypass if Off)
-            val (longDb, latDb) = if (tauMsOrNull == null) {
-                // Off → no EMA: just use clamped values directly
-                longEma = longClamped
-                latEma = latClamped
-                longClamped to latClamped
-            } else {
-                val alpha = 1f - kotlin.math.exp(-dtMs.toFloat() / tauMsOrNull)
-
-                val longEmaNew = longEma + alpha * (longClamped - longEma)
-                val latEmaNew = latEma + alpha * (latClamped - latEma)
-
-                longEma = longEmaNew
-                latEma = latEmaNew
-
-                // currently no deadband; just forward EMA outputs
-                longEmaNew to latEmaNew
-            }
-
-            // 4) Moving-average smoothing on top of EMA + deadband
-            //    NOTE: we store lat first, long second
-            val (latMa, longMa) = ma.add(latDb, longDb)
-
-            // Final values used by the rest of the UI
-            latG = latMa
-            longG = longMa
-
-
- */
-
-            // Final values used by the rest of the UI
-            latG = smoothed.latG
-            longG = smoothed.longG
-
-            // Always push the latest G values so ViewModel state is fresh for UI + puck callbacks
-            driveViewModel.updateGForces(
-                smoothedLat = latG,
-                smoothedLong = longG,
-                rawLat = rawLatG,
-                rawLong = rawLongG
-            )
-
-            // Sample recording is gated by the GPS source:
-            //  • External puck present → each GPS fix callback (above) triggers the sample
-            //  • Internal GPS          → the timer triggers the sample here at ~10 Hz
-            if (driveViewModel.usingExternalGps.value == false) {
-                driveViewModel.recordCurrentSample()
-                driveViewModel.updateCornerCaptureState(activeTrack)
-            }
-
-            ticks++
-
-        }
-
-    }
+    // The 20 Hz sampling loop (sensor projection, smoothing, recording) lives in
+    // RecordingEngine so it keeps running when this screen is not visible.
 
     // --- Pager state for swipeable Drive / Debug pages ---
     val pagerState = rememberPagerState(initialPage = 0, pageCount = {
@@ -1056,7 +781,7 @@ fun GGScreen(
 
                                         // Collect external GPS fix count
                                         launch {
-                                            usbGpsSource.fixes.collect {
+                                            recordingEngine.puckFixes.collect {
                                                 externalCount++
                                             }
                                         }
@@ -1210,7 +935,7 @@ fun GGScreen(
                                             onValueChange = { newValue ->
                                                 val clamped = newValue.toInt().coerceIn(1, 30)
                                                 smoothingSamples = clamped
-                                                gSmoother.setWindowSize(clamped)
+                                                recordingEngine.setSmoothingWindow(clamped)
                                             },
                                             valueRange = 1f..30f,
                                             steps = 30 - 2

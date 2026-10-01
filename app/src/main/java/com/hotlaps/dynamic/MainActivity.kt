@@ -18,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -109,6 +110,20 @@ class MainActivity : ComponentActivity() {
                 this,
                 arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION),
                 1001
+            )
+        }
+
+        // Android 13+: allow the "Recording" notification of the recording service
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
+            ActivityCompat.checkSelfPermission(
+                this,
+                android.Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
+                1002
             )
         }
 
@@ -263,13 +278,17 @@ class MainActivity : ComponentActivity() {
                         // Create ONE shared ViewModel for the whole app
                         val trackSelectionViewModel: TrackSelectionViewModel = viewModel()
 
-                        // ViewModel that manages event recording & GPS/corner logic
-                        val driveViewModel: DriveViewModel = viewModel()
-
                         val context = LocalContext.current
 
+                        // Event recording & GPS/corner logic. Process-wide (HotLapsApp) so the
+                        // recording service and every screen share the same recording.
+                        val driveViewModel: DriveViewModel = remember {
+                            (context.applicationContext as HotLapsApp).driveViewModel
+                        }
+
+                        // Restore the last selected track (survives app restarts / crashes)
                         LaunchedEffect(Unit) {
-                            driveViewModel.setAppContext(context)
+                            trackSelectionViewModel.restore(context)
                         }
 
                         LaunchedEffect(Unit) {
