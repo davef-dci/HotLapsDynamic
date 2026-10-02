@@ -227,6 +227,65 @@ object EventStorage {
         return file
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Live pit-side upload (see LiveParts)
+    // ---------------------------------------------------------------------------------------------
+
+    /** Bytes of each event file already shipped as live parts, and parts made so far. Recorder thread only. */
+    private val liveOffsets = HashMap<Long, Long>()
+    private val livePartCounts = HashMap<Long, Int>()
+
+    /** Local queue of live files waiting to upload, in order: cache/live_upload/<eventId>/ */
+    fun liveQueueDir(context: Context, eventId: Long): File =
+        File(context.cacheDir, "live_upload/$eventId").apply { mkdirs() }
+
+    /** Queues the session's corner list for upload (once, at session start). */
+    fun queueLiveCorners(
+        context: Context,
+        eventId: Long,
+        corners: List<CornerLapDetector.CornerSpec>,
+        radiusM: Double
+    ) {
+        if (corners.isEmpty()) return
+        // "00000_" prefix sorts it ahead of every part in the upload queue
+        val dest = File(liveQueueDir(context, eventId), "00000_" + LiveParts.cornersName(eventId))
+        try {
+            LiveParts.writeCorners(dest, corners, radiusM)
+        } catch (e: Exception) {
+            Log.e(TAG, "queueLiveCorners failed for event $eventId", e)
+        }
+    }
+
+    /**
+     * Queues the rows written since the previous call as the next live part. Runs on the recorder
+     * thread (blocking the caller), so rows are never split and the writer can't race the copy.
+     */
+    fun snapshotLivePart(context: Context, eventId: Long) {
+        val appContext = context.applicationContext
+        runOnRecorder {
+            writers[eventId]?.flushReady()
+            val dir = eventsDir(appContext) ?: return@runOnRecorder
+            val src = File(dir, "event_${eventId}.csv")
+            val number = (livePartCounts[eventId] ?: 0) + 1
+            val queue = liveQueueDir(appContext, eventId)
+            val dest = File(queue, LiveParts.partName(eventId, number))
+            val from = liveOffsets[eventId] ?: 0L
+            val to = LiveParts.slice(src, from, dest)
+            if (to > from) {
+                liveOffsets[eventId] = to
+                livePartCounts[eventId] = number
+            }
+        }
+    }
+
+    /** Forget live-upload state for a finished event (local queue is removed by the uploader). */
+    fun clearLiveState(eventId: Long) {
+        runOnRecorder {
+            liveOffsets.remove(eventId)
+            livePartCounts.remove(eventId)
+        }
+    }
+
     private fun runOnRecorder(block: () -> Unit) {
         try {
             recordingExecutor.submit(block).get()

@@ -107,6 +107,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberUpdatedState
 
 import com.hotlaps.dynamic.HotLapsApp
+import com.hotlaps.dynamic.util.BatteryStatus
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.google.android.gms.auth.api.signin.GoogleSignIn
@@ -522,6 +523,32 @@ fun GGScreen(
                                                     .clickable(enabled = !driveConnected) {
                                                         driveSignInLauncher.launch(signInClient.signInIntent)
                                                     }
+                                            )
+                                        }
+                                    }
+
+// --- Low-battery warning (the GPS puck may block charging through a splitter) ---
+                                    var battery by remember { mutableStateOf<BatteryStatus?>(null) }
+                                    LaunchedEffect(Unit) {
+                                        while (true) {
+                                            battery = BatteryStatus.read(context)
+                                            kotlinx.coroutines.delay(30_000)
+                                        }
+                                    }
+                                    battery?.takeIf { it.percent <= BatteryStatus.LOW_PERCENT && !it.charging }?.let { b ->
+                                        Surface(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(top = 6.dp),
+                                            color = Color(0xFFD32F2F),
+                                            shape = MaterialTheme.shapes.small
+                                        ) {
+                                            Text(
+                                                text = "Battery ${b.percent}% and not charging — recording stops when the phone dies.",
+                                                color = Color.White,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                                             )
                                         }
                                     }

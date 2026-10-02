@@ -16,7 +16,7 @@ import java.util.concurrent.Executors
  *
  *  - STALL lines when the sampling loop goes more than [STALL_MS] between ticks
  *    (at Gingerman, Apr 2026, per-corner file rewrites froze it for up to ~9 s)
- *  - a HEARTBEAT line every minute while recording (ticks, worst gap, memory)
+ *  - a HEARTBEAT line every minute while recording (ticks, worst gap, memory, battery)
  *  - EXIT lines at app start: why the previous processes died (crash / ANR / low memory...)
  *
  * All file writes happen on a private background thread.
@@ -33,6 +33,7 @@ object RecordingHealth {
     private val timeFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
 
     private var logFile: File? = null
+    private var appContext: Context? = null
 
     // Tick statistics (touched only from the sampling loop's thread)
     private var lastTickMs = 0L
@@ -43,6 +44,7 @@ object RecordingHealth {
 
     fun init(context: Context) {
         if (logFile != null) return
+        appContext = context.applicationContext
         val dir = context.getExternalFilesDir("debug_logs") ?: return
         logFile = File(dir, "recording_health.log")
         logPreviousExits(context)
@@ -67,10 +69,14 @@ object RecordingHealth {
                 val rt = Runtime.getRuntime()
                 val usedMb = (rt.totalMemory() - rt.freeMemory()) / (1024 * 1024)
                 val maxMb = rt.maxMemory() / (1024 * 1024)
+                val battery = appContext?.let { BatteryStatus.read(it) }
+                val batteryText = battery?.let {
+                    " battery=${it.percent}% charging=${it.charging} plugged=${it.plugged}"
+                } ?: ""
                 write(
                     "HEARTBEAT $label ticks=$ticksSinceHeartbeat " +
                             "worstGapMs=$worstGapSinceHeartbeat stalls=$stallsSinceHeartbeat " +
-                            "heapMb=$usedMb/$maxMb"
+                            "heapMb=$usedMb/$maxMb$batteryText"
                 )
             }
             lastHeartbeatMs = nowMs

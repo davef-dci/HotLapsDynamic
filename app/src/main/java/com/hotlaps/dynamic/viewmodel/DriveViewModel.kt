@@ -64,8 +64,11 @@ class DriveViewModel : ViewModel() {
     // Periodic backup job — launched on startManualEvent(), cancelled on stopEvent()
     private var backupJob: kotlinx.coroutines.Job? = null
 
-    /** How often to flush + backup the event CSV during recording (5 minutes). */
+    /** How often to copy the event CSV to a local backup during recording (5 minutes). */
     private val BACKUP_INTERVAL_MS = 5 * 60 * 1000L
+
+    /** How often new rows are uploaded for live pit-side analysis. */
+    private val LIVE_UPLOAD_INTERVAL_MS = 60 * 1000L
 
 
 
@@ -290,17 +293,37 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
         activeCornerDistanceSamples.clear()
         lastDistanceSampledM = null
 
-        // Start periodic flush + backup every 5 minutes
+        // Live pit-side upload: the corner list now, then only the new rows every minute
+        // (the Analyzer's live mode joins the parts). A local backup copy is still made every
+        // 5 minutes; the complete file is uploaded once, at Stop.
+        if (::appContext.isInitialized && track != null) {
+            EventStorage.queueLiveCorners(appContext, event.id, track.corners.map { c ->
+                CornerLapDetector.CornerSpec(
+                    index = c.index,
+                    name = c.name?.takeIf { it.isNotBlank() } ?: "Corner ${c.index}",
+                    lat = c.lat,
+                    lon = c.lon
+                )
+            }, _cornerTriggerRadiusM.value)
+        }
         backupJob?.cancel()
         backupJob = viewModelScope.launch(Dispatchers.IO) {
-            delay(BACKUP_INTERVAL_MS)   // first backup after 5 min, not immediately
+            var sinceLocalBackupMs = 0L
             while (true) {
+                delay(LIVE_UPLOAD_INTERVAL_MS)
                 val activeEvent = _currentEvent.value
-                if (activeEvent != null && ::appContext.isInitialized) {
-                    EventStorage.flushAndBackup(appContext, activeEvent.id)
-                    DriveUploadHelper.uploadBackupFile(appContext, activeEvent.id)
+                if (activeEvent == null || !::appContext.isInitialized) continue
+
+                if (DriveUploadHelper.hasDrivePermission(appContext)) {
+                    EventStorage.snapshotLivePart(appContext, activeEvent.id)
+                    DriveUploadHelper.uploadLiveQueue(appContext, activeEvent.id)
                 }
-                delay(BACKUP_INTERVAL_MS)
+
+                sinceLocalBackupMs += LIVE_UPLOAD_INTERVAL_MS
+                if (sinceLocalBackupMs >= BACKUP_INTERVAL_MS) {
+                    sinceLocalBackupMs = 0L
+                    EventStorage.flushAndBackup(appContext, activeEvent.id)
+                }
             }
         }
     }
@@ -355,10 +378,14 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
             viewModelScope.launch(Dispatchers.IO) {
                 val file = EventStorage.finishEvent(appContext, event.id, name, trackCorners, radiusM)
                 RecordingHealth.log("FINISHED event=${event.id} file=${file?.name} bytes=${file?.length()}")
-                // Release the foreground service only once the file is safely finished
+                // Upload the complete finished file, then remove the live parts it replaces
+                val uploaded = DriveUploadHelper.uploadBackupFile(appContext, event.id)
+                if (uploaded) DriveUploadHelper.deleteLiveParts(appContext, event.id)
+                EventStorage.clearLiveState(event.id)
+                RecordingHealth.log("UPLOAD final event=${event.id} ok=$uploaded")
+                // Release the foreground service only now: it keeps the process alive while the
+                // file is finished and uploaded, even if the app goes to the background
                 if (_currentEvent.value == null) RecordingService.stop(appContext)
-                // Upload the final backup to Drive so nothing is missing
-                DriveUploadHelper.uploadBackupFile(appContext, event.id)
             }
         }
 

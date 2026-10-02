@@ -7,6 +7,7 @@ import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.Scope
+import com.hotlaps.dynamic.data.EventStorage
 import com.hotlaps.dynamic.data.FileHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -102,6 +103,86 @@ object DriveUploadHelper {
                 false
             }
         }
+
+    // ---- Live pit-side upload ---------------------------------------------------
+
+    /** Drive file IDs of live parts uploaded per event, so they can be deleted after the final upload. */
+    private val liveFileIds = mutableMapOf<Long, MutableList<String>>()
+
+    /** Serializes live uploads with the final upload/cleanup for the same process. */
+    private val liveMutex = kotlinx.coroutines.sync.Mutex()
+
+    /**
+     * Uploads the event's queued live files (corners file + numbered parts) in order, deleting each
+     * local copy once uploaded. Stops at the first failure and leaves the rest queued, so a dead
+     * spot in mobile coverage only delays data. Returns the number of files uploaded.
+     */
+    suspend fun uploadLiveQueue(context: Context, eventId: Long): Int = withContext(Dispatchers.IO) {
+        liveMutex.lock()
+        try {
+            val queue = EventStorage.liveQueueDir(context, eventId)
+            val pending = queue.listFiles()?.filter { it.isFile }?.sortedBy { it.name }.orEmpty()
+            if (pending.isEmpty()) return@withContext 0
+            val (token, folderId) = authorize(context) ?: return@withContext 0
+
+            var uploaded = 0
+            for (f in pending) {
+                val remoteName = f.name.removePrefix("00000_")
+                val id = try { createFile(token, remoteName, f, folderId) } catch (e: Exception) {
+                    Log.w(TAG, "live upload failed for ${f.name}: ${e.message}"); null
+                } ?: break
+                if (remoteName.contains("_part_")) liveFileIds.getOrPut(eventId) { mutableListOf() }.add(id)
+                f.delete()
+                uploaded++
+            }
+            if (uploaded > 0) Log.i(TAG, "live: uploaded $uploaded file(s) for event $eventId")
+            uploaded
+        } catch (e: Exception) {
+            Log.e(TAG, "uploadLiveQueue failed: ${e.message}", e)
+            0
+        } finally {
+            liveMutex.unlock()
+        }
+    }
+
+    /**
+     * After the complete file has been uploaded at Stop: deletes the event's live parts from Drive
+     * (and any still queued locally). The small corners file is kept.
+     */
+    suspend fun deleteLiveParts(context: Context, eventId: Long) = withContext(Dispatchers.IO) {
+        liveMutex.lock()
+        try {
+            EventStorage.liveQueueDir(context, eventId).deleteRecursively()
+            val ids = liveFileIds.remove(eventId).orEmpty()
+            if (ids.isEmpty()) return@withContext
+            val (token, _) = authorize(context) ?: return@withContext
+            var deleted = 0
+            for (id in ids) {
+                if (try { deleteFile(token, id) } catch (_: Exception) { false }) deleted++
+            }
+            Log.i(TAG, "live: deleted $deleted/${ids.size} part(s) for event $eventId")
+        } finally {
+            liveMutex.unlock()
+        }
+    }
+
+    /** (access token, ApexDynamics folder id), or null if not signed in / offline. */
+    private fun authorize(context: Context): Pair<String, String>? {
+        val account = GoogleSignIn.getLastSignedInAccount(context) ?: return null
+        if (!GoogleSignIn.hasPermissions(account, Scope(DRIVE_FILE_SCOPE))) return null
+        val token = getToken(context, account) ?: return null
+        val folderId = ensureFolder(token) ?: return null
+        return token to folderId
+    }
+
+    private fun deleteFile(token: String, fileId: String): Boolean {
+        val conn = URL("$BASE_URL/drive/v3/files/$fileId").openConnection() as HttpURLConnection
+        return try {
+            conn.requestMethod = "DELETE"
+            conn.setRequestProperty("Authorization", "Bearer $token")
+            conn.responseCode in 200..299
+        } finally { conn.disconnect() }
+    }
 
     // ---- Auth ---------------------------------------------------------------
 
