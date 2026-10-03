@@ -56,6 +56,24 @@ object LiveParts {
         }
     }
 
+    /** Reads a file written by [writeCorners]: (corners, radiusM). Malformed rows are skipped. */
+    fun readCorners(src: File, defaultRadiusM: Double = CornerLapDetector.DEFAULT_RADIUS_M):
+            Pair<List<CornerLapDetector.CornerSpec>, Double> {
+        var radius = defaultRadiusM
+        val corners = src.readLines().drop(1).mapNotNull { line ->
+            val p = line.split(',')
+            if (p.size < 4) return@mapNotNull null
+            p.getOrNull(4)?.toDoubleOrNull()?.let { radius = it }
+            CornerLapDetector.CornerSpec(
+                index = p[0].toIntOrNull() ?: return@mapNotNull null,
+                name = p[1],
+                lat = p[2].toDoubleOrNull() ?: return@mapNotNull null,
+                lon = p[3].toDoubleOrNull() ?: return@mapNotNull null
+            )
+        }
+        return corners to radius
+    }
+
     /** "index,name,lat,lon,radiusM" CSV of the session's track corners. */
     fun writeCorners(dest: File, corners: List<CornerLapDetector.CornerSpec>, radiusM: Double) {
         dest.bufferedWriter().use { w ->

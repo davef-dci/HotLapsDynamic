@@ -2,6 +2,8 @@ package com.hotlaps.dynamic
 
 import android.app.Application
 import com.hotlaps.dynamic.recording.RecordingEngine
+import com.hotlaps.dynamic.recording.SessionRecovery
+import com.hotlaps.dynamic.util.RecordingHealth
 import com.hotlaps.dynamic.viewmodel.DriveViewModel
 
 /**
@@ -12,6 +14,13 @@ import com.hotlaps.dynamic.viewmodel.DriveViewModel
  * survives screen changes and the Activity going to the background.
  */
 class HotLapsApp : Application() {
+
+    override fun onCreate() {
+        super.onCreate()
+        RecordingHealth.init(this)
+        // Finish any session that was cut off (crash / Force Stop / dead battery) last time
+        SessionRecovery.recoverAsync(this)
+    }
 
     val driveViewModel: DriveViewModel by lazy {
         DriveViewModel().also { it.setAppContext(this) }

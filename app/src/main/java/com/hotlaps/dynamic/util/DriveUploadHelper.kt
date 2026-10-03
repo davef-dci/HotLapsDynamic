@@ -63,7 +63,12 @@ object DriveUploadHelper {
      * No-ops silently if the user is not signed in.
      * Safe to call from a background coroutine. Returns true on success.
      */
-    suspend fun uploadBackupFile(context: Context, eventId: Long): Boolean =
+    /**
+     * @param sessionName the name the session was saved under on the phone (null = unnamed). The
+     *        Drive copy is "<sessionName> - event_<id>_backup.csv", so it matches the phone; the
+     *        Analyzer's live mode recognises any name ending in "event_<id>_backup.csv".
+     */
+    suspend fun uploadBackupFile(context: Context, eventId: Long, sessionName: String? = null): Boolean =
         withContext(Dispatchers.IO) {
             try {
                 val dir = FileHelper.eventsDir(context) ?: return@withContext false
@@ -84,7 +89,11 @@ object DriveUploadHelper {
                 val folderId = ensureFolder(token)
                     ?: return@withContext false.also { Log.w(TAG, "Could not find/create Drive folder") }
 
-                val remoteName = backup.name
+                val safeName = sessionName
+                    ?.replace(Regex("""[\\/:*?"<>|]"""), "_")
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() && it != "event_$eventId" }
+                val remoteName = if (safeName != null) "$safeName - ${backup.name}" else backup.name
                 val existingId = cachedFileIds[remoteName]
                     ?: findFile(token, remoteName, folderId)?.also { cachedFileIds[remoteName] = it }
 
@@ -148,14 +157,19 @@ object DriveUploadHelper {
     /**
      * After the complete file has been uploaded at Stop: deletes the event's live parts from Drive
      * (and any still queued locally). The small corners file is kept.
+     *
+     * Parts are found by NAME in Drive, not only from this process's upload list, so this also
+     * cleans up after a session that was cut off (crash, Force Stop, dead battery) and recovered
+     * on the next app start.
      */
     suspend fun deleteLiveParts(context: Context, eventId: Long) = withContext(Dispatchers.IO) {
         liveMutex.lock()
         try {
             EventStorage.liveQueueDir(context, eventId).deleteRecursively()
-            val ids = liveFileIds.remove(eventId).orEmpty()
+            val known = liveFileIds.remove(eventId).orEmpty()
+            val (token, folderId) = authorize(context) ?: return@withContext
+            val ids = (known + findFilesByPrefix(token, "event_${eventId}_part_", folderId)).distinct()
             if (ids.isEmpty()) return@withContext
-            val (token, _) = authorize(context) ?: return@withContext
             var deleted = 0
             for (id in ids) {
                 if (try { deleteFile(token, id) } catch (_: Exception) { false }) deleted++
@@ -164,6 +178,32 @@ object DriveUploadHelper {
         } finally {
             liveMutex.unlock()
         }
+    }
+
+    /** IDs of this app's files in [folderId] whose name starts with [prefix] (all pages). */
+    private fun findFilesByPrefix(token: String, prefix: String, folderId: String): List<String> {
+        val ids = ArrayList<String>()
+        var pageToken: String? = null
+        do {
+            val q = "name contains '$prefix' and '$folderId' in parents and trashed=false"
+            val url = "$BASE_URL/drive/v3/files?q=${URLEncoder.encode(q, "UTF-8")}" +
+                    "&fields=nextPageToken,files(id,name)&pageSize=1000" +
+                    (pageToken?.let { "&pageToken=" + URLEncoder.encode(it, "UTF-8") } ?: "")
+            val conn = URL(url).openConnection() as HttpURLConnection
+            try {
+                conn.setRequestProperty("Authorization", "Bearer $token")
+                if (conn.responseCode != 200) return ids
+                val json = JSONObject(conn.inputStream.bufferedReader().readText())
+                val files = json.getJSONArray("files")
+                for (i in 0 until files.length()) {
+                    val f = files.getJSONObject(i)
+                    // "contains" matches word prefixes; check the real prefix
+                    if (f.getString("name").startsWith(prefix)) ids.add(f.getString("id"))
+                }
+                pageToken = json.optString("nextPageToken").takeIf { it.isNotEmpty() }
+            } finally { conn.disconnect() }
+        } while (pageToken != null)
+        return ids
     }
 
     /** (access token, ApexDynamics folder id), or null if not signed in / offline. */

@@ -15,7 +15,10 @@ import android.os.Process
 import android.util.Log
 import androidx.annotation.MainThread
 import androidx.core.content.ContextCompat
+import com.hotlaps.dynamic.data.AutoCalibrator
 import com.hotlaps.dynamic.data.CalibRepo
+import com.hotlaps.dynamic.data.CalibState
+import com.hotlaps.dynamic.data.CalibrationMath
 import com.hotlaps.dynamic.data.SettingsRepo
 import com.hotlaps.dynamic.data.SmoothingLevel
 import com.hotlaps.dynamic.util.GForceSmoother
@@ -102,6 +105,22 @@ class RecordingEngine(
     private val _phoneGpsLon = MutableStateFlow(0.0)
     val phoneGpsLon: StateFlow<Double> get() = _phoneGpsLon
 
+    /**
+     * Calibration status for the UI. READY = a calibration is in use. ARMED = the app will
+     * calibrate itself on the next clean straight-line pull (no calibration yet, the phone was
+     * moved, or the user asked to recalibrate).
+     */
+    data class CalibStatus(val ready: Boolean, val message: String)
+
+    private val _calibStatus = MutableStateFlow(CalibStatus(false, "Starting…"))
+    val calibStatus: StateFlow<CalibStatus> get() = _calibStatus
+
+    private val autoCalibrator = AutoCalibrator()
+
+    /** Latest gravity vector (phone frame, m/s^2): calibration screen + mount-change check. */
+    private val _gravity = MutableStateFlow<FloatArray?>(null)
+    val gravity: StateFlow<FloatArray?> get() = _gravity
+
     /** Emits once per USB puck fix (debug Hz display). */
     private val _puckFixes = MutableSharedFlow<Unit>(extraBufferCapacity = 64)
     val puckFixes: SharedFlow<Unit> get() = _puckFixes
@@ -163,9 +182,9 @@ class RecordingEngine(
         // 20 Hz loop, restarted when calibration or smoothing settings change
         s.launch {
             combine(calibRepo.state, settingsRepo.smoothingLevel, smoothingWindowOverride) { calib, level, window ->
-                Triple(calib.vec, SmoothingLevel.fromIndex(level), window)
-            }.collectLatest { (calibVec, level, window) ->
-                runTickLoop(calibVec, level, window)
+                Triple(calib, SmoothingLevel.fromIndex(level), window)
+            }.collectLatest { (calib, level, window) ->
+                runTickLoop(calib, level, window)
             }
         }
     }
@@ -182,13 +201,20 @@ class RecordingEngine(
 
     // ---- 20 Hz loop ---------------------------------------------------------
 
-    private suspend fun runTickLoop(calibVec: FloatArray?, level: SmoothingLevel, windowOverride: Int?) {
+    private suspend fun runTickLoop(calib: CalibState, level: SmoothingLevel, windowOverride: Int?) {
         val g = SensorManager.GRAVITY_EARTH
         val smoother = GForceSmoother(
             tauMs = if (level == SmoothingLevel.Off) null else level.tauMs.coerceAtLeast(1).toFloat(),
             maWindowSize = windowOverride ?: level.windowSize
         )
         RecordingHealth.resetTicks()
+        autoCalibrator.reset()
+
+        // Mount-change check runs only while parked: in long hard corners the gravity estimate
+        // can lean (especially on phones without a gyroscope), which must never re-arm mid-session.
+        var parkedMs = 0L
+        var mountMoved = false
+        var locking = false
 
         while (true) {
             delay(TICK_MS)
@@ -206,12 +232,56 @@ class RecordingEngine(
                 accelCount = 0
             }
 
-            // Pick forward vector: use calibration if present, else guess (-Y forward)
-            val calibForward = normalize3(
-                calibVec?.getOrNull(0) ?: 0f,
-                calibVec?.getOrNull(1) ?: -1f,
-                calibVec?.getOrNull(2) ?: 0f
-            ) ?: floatArrayOf(0f, -1f, 0f)
+            val gravityNow = if (gravX != 0f || gravY != 0f || gravZ != 0f)
+                floatArrayOf(gravX, gravY, gravZ) else null
+
+            if (drive.speedMps.value < 1.0) parkedMs += TICK_MS else parkedMs = 0L
+            if (!mountMoved && calib.vec != null && parkedMs >= 2_000L) {
+                CalibrationMath.mountChangeDeg(calib.gravity, gravityNow)
+                    ?.takeIf { it > CalibrationMath.MOUNT_CHANGE_DEG }
+                    ?.let { deg ->
+                        mountMoved = true
+                        RecordingHealth.log("CALIBRATION phone moved %.0f deg since calibration; re-armed".format(deg))
+                    }
+            }
+
+            // Forward axis: the saved calibration, or a gravity-based guess until auto-calibration locks
+            val needsCalibration = calib.vec == null || mountMoved
+            val armed = needsCalibration || calib.armedManually
+            val calibForward = (if (needsCalibration) null else calib.vec?.let { normalize3(it[0], it[1], it[2]) })
+                ?: CalibrationMath.guessForward(gravityNow)
+
+            val status = when {
+                !armed -> CalibStatus(true, "Ready · ${calib.summary}")
+                mountMoved -> CalibStatus(false, "Phone moved: recalibrating. Accelerate firmly in a straight line.")
+                calib.vec == null -> CalibStatus(false, "Calibrating: accelerate firmly in a straight line.")
+                else -> CalibStatus(false, "Recalibrating: accelerate firmly in a straight line.")
+            }
+            if (_calibStatus.value != status) _calibStatus.value = status
+
+            if (armed && !locking && gravityNow != null) {
+                autoCalibrator.add(
+                    AutoCalibrator.Tick(
+                        timeMs = System.currentTimeMillis(),
+                        accel = floatArrayOf(accelX, accelY, accelZ),
+                        gravity = gravityNow,
+                        speedMps = drive.speedMps.value,
+                        lat = drive.gpsLat.value,
+                        lon = drive.gpsLon.value
+                    )
+                )?.let { lock ->
+                    locking = true
+                    RecordingHealth.log(
+                        "CALIBRATION auto-locked from straight-line %s: %.2f g, forward=(%.2f, %.2f, %.2f)".format(
+                            if (lock.braking) "braking" else "acceleration", lock.meanG,
+                            lock.forward[0], lock.forward[1], lock.forward[2]
+                        )
+                    )
+                    scope?.launch {
+                        calibRepo.save(lock.forward, CalibrationMath.SOURCE_AUTO, null, lock.gravity)
+                    }
+                }
+            }
 
             // Gravity vector -> "down"; "up" is opposite
             val down = normalize3(gravX, gravY, gravZ) ?: floatArrayOf(0f, 0f, 1f)
@@ -265,6 +335,7 @@ class RecordingEngine(
                 drive.updateCornerCaptureState()
             }
 
+            if (gravityNow != null) _gravity.value = gravityNow
             _ticks.value++
         }
     }

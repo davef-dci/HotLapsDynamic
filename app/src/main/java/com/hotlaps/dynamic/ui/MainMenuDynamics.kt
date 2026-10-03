@@ -108,7 +108,11 @@ fun MainMenuDynamics(
 
             Spacer(Modifier.height(8.dp))
             Text(
-                text = if (isCalibrated) "Calibration: Saved ✓" else "Calibration: Not set",
+                text = when {
+                    calibState == null -> "Calibration: …"
+                    calibState.vec == null -> "Calibration: automatic on your next drive"
+                    else -> "Calibration: " + calibState.summary
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (isCalibrated) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.error
@@ -118,8 +122,8 @@ fun MainMenuDynamics(
 
             // Primary action: Drive
             BigButton(
-                text = if (isCalibrated) "Drive" else "Drive (needs calibration)",
-                enabled = isCalibrated,
+                text = "Drive",
+                enabled = true,
                 onClick = onDrive
             )
 

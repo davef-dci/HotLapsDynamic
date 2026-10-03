@@ -296,15 +296,20 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
         // Live pit-side upload: the corner list now, then only the new rows every minute
         // (the Analyzer's live mode joins the parts). A local backup copy is still made every
         // 5 minutes; the complete file is uploaded once, at Stop.
-        if (::appContext.isInitialized && track != null) {
-            EventStorage.queueLiveCorners(appContext, event.id, track.corners.map { c ->
-                CornerLapDetector.CornerSpec(
-                    index = c.index,
-                    name = c.name?.takeIf { it.isNotBlank() } ?: "Corner ${c.index}",
-                    lat = c.lat,
-                    lon = c.lon
-                )
-            }, _cornerTriggerRadiusM.value)
+        val startCorners = track?.corners.orEmpty().map { c ->
+            CornerLapDetector.CornerSpec(
+                index = c.index,
+                name = c.name?.takeIf { it.isNotBlank() } ?: "Corner ${c.index}",
+                lat = c.lat,
+                lon = c.lon
+            )
+        }
+        if (::appContext.isInitialized) {
+            // Marker so a cut-off session (crash / Force Stop / dead battery) is finished on next start
+            EventStorage.markSessionActive(appContext, event.id, startCorners, _cornerTriggerRadiusM.value)
+            if (startCorners.isNotEmpty()) {
+                EventStorage.queueLiveCorners(appContext, event.id, startCorners, _cornerTriggerRadiusM.value)
+            }
         }
         backupJob?.cancel()
         backupJob = viewModelScope.launch(Dispatchers.IO) {
@@ -379,7 +384,7 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
                 val file = EventStorage.finishEvent(appContext, event.id, name, trackCorners, radiusM)
                 RecordingHealth.log("FINISHED event=${event.id} file=${file?.name} bytes=${file?.length()}")
                 // Upload the complete finished file, then remove the live parts it replaces
-                val uploaded = DriveUploadHelper.uploadBackupFile(appContext, event.id)
+                val uploaded = DriveUploadHelper.uploadBackupFile(appContext, event.id, file?.nameWithoutExtension)
                 if (uploaded) DriveUploadHelper.deleteLiveParts(appContext, event.id)
                 EventStorage.clearLiveState(event.id)
                 RecordingHealth.log("UPLOAD final event=${event.id} ok=$uploaded")

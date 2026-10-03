@@ -527,6 +527,36 @@ fun GGScreen(
                                         }
                                     }
 
+// --- Calibration: READY line, or ARMED banner until auto-calibration locks in ---
+                                    val calibStatus by recordingEngine.calibStatus.collectAsState()
+                                    if (calibStatus.ready) {
+                                        Text(
+                                            text = "Calibration: " + calibState.summary,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier
+                                                .padding(top = 4.dp)
+                                                .clickable { onOpenCalibrate() }
+                                        )
+                                    } else {
+                                        Surface(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(top = 6.dp)
+                                                .clickable { onOpenCalibrate() },
+                                            color = Color(0xFFFFB300),
+                                            shape = MaterialTheme.shapes.small
+                                        ) {
+                                            Text(
+                                                text = calibStatus.message,
+                                                color = Color.Black,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                            )
+                                        }
+                                    }
+
 // --- Low-battery warning (the GPS puck may block charging through a splitter) ---
                                     var battery by remember { mutableStateOf<BatteryStatus?>(null) }
                                     LaunchedEffect(Unit) {
@@ -607,6 +637,12 @@ fun GGScreen(
                                                 else             -> scaleMode.fixedMaxG ?: ggMaxG
                                             }
 
+                                        val plotCalib by recordingEngine.calibStatus.collectAsState()
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .aspectRatio(1f)
+                                        ) {
                                         GGPlot(
                                             maxAbsG = effectiveMaxG,
                                             latG = latG,
@@ -624,6 +660,37 @@ fun GGScreen(
                                                 }
                                             }
                                         )
+                                        // Until calibration locks the axes are a guess: don't let them look trustworthy
+                                        if (!plotCalib.ready) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .matchParentSize()
+                                                    .background(Color.Black.copy(alpha = 0.72f))
+                                                    .clickable { onOpenCalibrate() },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Column(
+                                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                                    modifier = Modifier.padding(24.dp)
+                                                ) {
+                                                    Text(
+                                                        "CALIBRATING",
+                                                        color = Color(0xFFFFB300),
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 26.sp
+                                                    )
+                                                    Spacer(Modifier.height(8.dp))
+                                                    Text(
+                                                        "Accelerate or brake firmly in a straight line. " +
+                                                                "The G-G plot appears once the app knows which way is forward.",
+                                                        color = Color.White,
+                                                        textAlign = TextAlign.Center,
+                                                        fontSize = 15.sp
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        }
 
                                         Spacer(Modifier.height(4.dp))
 
@@ -1111,37 +1178,7 @@ fun GGScreen(
                     }
                 }
 
-                // 2) Calibration overlay (only when NOT calibrated)
-                if (!isCalibrated) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
-                            .padding(24.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.align(Alignment.Center),
-                            verticalArrangement = Arrangement.spacedBy(16.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text(
-                                text = "Calibration required",
-                                style = MaterialTheme.typography.titleLarge
-                            )
-                            Text(
-                                text = "Before using the G-Force map, please calibrate the accelerometers so braking and acceleration are oriented correctly.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                textAlign = TextAlign.Center
-                            )
-                            Button(
-                                onClick = { onOpenCalibrate() }
-                            ) {
-                                Text("Go to Calibration")
-                            }
-
-                        }
-                    }
-                }
+                // (No calibration gate: the app calibrates itself on the first straight-line pull)
             }
         }
     }

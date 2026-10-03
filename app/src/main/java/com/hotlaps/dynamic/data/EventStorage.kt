@@ -200,7 +200,10 @@ object EventStorage {
 
         val dir = eventsDir(appContext) ?: return null
         var file = File(dir, "event_${eventId}.csv")
-        if (!file.exists()) return null
+        if (!file.exists()) {
+            markerFile(appContext, eventId).delete()
+            return null
+        }
 
         try {
             val result = EventPostProcessor.finish(
@@ -224,7 +227,56 @@ object EventStorage {
         } catch (e: Exception) {
             Log.e(TAG, "finishEvent: backup copy failed for event $eventId", e)
         }
+        markerFile(appContext, eventId).delete()
         return file
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Session markers: recovering sessions that were cut off
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * App-private marker per recording session: files/active_sessions/event_<id>_corners.csv,
+     * written at Record (with the track's corners) and deleted at the end of [finishEvent].
+     * A marker that still exists when the app starts means the session was cut off (crash,
+     * Force Stop, dead battery) before Stop: see SessionRecovery.
+     */
+    private fun markerDir(context: Context) = File(context.filesDir, "active_sessions").apply { mkdirs() }
+
+    private fun markerFile(context: Context, eventId: Long) =
+        File(markerDir(context), "event_${eventId}_corners.csv")
+
+    fun markSessionActive(
+        context: Context,
+        eventId: Long,
+        corners: List<CornerLapDetector.CornerSpec>,
+        radiusM: Double
+    ) {
+        try {
+            LiveParts.writeCorners(markerFile(context, eventId), corners, radiusM)
+        } catch (e: Exception) {
+            Log.e(TAG, "markSessionActive failed for event $eventId", e)
+        }
+    }
+
+    data class UnfinishedSession(
+        val eventId: Long,
+        val corners: List<CornerLapDetector.CornerSpec>,
+        val radiusM: Double
+    )
+
+    /** Sessions whose marker still exists (call at app start, before anything records). */
+    fun unfinishedSessions(context: Context): List<UnfinishedSession> {
+        val regex = Regex("""event_(\d+)_corners\.csv""")
+        return markerDir(context).listFiles().orEmpty().mapNotNull { f ->
+            val id = regex.matchEntire(f.name)?.groupValues?.get(1)?.toLongOrNull() ?: return@mapNotNull null
+            val (corners, radius) = try {
+                LiveParts.readCorners(f)
+            } catch (_: Exception) {
+                emptyList<CornerLapDetector.CornerSpec>() to CornerLapDetector.DEFAULT_RADIUS_M
+            }
+            UnfinishedSession(id, corners, radius)
+        }
     }
 
     // ---------------------------------------------------------------------------------------------
