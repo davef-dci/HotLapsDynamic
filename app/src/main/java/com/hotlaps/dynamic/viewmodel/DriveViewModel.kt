@@ -276,7 +276,7 @@ private val perCornerState = mutableMapOf<Int, CornerState>()
 
         _currentEvent.value = event
         _recordingState.value = RecordingState.Recording
-        RecordingHealth.log("START event=${event.id} track=${track?.name ?: "(none)"}")
+        RecordingHealth.log("START event=${event.id} track=${track?.name ?: "(none)"} app=${com.hotlaps.dynamic.util.AppVersion.label}")
 
         // Keep sampling alive with the screen off / app in background / other screens open
         RecordingService.start(context.applicationContext, eventName)

@@ -69,8 +69,11 @@ class LivePartsTest {
     @Test
     fun cornersFile() {
         val f = File(tmp.root, "c.csv")
-        LiveParts.writeCorners(f, listOf(CornerLapDetector.CornerSpec(1, "Turn 1, fast", 42.4, -86.1)), 30.0)
-        assertEquals(listOf("index,name,lat,lon,radiusM", "1,Turn 1  fast,42.4,-86.1,30.0"), f.readLines())
+        LiveParts.writeCorners(f, listOf(CornerLapDetector.CornerSpec(1, "Turn 1, fast", 42.4, -86.1)), 30.0, "0.3.0 abc1234")
+        assertEquals(
+            listOf("index,name,lat,lon,radiusM,appVersion", "1,Turn 1  fast,42.4,-86.1,30.0,0.3.0 abc1234"),
+            f.readLines()
+        )
         val (back, radius) = LiveParts.readCorners(f)
         assertEquals(listOf(CornerLapDetector.CornerSpec(1, "Turn 1  fast", 42.4, -86.1)), back)
         assertEquals(30.0, radius, 0.0)

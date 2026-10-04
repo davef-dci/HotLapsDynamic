@@ -74,12 +74,21 @@ object LiveParts {
         return corners to radius
     }
 
-    /** "index,name,lat,lon,radiusM" CSV of the session's track corners. */
-    fun writeCorners(dest: File, corners: List<CornerLapDetector.CornerSpec>, radiusM: Double) {
+    /**
+     * "index,name,lat,lon,radiusM,appVersion" CSV of the session's track corners. appVersion (the
+     * build that recorded the session) is repeated on each row; readers ignore extra columns.
+     */
+    fun writeCorners(
+        dest: File,
+        corners: List<CornerLapDetector.CornerSpec>,
+        radiusM: Double,
+        appVersion: String = com.hotlaps.dynamic.util.AppVersion.label
+    ) {
+        val version = EventCsvFormat.sanitizeField(appVersion)
         dest.bufferedWriter().use { w ->
-            w.write("index,name,lat,lon,radiusM\n")
+            w.write("index,name,lat,lon,radiusM,appVersion\n")
             corners.forEach { c ->
-                w.write("${c.index},${EventCsvFormat.sanitizeField(c.name)},${c.lat},${c.lon},$radiusM\n")
+                w.write("${c.index},${EventCsvFormat.sanitizeField(c.name)},${c.lat},${c.lon},$radiusM,$version\n")
             }
         }
     }

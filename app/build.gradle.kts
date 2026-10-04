@@ -20,8 +20,9 @@ android {
         applicationId = "com.hotlaps.dynamic"
         minSdk = 26
         targetSdk = 35
-        versionCode = 10
-        versionName = "0.2.0"
+        // Shared version with ApexDynamicsAnalyzer: both apps move together (same CSV/upload formats)
+        versionCode = 11
+        versionName = "0.3.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
     }
@@ -134,9 +135,13 @@ dependencies {
 
 
 // Helpers
+// Short commit, with "+" when the build includes uncommitted changes to tracked files
 fun gitSha(): String = try {
-    val p = Runtime.getRuntime().exec("git rev-parse --short=7 HEAD")
-    p.inputStream.bufferedReader().readText().trim().ifEmpty { "nogit" }
+    val p = Runtime.getRuntime().exec(arrayOf("git", "rev-parse", "--short=7", "HEAD"))
+    val sha = p.inputStream.bufferedReader().readText().trim().ifEmpty { "nogit" }
+    val s = Runtime.getRuntime().exec(arrayOf("git", "status", "--porcelain", "--untracked-files=no"))
+    val dirty = s.inputStream.bufferedReader().readText().isNotBlank()
+    if (dirty) "$sha+" else sha
 } catch (_: Exception) { "nogit" }
 
 fun buildTime(): String =
