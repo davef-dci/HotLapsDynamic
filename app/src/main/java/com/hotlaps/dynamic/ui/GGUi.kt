@@ -956,6 +956,16 @@ fun GGScreen(
                                         Text(
                                             "External GPS ${if (usingExternalGps) "★ ACTIVE" else "(not connected)"} @ ${"%.1f".format(externalGpsHz)} Hz: ${"%.6f".format(vmGpsLat)}, ${"%.6f".format(vmGpsLon)}"
                                         )
+                                        // Test: log the phone's GPS alongside the puck (debug_logs/gps_compare_*.csv)
+                                        val compareOn by com.hotlaps.dynamic.util.GpsCompareLog.enabled.collectAsState()
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            androidx.compose.material3.Switch(
+                                                checked = compareOn,
+                                                onCheckedChange = { com.hotlaps.dynamic.util.GpsCompareLog.setEnabled(context, it) }
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                            Text("GPS compare test: log phone GPS alongside puck")
+                                        }
                                         val usbStatus by usbGpsSource.statusMessage.collectAsState()
                                         Text(
                                             text = usbStatus,

@@ -52,7 +52,11 @@ class UsbPuckGpsSource(private val context: Context) {
         val lat: Double,
         val lon: Double,
         val speedMps: Double?,          // from NMEA $GPRMC speed-over-ground (may be null)
-        val utcMs: Long                 // wall-clock UTC ms — use directly as EventSample.utcMs
+        val utcMs: Long,                // wall-clock UTC ms — use directly as EventSample.utcMs
+        /** When the GPS measured this fix (RMC time + date), UTC ms; null if not parseable. */
+        val gpsTimeMs: Long? = null,
+        /** RMC speed-over-ground as received (same as [speedMps]; logged by the GPS compare test). */
+        val rmcSpeedMps: Double? = null
     )
 
     // ---- Public state --------------------------------------------------------
@@ -203,6 +207,7 @@ class UsbPuckGpsSource(private val context: Context) {
             while (currentCoroutineContext().isActive) {
                 val n = try { port.read(readBuf, 200) } catch (_: Exception) { -1 }
                 if (n != null && n > 0) {
+                    diag.onBytes(n)
                     val chunk = String(readBuf, 0, n, ascii)
                     for (c in chunk) {
                         if (c == '\n') {
@@ -232,6 +237,7 @@ class UsbPuckGpsSource(private val context: Context) {
     private var receivedFirstFix = false
 
     private fun handleLine(line: String) {
+        diag.onSentence(line.substringBefore(','))
         // Accept only $GPRMC — the BU-353 also outputs $GNRMC for the same fix,
         // which would double the apparent rate to ~20 Hz. Pinning to GPRMC gives
         // clean 10 Hz output with one fix per GPS epoch.
@@ -242,7 +248,68 @@ class UsbPuckGpsSource(private val context: Context) {
                 receivedFirstFix = true
                 _statusMessage.value = "USB GPS: receiving fixes — 10 Hz active"
             }
-            _fixes.tryEmit(fix)
+            diag.onFix(fix, emitted = _fixes.tryEmit(fix))
+        }
+    }
+
+    /** Called by the consumer (RecordingEngine) when it processes a fix: measures queueing delay. */
+    fun onFixConsumed(fix: UsbGpsFix) = diag.onConsumed(System.currentTimeMillis() - fix.utcMs)
+
+    // ---- Latency diagnostics (logged to the recording health log every 10 s) ---------------
+    //
+    // Three delays per fix: GPS measurement time (from the RMC sentence) -> arrival here ->
+    // processed by the engine. Plus bytes/s against the link capacity and which sentence types
+    // the puck sends, to find where GPS data falls behind the accelerometer.
+    private val diag = LatencyDiag()
+
+    private inner class LatencyDiag {
+        private val windowMs = 10_000L
+        private var windowStart = 0L
+        private var bytes = 0L
+        private var fixes = 0
+        private var dropped = 0
+        private val types = HashMap<String, Int>()
+        private val gpsToApp = ArrayList<Long>()
+        private val appToEngine = ArrayList<Long>()
+
+        @Synchronized fun onBytes(n: Int) { bytes += n }
+
+        @Synchronized fun onSentence(type: String) {
+            if (type.startsWith("$")) types[type] = (types[type] ?: 0) + 1
+        }
+
+        @Synchronized fun onConsumed(delayMs: Long) { appToEngine.add(delayMs) }
+
+        @Synchronized fun onFix(fix: UsbGpsFix, emitted: Boolean) {
+            fixes++
+            if (!emitted) dropped++
+            fix.gpsTimeMs?.let { gpsToApp.add(fix.utcMs - it) }
+            val now = fix.utcMs
+            if (windowStart == 0L) windowStart = now
+            if (now - windowStart >= windowMs) {
+                report(now - windowStart)
+                windowStart = now
+                bytes = 0; fixes = 0; dropped = 0
+                types.clear(); gpsToApp.clear(); appToEngine.clear()
+            }
+        }
+
+        private fun stat(xs: List<Long>): String {
+            if (xs.isEmpty()) return "n/a"
+            val s = xs.sorted()
+            return "med=${s[s.size / 2]} min=${s.first()} max=${s.last()}ms"
+        }
+
+        private fun report(spanMs: Long) {
+            val secs = spanMs / 1000.0
+            val bps = bytes / secs
+            val linkBps = BAUD / 10.0 // 8N1: 10 bits per byte
+            val typeList = types.entries.sortedBy { it.key }.joinToString(" ") { "${it.key.drop(1)}:${it.value}" }
+            RecordingHealth.log(
+                "PUCK %.1f Hz dropped=%d | gps->app %s | app->engine %s | %.0f B/s = %.0f%% of link | %s".format(
+                    fixes / secs, dropped, stat(gpsToApp), stat(appToEngine), bps, 100 * bps / linkBps, typeList
+                )
+            )
         }
     }
 
@@ -275,8 +342,30 @@ class UsbPuckGpsSource(private val context: Context) {
             lat = lat,
             lon = lon,
             speedMps = speedMps,
-            utcMs = System.currentTimeMillis()
+            utcMs = System.currentTimeMillis(),
+            gpsTimeMs = rmcTimeMs(f.getOrNull(1), f.getOrNull(9)),
+            rmcSpeedMps = speedMps
         )
+    }
+
+    /** RMC time "hhmmss.sss" + date "ddmmyy" -> UTC epoch ms. */
+    private fun rmcTimeMs(time: String?, date: String?): Long? {
+        if (time == null || date == null || time.length < 6 || date.length != 6) return null
+        return try {
+            val hh = time.substring(0, 2).toInt()
+            val mm = time.substring(2, 4).toInt()
+            val ss = time.substring(4).toDouble()
+            val day = date.substring(0, 2).toInt()
+            val mon = date.substring(2, 4).toInt()
+            val yr = 2000 + date.substring(4, 6).toInt()
+            val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
+                clear()
+                set(yr, mon - 1, day, hh, mm, 0)
+            }
+            cal.timeInMillis + Math.round(ss * 1000)
+        } catch (_: Exception) {
+            null
+        }
     }
 
     /** Convert NMEA DDMM.MMMM / DDDMM.MMMM + hemisphere to decimal degrees. */

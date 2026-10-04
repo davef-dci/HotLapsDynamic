@@ -24,6 +24,7 @@ import com.hotlaps.dynamic.data.SmoothingLevel
 import com.hotlaps.dynamic.util.GForceSmoother
 import com.hotlaps.dynamic.util.RecordingHealth
 import com.hotlaps.dynamic.util.UsbPuckGpsSource
+import com.hotlaps.dynamic.util.GpsCompareLog
 import com.hotlaps.dynamic.viewmodel.DriveViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.android.asCoroutineDispatcher
@@ -162,16 +163,20 @@ class RecordingEngine(
 
         // Puck connection decides who drives GPS (and sample timing)
         s.launch {
-            usbGps.isConnected.collect { connected ->
-                drive.setUsingExternalGps(connected)
-                // Only power up the internal GPS radio when the puck is not connected
-                if (connected) stopPhoneGps() else startPhoneGps()
-            }
+            combine(usbGps.isConnected, GpsCompareLog.enabled) { c, cmp -> c to cmp }
+                .collect { (connected, compare) ->
+                    drive.setUsingExternalGps(connected)
+                    // Only power up the internal GPS radio when the puck is not connected,
+                    // unless the GPS compare test is logging both
+                    if (connected && !compare) stopPhoneGps() else startPhoneGps()
+                }
         }
 
         // GPS-gated sampling: each puck fix drives one sample (replaces the timer trigger)
         s.launch {
             usbGps.fixes.collect { fix ->
+                usbGps.onFixConsumed(fix)
+                GpsCompareLog.puck(fix)
                 _puckFixes.tryEmit(Unit)
                 drive.updateGps(lat = fix.lat, lon = fix.lon, speedMps = fix.speedMps)
                 drive.recordCurrentSample()
@@ -372,6 +377,7 @@ class RecordingEngine(
     private var phoneGpsActive = false
 
     private val locationListener = LocationListener { loc: Location ->
+        GpsCompareLog.phone(loc)
         _phoneGpsLat.value = loc.latitude
         _phoneGpsLon.value = loc.longitude
         // When the puck is active it owns VM GPS exclusively at 10 Hz
