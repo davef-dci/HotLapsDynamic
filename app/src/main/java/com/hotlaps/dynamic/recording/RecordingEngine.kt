@@ -15,7 +15,7 @@ import android.os.Process
 import android.util.Log
 import androidx.annotation.MainThread
 import androidx.core.content.ContextCompat
-import com.hotlaps.dynamic.data.AutoCalibrator
+import com.hotlaps.dynamic.data.PullCalibrator
 import com.hotlaps.dynamic.data.CalibRepo
 import com.hotlaps.dynamic.data.CalibState
 import com.hotlaps.dynamic.data.CalibrationMath
@@ -107,16 +107,57 @@ class RecordingEngine(
     val phoneGpsLon: StateFlow<Double> get() = _phoneGpsLon
 
     /**
-     * Calibration status for the UI. READY = a calibration is in use. ARMED = the app will
-     * calibrate itself on the next clean straight-line pull (no calibration yet, the phone was
-     * moved, or the user asked to recalibrate).
+     * Calibration status for the UI.
+     *  - ready: a calibration is in use (maybe with [warning]: the phone may have moved since)
+     *  - calibrating: the driver pressed Calibrate; waiting for a straight-line pull
+     *  - otherwise: not calibrated (axes are a guess from how the phone is tilted)
      */
-    data class CalibStatus(val ready: Boolean, val message: String)
+    data class CalibStatus(
+        val ready: Boolean,
+        val message: String,
+        val warning: Boolean = false
+    )
+
+    /** Calibrate button flow: 3-2-1 countdown, a 4 s straight-line pull, then the result. */
+    sealed class CalPhase {
+        object Idle : CalPhase()
+        data class Countdown(val secondsLeft: Int) : CalPhase()
+        data class Pull(val progress: Float) : CalPhase()
+        data class Done(val ok: Boolean, val message: String) : CalPhase()
+    }
+
+    private val _calPhase = MutableStateFlow<CalPhase>(CalPhase.Idle)
+    val calPhase: StateFlow<CalPhase> get() = _calPhase
+
+    /** When Calibrate was tapped (0 = not calibrating). Timing runs on the engine's tick loop. */
+    @Volatile private var calStartMs = 0L
+    private var calDoneMs = 0L
+    private val pullTicks = ArrayList<PullCalibrator.Tick>()
+
+    /**
+     * Gravity during the countdown (car still): the "phone moved?" reference. Gravity measured
+     * during the pull leans with the acceleration, which made the check report "moved 17 deg"
+     * as soon as the car parked (2026-10-05).
+     */
+    private val countdownGravity = ArrayList<FloatArray>()
+
+    /** Calibrate button: countdown, then the driver accelerates or brakes firmly in a straight line. */
+    fun startCalibration() {
+        pullTicks.clear()
+        countdownGravity.clear()
+        calStartMs = System.currentTimeMillis()
+        _calPhase.value = CalPhase.Countdown(3)
+        RecordingHealth.log("CALIBRATION started (countdown)")
+    }
+
+    fun cancelCalibration() {
+        calStartMs = 0L
+        _calPhase.value = CalPhase.Idle
+    }
 
     private val _calibStatus = MutableStateFlow(CalibStatus(false, "Starting…"))
     val calibStatus: StateFlow<CalibStatus> get() = _calibStatus
 
-    private val autoCalibrator = AutoCalibrator()
 
     /** Latest gravity vector (phone frame, m/s^2): calibration screen + mount-change check. */
     private val _gravity = MutableStateFlow<FloatArray?>(null)
@@ -213,13 +254,13 @@ class RecordingEngine(
             maWindowSize = windowOverride ?: level.windowSize
         )
         RecordingHealth.resetTicks()
-        autoCalibrator.reset()
 
         // Mount-change check runs only while parked: in long hard corners the gravity estimate
-        // can lean (especially on phones without a gyroscope), which must never re-arm mid-session.
+        // can lean (especially on phones without a gyroscope). It only WARNS: a calibration is
+        // never thrown away automatically (2026-10-05: moving the phone from desk to dash
+        // discarded a good calibration and left the app waiting for a pull that never came).
         var parkedMs = 0L
         var mountMoved = false
-        var locking = false
 
         while (true) {
             delay(TICK_MS)
@@ -246,46 +287,83 @@ class RecordingEngine(
                     ?.takeIf { it > CalibrationMath.MOUNT_CHANGE_DEG }
                     ?.let { deg ->
                         mountMoved = true
-                        RecordingHealth.log("CALIBRATION phone moved %.0f deg since calibration; re-armed".format(deg))
+                        RecordingHealth.log("CALIBRATION phone moved %.0f deg since calibration; warning shown (calibration kept)".format(deg))
                     }
             }
 
-            // Forward axis: the saved calibration, or a gravity-based guess until auto-calibration locks
-            val needsCalibration = calib.vec == null || mountMoved
-            val armed = needsCalibration || calib.armedManually
-            val calibForward = (if (needsCalibration) null else calib.vec?.let { normalize3(it[0], it[1], it[2]) })
+            // Forward axis: the saved calibration, else a guess from how the phone is tilted
+            val calibForward = calib.vec?.let { normalize3(it[0], it[1], it[2]) }
                 ?: CalibrationMath.guessForward(gravityNow)
 
             val status = when {
-                !armed -> CalibStatus(true, "Ready · ${calib.summary}")
-                mountMoved -> CalibStatus(false, "Phone moved: recalibrating. Accelerate firmly in a straight line.")
-                calib.vec == null -> CalibStatus(false, "Calibrating: accelerate firmly in a straight line.")
-                else -> CalibStatus(false, "Recalibrating: accelerate firmly in a straight line.")
+                calib.vec == null -> CalibStatus(false, "Not calibrated: tap Calibrate, then accelerate firmly in a straight line.")
+                mountMoved -> CalibStatus(true, "Phone may have moved since calibration: tap to recalibrate.", warning = true)
+                else -> CalibStatus(true, "Ready · ${calib.summary}")
             }
             if (_calibStatus.value != status) _calibStatus.value = status
 
-            if (armed && !locking && gravityNow != null) {
-                autoCalibrator.add(
-                    AutoCalibrator.Tick(
-                        timeMs = System.currentTimeMillis(),
-                        accel = floatArrayOf(accelX, accelY, accelZ),
-                        gravity = gravityNow,
-                        speedMps = drive.speedMps.value,
-                        lat = drive.gpsLat.value,
-                        lon = drive.gpsLon.value
-                    )
-                )?.let { lock ->
-                    locking = true
-                    RecordingHealth.log(
-                        "CALIBRATION auto-locked from straight-line %s: %.2f g, forward=(%.2f, %.2f, %.2f)".format(
-                            if (lock.braking) "braking" else "acceleration", lock.meanG,
-                            lock.forward[0], lock.forward[1], lock.forward[2]
-                        )
-                    )
-                    scope?.launch {
-                        calibRepo.save(lock.forward, CalibrationMath.SOURCE_AUTO, null, lock.gravity)
+            // Calibrate button: countdown, 4 s pull, check against GPS, save or explain why not
+            val now = System.currentTimeMillis()
+            val calStart = calStartMs
+            if (calStart != 0L) {
+                val elapsed = now - calStart
+                when {
+                    elapsed < PullCalibrator.COUNTDOWN_MS -> {
+                        if (gravityNow != null && drive.speedMps.value < 1.0) countdownGravity.add(gravityNow)
+                        val left = ((PullCalibrator.COUNTDOWN_MS - elapsed + 999) / 1000).toInt()
+                        if (_calPhase.value != CalPhase.Countdown(left)) _calPhase.value = CalPhase.Countdown(left)
+                    }
+                    elapsed < PullCalibrator.COUNTDOWN_MS + PullCalibrator.PULL_MS -> {
+                        if (gravityNow != null) {
+                            pullTicks.add(
+                                PullCalibrator.Tick(
+                                    timeMs = now,
+                                    accel = floatArrayOf(accelX, accelY, accelZ),
+                                    gravity = gravityNow,
+                                    speedMps = drive.speedMps.value,
+                                    lat = drive.gpsLat.value,
+                                    lon = drive.gpsLon.value
+                                )
+                            )
+                        }
+                        val p = (elapsed - PullCalibrator.COUNTDOWN_MS).toFloat() / PullCalibrator.PULL_MS
+                        _calPhase.value = CalPhase.Pull(p)
+                    }
+                    else -> {
+                        calStartMs = 0L
+                        calDoneMs = now
+                        when (val r = PullCalibrator.evaluate(pullTicks.toList())) {
+                            is PullCalibrator.Result.Ok -> {
+                                RecordingHealth.log(
+                                    "CALIBRATION measured from straight-line %s: %.2f g, GPS %+.0f mph, forward=(%.2f, %.2f, %.2f)".format(
+                                        if (r.braking) "braking" else "acceleration", r.meanG, r.speedChangeMph,
+                                        r.forward[0], r.forward[1], r.forward[2]
+                                    )
+                                )
+                                // Mount-change reference: gravity while still (countdown), else during the pull
+                                val still = countdownGravity.takeIf { it.size >= 10 }?.let { g ->
+                                    floatArrayOf(
+                                        g.map { it[0] }.average().toFloat(),
+                                        g.map { it[1] }.average().toFloat(),
+                                        g.map { it[2] }.average().toFloat()
+                                    )
+                                }
+                                scope?.launch { calibRepo.save(r.forward, CalibrationMath.SOURCE_MEASURED, null, still ?: r.gravity) }
+                                _calPhase.value = CalPhase.Done(
+                                    true,
+                                    "Pull measured %.2f g. Check: brake gently and the dot should move down.".format(r.meanG)
+                                )
+                            }
+                            is PullCalibrator.Result.Fail -> {
+                                RecordingHealth.log("CALIBRATION rejected: ${r.reason}")
+                                _calPhase.value = CalPhase.Done(false, r.reason)
+                            }
+                        }
+                        pullTicks.clear()
                     }
                 }
+            } else if (_calPhase.value is CalPhase.Done && now - calDoneMs > 6_000L) {
+                _calPhase.value = CalPhase.Idle
             }
 
             // Gravity vector -> "down"; "up" is opposite

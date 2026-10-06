@@ -279,6 +279,28 @@ fun GGScreen(
     // TRUE if we have a saved forward vector, FALSE if not calibrated yet
     val isCalibrated = calibState.vec != null
 
+    // Calibrate flow (countdown → pull → result), with buzzes so the driver needn't look at the phone
+    val calPhase by recordingEngine.calPhase.collectAsState()
+    val calKind = when (val p = calPhase) {
+        is com.hotlaps.dynamic.recording.RecordingEngine.CalPhase.Countdown -> "count${p.secondsLeft}"
+        is com.hotlaps.dynamic.recording.RecordingEngine.CalPhase.Pull -> "pull"
+        is com.hotlaps.dynamic.recording.RecordingEngine.CalPhase.Done -> if (p.ok) "ok" else "fail"
+        else -> "idle"
+    }
+    LaunchedEffect(calKind) {
+        val ms = when {
+            calKind.startsWith("count") -> 60L
+            calKind == "pull" -> 300L
+            calKind == "ok" -> 700L
+            calKind == "fail" -> 150L
+            else -> 0L
+        }
+        if (ms > 0) try {
+            val vib = context.getSystemService(android.os.Vibrator::class.java)
+            vib?.vibrate(android.os.VibrationEffect.createOneShot(ms, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+        } catch (_: Exception) { }
+    }
+
 
 
     // === GPS values in the screen (local copy) ===
@@ -529,7 +551,7 @@ fun GGScreen(
 
 // --- Calibration: READY line, or ARMED banner until auto-calibration locks in ---
                                     val calibStatus by recordingEngine.calibStatus.collectAsState()
-                                    if (calibStatus.ready) {
+                                    if (calibStatus.ready && !calibStatus.warning) {
                                         Text(
                                             text = "Calibration: " + calibState.summary,
                                             style = MaterialTheme.typography.labelMedium,
@@ -543,7 +565,10 @@ fun GGScreen(
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .padding(top = 6.dp)
-                                                .clickable { onOpenCalibrate() },
+                                                .clickable {
+                                                    // Warning or not calibrated: one tap starts Calibrate
+                                                    if (calPhase is com.hotlaps.dynamic.recording.RecordingEngine.CalPhase.Idle) recordingEngine.startCalibration()
+                                                },
                                             color = Color(0xFFFFB300),
                                             shape = MaterialTheme.shapes.small
                                         ) {
@@ -660,33 +685,73 @@ fun GGScreen(
                                                 }
                                             }
                                         )
-                                        // Until calibration locks the axes are a guess: don't let them look trustworthy
-                                        if (!plotCalib.ready) {
+                                        // Calibrating, or not calibrated (axes are a guess): cover the plot with what to do
+                                        if (!plotCalib.ready || calPhase !is com.hotlaps.dynamic.recording.RecordingEngine.CalPhase.Idle) {
                                             Box(
                                                 modifier = Modifier
                                                     .matchParentSize()
-                                                    .background(Color.Black.copy(alpha = 0.72f))
-                                                    .clickable { onOpenCalibrate() },
+                                                    .background(Color.Black.copy(alpha = 0.78f)),
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 Column(
                                                     horizontalAlignment = Alignment.CenterHorizontally,
                                                     modifier = Modifier.padding(24.dp)
                                                 ) {
-                                                    Text(
-                                                        "CALIBRATING",
-                                                        color = Color(0xFFFFB300),
-                                                        fontWeight = FontWeight.Bold,
-                                                        fontSize = 26.sp
-                                                    )
-                                                    Spacer(Modifier.height(8.dp))
-                                                    Text(
-                                                        "Accelerate or brake firmly in a straight line. " +
-                                                                "The G-G plot appears once the app knows which way is forward.",
-                                                        color = Color.White,
-                                                        textAlign = TextAlign.Center,
-                                                        fontSize = 15.sp
-                                                    )
+                                                    val amber = Color(0xFFFFB300)
+                                                    when (val p = calPhase) {
+                                                        is com.hotlaps.dynamic.recording.RecordingEngine.CalPhase.Countdown -> {
+                                                            Text("${p.secondsLeft}", color = amber, fontWeight = FontWeight.Bold, fontSize = 72.sp)
+                                                            Text(
+                                                                "Get ready to accelerate firmly in a straight line",
+                                                                color = Color.White, textAlign = TextAlign.Center, fontSize = 16.sp
+                                                            )
+                                                        }
+                                                        is com.hotlaps.dynamic.recording.RecordingEngine.CalPhase.Pull -> {
+                                                            Text("GO!", color = Color(0xFF00E676), fontWeight = FontWeight.Bold, fontSize = 56.sp)
+                                                            Text(
+                                                                "Accelerate firmly in a straight line",
+                                                                color = Color.White, textAlign = TextAlign.Center, fontSize = 18.sp
+                                                            )
+                                                            Spacer(Modifier.height(12.dp))
+                                                            androidx.compose.material3.LinearProgressIndicator(
+                                                                progress = { p.progress },
+                                                                modifier = Modifier.fillMaxWidth(0.7f)
+                                                            )
+                                                        }
+                                                        is com.hotlaps.dynamic.recording.RecordingEngine.CalPhase.Done -> {
+                                                            Text(
+                                                                if (p.ok) "Calibrated ✓" else "Try again",
+                                                                color = if (p.ok) Color(0xFF00E676) else amber,
+                                                                fontWeight = FontWeight.Bold, fontSize = 30.sp
+                                                            )
+                                                            Spacer(Modifier.height(8.dp))
+                                                            Text(p.message, color = Color.White, textAlign = TextAlign.Center, fontSize = 15.sp)
+                                                            if (!p.ok) {
+                                                                Spacer(Modifier.height(12.dp))
+                                                                Button(onClick = { recordingEngine.startCalibration() }) {
+                                                                    Text("Calibrate", fontSize = 16.sp)
+                                                                }
+                                                            }
+                                                        }
+                                                        else -> {
+                                                            Text("NOT CALIBRATED", color = amber, fontWeight = FontWeight.Bold, fontSize = 26.sp)
+                                                            Spacer(Modifier.height(8.dp))
+                                                            Text(
+                                                                "Tap Calibrate. After a 3-2-1 countdown, accelerate firmly in a straight line for 4 seconds.",
+                                                                color = Color.White, textAlign = TextAlign.Center, fontSize = 15.sp
+                                                            )
+                                                            Spacer(Modifier.height(12.dp))
+                                                            Button(onClick = { recordingEngine.startCalibration() }) {
+                                                                Text("Calibrate", fontSize = 16.sp)
+                                                            }
+                                                        }
+                                                    }
+                                                    if (calPhase is com.hotlaps.dynamic.recording.RecordingEngine.CalPhase.Countdown || calPhase is com.hotlaps.dynamic.recording.RecordingEngine.CalPhase.Pull) {
+                                                        Spacer(Modifier.height(10.dp))
+                                                        androidx.compose.material3.TextButton(onClick = { recordingEngine.cancelCalibration() }) {
+                                                            Text("Cancel", color = Color.White)
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }

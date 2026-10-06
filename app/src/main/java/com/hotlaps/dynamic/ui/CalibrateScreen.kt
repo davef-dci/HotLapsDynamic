@@ -39,10 +39,10 @@ private val ReadyBg = Color(0xFF1B5E20)
 private val ArmedBg = Color(0xFFFFB300)
 
 /**
- * Calibration status and overrides. Nobody HAS to visit this screen: the app calibrates itself
- * on the first clean straight-line pull (AutoCalibrator, in RecordingEngine) and re-arms when the
- * phone is moved. Here you can see the status, check it with live bars, re-arm by hand, or set it
- * in the garage without driving (the app detects flat/upright itself; at most one question).
+ * Calibration: tap Calibrate, 3-2-1 countdown, then a 4 s firm straight-line pull, checked
+ * against GPS before it is saved (PullCalibrator, run by RecordingEngine). The same button is on
+ * the Drive screen. Here you can also check the result with live bars, or set it in the garage
+ * without driving (the app detects flat/upright itself; at most one question).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,6 +59,7 @@ fun CalibrateScreen(onBack: () -> Unit) {
         onDispose { engine.release("calibrate-screen") }
     }
     val status by engine.calibStatus.collectAsState()
+    val phase by engine.calPhase.collectAsState()
     val gravity by engine.gravity.collectAsState()
     val liveLat by app.driveViewModel.latG.collectAsState()
     val liveLong by app.driveViewModel.longG.collectAsState()
@@ -97,28 +98,37 @@ fun CalibrateScreen(onBack: () -> Unit) {
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            StatusBanner(status.ready, status.message, calib)
+            StatusBanner(status, calib)
+
+            // Calibrate flow: countdown, pull, result
+            when (val p = phase) {
+                is com.hotlaps.dynamic.recording.RecordingEngine.CalPhase.Countdown -> PhaseText("${p.secondsLeft}", "Get ready to accelerate firmly in a straight line", Color(0xFFFFB300))
+                is com.hotlaps.dynamic.recording.RecordingEngine.CalPhase.Pull -> PhaseText("GO!", "Accelerate firmly in a straight line", Color(0xFF00E676))
+                is com.hotlaps.dynamic.recording.RecordingEngine.CalPhase.Done -> PhaseText(if (p.ok) "Calibrated ✓" else "Try again", p.message, if (p.ok) Color(0xFF00E676) else Color(0xFFFFB300))
+                else -> {}
+            }
 
             LiveBars(lat = liveLat, long = liveLong)
 
             Text(
-                "Calibration is automatic: the first time you accelerate firmly in a straight line " +
-                        "(pit exit is perfect), the app learns which way is forward. If the phone is " +
-                        "moved, it recalibrates itself on the next straight-line pull.",
+                "With the phone in its mount: tap Calibrate. After a 3-2-1 countdown, accelerate firmly in a " +
+                        "straight line for 4 seconds (a firm stop works too). The app checks the pull against GPS " +
+                        "and only saves a good one. Do it again whenever the phone is moved to a different mount.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            OutlinedButton(
-                onClick = {
-                    scope.launch {
-                        calibRepo.arm()
-                        snackbar.currentSnackbarData?.dismiss()
-                        snackbar.showSnackbar("Will recalibrate on your next straight-line pull")
-                    }
-                },
-                modifier = Modifier.fillMaxWidth().height(56.dp)
-            ) { Text("Recalibrate on next drive", fontSize = 16.sp) }
+            if (phase is com.hotlaps.dynamic.recording.RecordingEngine.CalPhase.Countdown || phase is com.hotlaps.dynamic.recording.RecordingEngine.CalPhase.Pull) {
+                OutlinedButton(
+                    onClick = { engine.cancelCalibration() },
+                    modifier = Modifier.fillMaxWidth().height(56.dp)
+                ) { Text("Cancel", fontSize = 16.sp) }
+            } else {
+                androidx.compose.material3.Button(
+                    onClick = { engine.startCalibration() },
+                    modifier = Modifier.fillMaxWidth().height(56.dp)
+                ) { Text("Calibrate", fontSize = 18.sp) }
+            }
 
             OutlinedButton(
                 onClick = { showManual = !showManual },
@@ -161,9 +171,15 @@ fun CalibrateScreen(onBack: () -> Unit) {
 // ---------------------------------------------------------------------------------------------
 
 @Composable
-private fun StatusBanner(ready: Boolean, message: String, calib: CalibState) {
+private fun StatusBanner(status: com.hotlaps.dynamic.recording.RecordingEngine.CalibStatus, calib: CalibState) {
+    val ready = status.ready && !status.warning
     val bg = if (ready) ReadyBg else ArmedBg
     val fg = if (ready) Color.White else Color.Black
+    val title = when {
+        status.warning -> "CHECK CALIBRATION"
+        status.ready -> "CALIBRATED ✓"
+        else -> "NOT CALIBRATED"
+    }
     Surface(color = bg, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -172,13 +188,13 @@ private fun StatusBanner(ready: Boolean, message: String, calib: CalibState) {
                     contentDescription = null, tint = fg, modifier = Modifier.size(26.dp)
                 )
                 Spacer(Modifier.width(10.dp))
-                Text(if (ready) "READY" else "ARMED", color = fg, fontWeight = FontWeight.Bold, fontSize = 22.sp)
+                Text(title, color = fg, fontWeight = FontWeight.Bold, fontSize = 22.sp)
             }
             Text(
-                if (ready) calib.summary else message,
+                if (ready) calib.summary else status.message,
                 color = fg, fontSize = 15.sp, fontWeight = FontWeight.Medium
             )
-            if (ready) {
+            if (status.ready) {
                 calib.savedAtEpochMs?.let {
                     Text(
                         "Set " + SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()).format(Date(it)),
@@ -186,7 +202,7 @@ private fun StatusBanner(ready: Boolean, message: String, calib: CalibState) {
                     )
                 }
             } else {
-                Text("Recording works meanwhile; G-forces are exact once it locks in.", color = fg, fontSize = 13.sp)
+                Text("Recording works meanwhile; G-forces are exact once calibrated.", color = fg, fontSize = 13.sp)
             }
         }
     }
@@ -317,5 +333,14 @@ private fun DirButton(label: String, icon: ImageVector, onClick: () -> Unit) {
         Icon(icon, contentDescription = null)
         Spacer(Modifier.width(6.dp))
         Text(label)
+    }
+}
+
+/** Big countdown / GO / result line for the Calibrate flow. */
+@Composable
+private fun PhaseText(big: String, small: String, color: Color) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+        Text(big, color = color, fontWeight = FontWeight.Bold, fontSize = 44.sp)
+        Text(small, fontSize = 16.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
     }
 }

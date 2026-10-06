@@ -9,6 +9,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
+/**
+ * Short enough that the checkbox and Continue fit on one screen even with a large system font
+ * (still scrolls if it doesn't).
+ */
 @Composable
 fun DisclaimerScreen(
     onAccept: () -> Unit
@@ -20,63 +24,42 @@ fun DisclaimerScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(24.dp)
+                .padding(horizontal = 24.dp, vertical = 16.dp)
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.SpaceBetween
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Top: title + text
-            Column {
-                Text(
-                    text = "Safety Disclaimer",
-                    style = MaterialTheme.typography.headlineSmall
+            Text(
+                text = "Safety Disclaimer",
+                style = MaterialTheme.typography.titleLarge
+            )
+            Text(
+                text = "Provided as is, with no warranty of accuracy or results. Use at your own risk.",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Text(
+                text = "Do not operate this app while driving. Set it up before you drive, or have a " +
+                        "passenger or coach use it. Keep your attention on driving and obey all traffic laws.",
+                style = MaterialTheme.typography.bodyMedium
+            )
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = isChecked,
+                    onCheckedChange = { isChecked = it }
                 )
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.width(8.dp))
                 Text(
-                    text = "This app is provided as is with no warranty or " +
-                            "guarantee of performance, accuracy, or results. " +
-                            "Use at your own risk."
-                )
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    text = "This app is NOT intended to be used by the person " +
-                            "driving the vehicle. It should only be used by a " +
-                            "coach or passenger. Do not operate or interact with " +
-                            "this app while driving. Always keep your full " +
-                            "attention on driving and obey all traffic laws."
-                )
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    text = "By checking the box below and tapping “Continue,” " +
-                            "you acknowledge that you understand and accept " +
-                            "these terms."
+                    text = "I agree, and I will not operate this app while driving.",
+                    style = MaterialTheme.typography.bodyMedium
                 )
             }
 
-            // Bottom: checkbox + button
-            Column {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Checkbox(
-                        checked = isChecked,
-                        onCheckedChange = { isChecked = it }
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = "I understand and agree to the disclaimer above,\n" +
-                                "and I will not use this app while driving."
-                    )
-                }
-
-                Spacer(Modifier.height(16.dp))
-
-                Button(
-                    onClick = onAccept,
-                    enabled = isChecked,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Continue")
-                }
+            Button(
+                onClick = onAccept,
+                enabled = isChecked,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Continue")
             }
         }
     }

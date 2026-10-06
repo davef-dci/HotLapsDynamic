@@ -32,9 +32,9 @@ data class CalibState(
     val summary: String
         get() = when {
             vec == null -> "Not calibrated"
-            source == CalibrationMath.SOURCE_AUTO -> "Automatic (straight-line pull)"
+            source == CalibrationMath.SOURCE_AUTO -> "Automatic (straight-line pull, old method)"
             preset != null -> "Set by hand: ${preset!!.label}"
-            else -> "Measured while driving"
+            else -> "Measured (straight-line pull)"
         }
 }
 
@@ -89,11 +89,6 @@ class CalibRepo(private val context: Context) {
                 p.remove(K.GX); p.remove(K.GY); p.remove(K.GZ)
             }
         }
-    }
-
-    /** Recalibrate automatically on the next straight-line pull. */
-    suspend fun arm() {
-        context.calibDataStore.edit { it[K.ARMED] = true }
     }
 
     suspend fun clear() {
