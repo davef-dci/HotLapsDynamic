@@ -29,12 +29,23 @@
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
+            android:launchMode="singleTask"
             android:theme="@style/Theme.HotLapsDynamic">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Plugging in the BU-353 offers "Open Apex Dynamics … Always". Once "Always" is
+                 chosen, Android grants USB access to the puck automatically on every plug-in
+                 (no permission prompt in the car). singleTask: re-plugging brings the running
+                 app forward instead of stacking a second copy. -->
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/usb_device_filter" />
         </activity>
 
         <service

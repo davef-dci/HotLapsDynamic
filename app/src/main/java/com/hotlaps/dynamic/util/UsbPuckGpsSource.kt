@@ -79,11 +79,18 @@ class UsbPuckGpsSource(private val context: Context) {
     private var readJob: Job? = null
     private var scope: CoroutineScope? = null
 
+    // Set when the user answers the USB permission dialog (allow OR deny). The grant itself is
+    // read from usb.hasPermission() — the PendingIntent is immutable, so the extras are not reliable.
+    @Volatile private var permissionAnswered = false
+
+    // Device instance (deviceName changes on every re-plug) the user denied; not asked again
+    // until the puck is unplugged and plugged back in.
+    private var deniedDeviceName: String? = null
+
     // Permission broadcast receiver
     private val permReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
-            // Nothing to do here — we poll hasPermission() in runReader().
-            // The receiver just ensures the system delivers the permission dialog result.
+            permissionAnswered = true
         }
     }
 
@@ -115,57 +122,75 @@ class UsbPuckGpsSource(private val context: Context) {
         _isConnected.value = false
         _statusMessage.value = "USB GPS: stopped"
         receivedFirstFix = false
+        deniedDeviceName = null
         try { context.unregisterReceiver(permReceiver) } catch (_: Exception) {}
     }
 
     // ---- Core read loop ------------------------------------------------------
 
     private suspend fun runReader() {
-        // Retry loop — polls every 2 s until the puck appears.
-        // This handles: puck plugged in after app start, Samsung OTG enumeration delay,
-        // and the occasional transient "no devices" glitch seen on Pixel phones.
-        var device: UsbDevice? = null
+        // Never gives up while recording: scan → permission → read → (unplug / USB reset) → scan.
+        // A USB reset happens e.g. when power is plugged into / pulled from a charge-through hub;
+        // the puck re-enumerates and must be picked up again without restarting the app.
         var attempt = 0
         while (currentCoroutineContext().isActive) {
-            val allDevices = usb.deviceList.values
-            val deviceSummary = if (allDevices.isEmpty()) "none"
-            else allDevices.joinToString { d ->
-                "${d.productName ?: "unknown"} [vid=0x%04X]".format(d.vendorId)
+            val device = findProlific()
+            if (device == null) {
+                deniedDeviceName = null   // unplugged → ask again on the next plug-in
+                attempt++
+                val allDevices = usb.deviceList.values
+                val msg = if (allDevices.isEmpty())
+                    "USB GPS: no USB devices — plug in puck (attempt $attempt)"
+                else
+                    "USB GPS: puck not found. Devices: " + allDevices.joinToString { d ->
+                        "${d.productName ?: "unknown"} [vid=0x%04X]".format(d.vendorId)
+                    } + " (attempt $attempt)"
+                _statusMessage.value = msg
+                if (attempt == 1) Log.d(TAG, msg)   // log once to avoid spam
+                kotlinx.coroutines.delay(2000)
+                continue
+            }
+            attempt = 0
+
+            if (!usb.hasPermission(device) && !awaitPermission(device)) {
+                kotlinx.coroutines.delay(2000)
+                continue
             }
 
-            device = findProlific()
-            if (device != null) break
-
-            attempt++
-            val msg = if (allDevices.isEmpty())
-                "USB GPS: no USB devices — plug in puck (attempt $attempt)"
-            else
-                "USB GPS: puck not found. Devices: $deviceSummary (attempt $attempt)"
-            _statusMessage.value = msg
-            if (attempt == 1) Log.d(TAG, msg)   // log once to avoid spam
-            kotlinx.coroutines.delay(2000)
+            readFrom(device)
+            kotlinx.coroutines.delay(1000)   // let a re-enumerating puck settle before rescanning
         }
-        if (device == null) return   // coroutine was cancelled
+    }
 
-        _statusMessage.value = "USB GPS: Prolific device found, requesting permission..."
-
-        // Request permission if needed
-        if (!usb.hasPermission(device)) {
-            requestPermission(device)
-            // Poll up to 5 seconds for user to grant permission
-            var granted = false
-            repeat(50) {
-                if (usb.hasPermission(device)) { granted = true; return@repeat }
-                kotlinx.coroutines.delay(100)
-            }
-            if (!granted) {
-                val msg = "USB GPS: permission denied by user"
+    /**
+     * Shows the system "Allow access to USB device?" dialog and waits — with no timeout — until
+     * the user answers or the puck is unplugged. Returns true if access was granted.
+     */
+    private suspend fun awaitPermission(device: UsbDevice): Boolean {
+        if (deniedDeviceName == device.deviceName) {
+            _statusMessage.value = "USB GPS: access was denied — unplug and re-plug the puck to be asked again"
+            return false
+        }
+        _statusMessage.value = "USB GPS: puck found — tap OK on the \"Allow access\" prompt"
+        permissionAnswered = false
+        requestPermission(device)
+        while (currentCoroutineContext().isActive) {
+            if (usb.hasPermission(device)) return true
+            if (permissionAnswered) {
+                deniedDeviceName = device.deviceName
+                val msg = "USB GPS: access denied — unplug and re-plug the puck to be asked again"
                 _statusMessage.value = msg
                 Log.w(TAG, msg)
-                return
+                return false
             }
+            if (findProlific()?.deviceName != device.deviceName) return false   // unplugged / reset
+            kotlinx.coroutines.delay(200)
         }
+        return false
+    }
 
+    /** Opens the puck and streams NMEA until it is unplugged or the port fails. */
+    private suspend fun readFrom(device: UsbDevice) {
         val driver = UsbSerialProber.getDefaultProber().probeDevice(device)
         if (driver == null) {
             val msg = "USB GPS: no serial driver for device (unexpected for PL2303)"
@@ -204,9 +229,20 @@ class UsbPuckGpsSource(private val context: Context) {
             val sb = StringBuilder()
             val ascii = Charset.forName("US-ASCII")
 
+            var lastPresenceCheck = System.currentTimeMillis()
             while (currentCoroutineContext().isActive) {
-                val n = try { port.read(readBuf, 200) } catch (_: Exception) { -1 }
-                if (n != null && n > 0) {
+                // A read error used to be swallowed and retried forever (busy loop, puck
+                // still shown as connected). Now it ends this connection and we rescan.
+                val n = port.read(readBuf, 200)
+                val now = System.currentTimeMillis()
+                if (now - lastPresenceCheck > 1000) {
+                    lastPresenceCheck = now
+                    if (findProlific()?.deviceName != device.deviceName) {
+                        _statusMessage.value = "USB GPS: puck unplugged — rescanning"
+                        break
+                    }
+                }
+                if (n > 0) {
                     diag.onBytes(n)
                     val chunk = String(readBuf, 0, n, ascii)
                     for (c in chunk) {
@@ -224,7 +260,9 @@ class UsbPuckGpsSource(private val context: Context) {
             }
         } catch (e: Exception) {
             Log.e(TAG, "USB read error: ${e.message}")
+            _statusMessage.value = "USB GPS: connection lost (${e.message}) — rescanning"
         } finally {
+            receivedFirstFix = false
             _isConnected.value = false
             try { port.close() } catch (_: Exception) {}
             try { connection.close() } catch (_: Exception) {}

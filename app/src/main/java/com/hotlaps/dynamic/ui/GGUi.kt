@@ -610,6 +610,13 @@ fun GGScreen(
 
 // --- Phone-GPS warning: corner/lap analysis needs the 10 Hz puck ---
                                     if (!usingExternalGps) {
+                                        // Plugged in but not usable (permission prompt, denied, reset)
+                                        // → say why instead of "plug in the puck".
+                                        val puckStatus by usbGpsSource.statusMessage.collectAsState()
+                                        val puckPresent = puckStatus.contains("puck found") ||
+                                                puckStatus.contains("denied") ||
+                                                puckStatus.contains("could not open") ||
+                                                puckStatus.contains("no serial driver")
                                         Surface(
                                             modifier = Modifier
                                                 .fillMaxWidth()
@@ -618,8 +625,12 @@ fun GGScreen(
                                             shape = MaterialTheme.shapes.small
                                         ) {
                                             Text(
-                                                text = "No GPS puck: phone GPS (~1 Hz). G-forces are fine, " +
-                                                        "but corner/lap timing is approximate. Plug in the puck.",
+                                                text = if (puckPresent)
+                                                    "GPS puck not in use — ${puckStatus.removePrefix("USB GPS: ")}. " +
+                                                            "Using phone GPS (~1 Hz) until then."
+                                                else
+                                                    "No GPS puck: phone GPS (~1 Hz). G-forces are fine, " +
+                                                            "but corner/lap timing is approximate. Plug in the puck.",
                                                 color = Color.Black,
                                                 style = MaterialTheme.typography.labelMedium,
                                                 fontWeight = FontWeight.SemiBold,
