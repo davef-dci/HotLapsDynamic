@@ -71,7 +71,9 @@ object RecordingHealth {
                 val maxMb = rt.maxMemory() / (1024 * 1024)
                 val battery = appContext?.let { BatteryStatus.read(it) }
                 val batteryText = battery?.let {
-                    " battery=${it.percent}% charging=${it.charging} plugged=${it.plugged}"
+                    " battery=${it.percent}% charging=${it.charging} plugged=${it.plugged}" +
+                            (it.tempC?.let { t -> " temp=%.1fC".format(t) } ?: "") +
+                            (it.thermal?.let { s -> " thermal=$s" } ?: "")
                 } ?: ""
                 write(
                     "HEARTBEAT $label ticks=$ticksSinceHeartbeat " +
