@@ -127,6 +127,31 @@ class CornerLapDetectorTest {
         }
     }
 
+    @Test
+    fun carReappearsFarBehind_cornersAfterItStillCount() {
+        // Two laps, then the car is in a paddock beside an earlier part of the track (300 m
+        // back, 25 m off the line) for a minute, then drives on from there round to C1, C2...
+        val rowHz = 10
+        val laps = 2.0 + 0.3 / (2 * Math.PI)                // stop 0.3 rad past C1 of lap 3
+        val endAngle = START_ANGLE + laps * 2 * Math.PI
+        val backAngle = endAngle - 1.5                       // 300 m back along the circle
+        val ts = ArrayList<Long>(); val la = ArrayList<Double>(); val lo = ArrayList<Double>()
+        var t = 0.0
+        fun add(angle: Double, r: Double = 200.0) {
+            val (a, b) = pointAt(angle, r); ts.add(1_000_000L + (t * 1000).toLong()); la.add(a); lo.add(b); t += 1.0 / rowHz
+        }
+        var ang = START_ANGLE
+        while (ang < endAngle) { add(ang); ang += 30.0 / 200.0 / rowHz }
+        repeat(60 * rowHz) { k -> add(backAngle + (k % 3) * 1e-5, r = 225.0) }   // parked, jittering
+        ang = backAngle
+        while (ang < endAngle + 2 * Math.PI) { add(ang); ang += 30.0 / 200.0 / rowHz }
+        val apexes = CornerLapDetector.detect(ts.toLongArray(), la.toDoubleArray(), lo.toDoubleArray(), ts.size, corners)
+        val afterPark = apexes.filter { it.utcMs > 1_000_000L + ((endAngle - START_ANGLE) * 200 / 30 + 60) * 1000 }
+        // From 300 m back (between C4 and C1) it drives a full lap C1..C4; before the fix
+        // nothing counted until it got past where it had stopped
+        assertEquals(listOf(1, 2, 3, 4), afterPark.map { it.cornerIndex }.take(4))
+    }
+
     /**
      * Real recorded session (optional):
      *   gradlew testDebugUnitTest --tests "*CornerLapDetectorTest*" -DreplayCsv=<event.csv> -DtrackJson=<track.json>

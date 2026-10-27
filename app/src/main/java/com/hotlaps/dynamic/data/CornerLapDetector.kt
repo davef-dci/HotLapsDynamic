@@ -331,8 +331,16 @@ object CornerLapDetector {
                 if (ds < -L / 2) wraps++ else if (ds > L / 2) wraps--
             }
             val u = wraps * L + s
+            // Far behind the furthest point reached: the car really is elsewhere (pit lane or a
+            // paddock next to another part of the track), not jitter. Start counting from here,
+            // or corners are skipped until it passes the old point again (Road America, Oct 2026:
+            // paddock 35 m from the Carousel, so the out-lap after lunch lost corners 1-3).
+            if (!maxU.isNaN() && u < maxU - REWIND_M) maxU = u
             val dtMs = ft[k] - prevT
-            val plausible = dtMs in 1..MAX_INTERP_GAP_MS && (u - prevU) / dtMs * 1000 <= MAX_SPEED_MPS
+            // A small step is never a GPS jump: off the reference line on the inside of a bend,
+            // a few metres sideways moves the projection fast (Bend 2: 13 m in 0.12 s).
+            val plausible = dtMs in 1..MAX_INTERP_GAP_MS &&
+                    (u - prevU <= SMALL_STEP_M || (u - prevU) / dtMs * 1000 <= MAX_SPEED_MPS)
             if (!maxU.isNaN() && u > maxU && plausible) {
                 // Every corner distance passed between max(prevU, maxU) and u; never twice
                 // (maxU), so jitter while stopped can't repeat a corner.
@@ -466,6 +474,12 @@ object CornerLapDetector {
 
     /** Progress faster than this between two fixes is a GPS jump: no corners from it. */
     private const val MAX_SPEED_MPS = 100.0
+
+    /** A step along the line this short is accepted whatever its apparent speed. */
+    private const val SMALL_STEP_M = 25.0
+
+    /** Falling this far behind the furthest point reached means the car is elsewhere, not jitter. */
+    private const val REWIND_M = 100.0
 
     /** Near-equal projections onto different parts of the line: prefer continuity. */
     private const val AMBIGUITY_M = 10.0
