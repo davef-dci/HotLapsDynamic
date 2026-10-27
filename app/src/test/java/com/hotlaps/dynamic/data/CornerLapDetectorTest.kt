@@ -6,6 +6,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import java.io.File
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -93,6 +94,37 @@ class CornerLapDetectorTest {
         val perLap = apexes.groupBy { it.lap }.mapValues { (_, v) -> v.map { it.cornerIndex } }
         assertEquals(listOf(1, 2, 4), perLap[2])      // gap where C3 was missed
         assertEquals(listOf(1, 2, 3, 4), perLap[3])   // later laps unaffected
+    }
+
+    @Test
+    fun noisyPhoneGps_cornersOffTheLine_alongTrackFindsEveryCornerAndLapTime() {
+        // 1 Hz fixes with ±8 m noise; corner points 25 m inside the driven circle, so a pass
+        // is often outside the 30 m radius. Along-track timing doesn't care about the offset.
+        val rnd = java.util.Random(42)
+        val (ts, la, lo) = simulate(laps = 6.0, rowHz = 20, gpsHz = 1.0)
+        var last = Double.NaN to Double.NaN
+        var noisy = 0.0 to 0.0
+        for (i in ts.indices) {
+            if (la[i] != last.first || lo[i] != last.second) {
+                last = la[i] to lo[i]
+                noisy = (la[i] + rnd.nextGaussian() * 4.0 / 111_320.0) to
+                        (lo[i] + rnd.nextGaussian() * 4.0 / mPerDegLon)
+            }
+            la[i] = noisy.first; lo[i] = noisy.second
+        }
+        val inner = (0 until 4).map { k ->
+            val (cla, clo) = pointAt(k * Math.PI / 2, radiusM = 175.0)
+            CornerLapDetector.CornerSpec(index = k + 1, name = "C${k + 1}", lat = cla, lon = clo)
+        }
+        val apexes = CornerLapDetector.detect(ts, la, lo, ts.size, inner)
+        val perLap = apexes.groupBy { it.lap }
+        for (lap in 2..5) assertEquals("lap $lap", listOf(1, 2, 3, 4), perLap[lap]?.map { it.cornerIndex })
+
+        val trueLapMs = 2 * Math.PI * 200.0 / 30.0 * 1000
+        for (lap in 2..5) {
+            val dt = perLap.getValue(lap + 1).first().utcMs - perLap.getValue(lap).first().utcMs
+            assertTrue("lap $lap took $dt ms", abs(dt - trueLapMs) < 300)
+        }
     }
 
     /**

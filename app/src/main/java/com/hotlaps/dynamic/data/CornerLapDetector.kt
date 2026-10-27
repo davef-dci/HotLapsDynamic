@@ -1,6 +1,10 @@
 package com.hotlaps.dynamic.data
 
+import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.floor
+import kotlin.math.hypot
+import kotlin.math.sqrt
 
 /**
  * Offline corner-apex and lap detection, run once when a session is finished.
@@ -10,7 +14,12 @@ import kotlin.math.cos
  * of corner passes got an apex, and some passes jumped the radius entirely. And because the
  * Nth visit to a corner was used as "lap N", one missed pass shifted every later lap.
  *
- * Here:
+ * Preferred: along-track timing (see [alongTrack]). A clean lap from the session is the
+ * reference line; each corner's time is when the car's progress along that line passes the
+ * corner, so a pass that stays outside the radius still counts. Works at 1 Hz (Road America,
+ * Oct 2026). Needs one clean lap that the radius pass below can find; without it, falls back to:
+ *
+ * Radius detection:
  *  - positions are linearly interpolated between GPS fixes for every row (a no-op at 10 Hz)
  *  - a visit is a run of rows within [radiusM] of a corner; runs of the same corner less than
  *    [MERGE_GAP_MS] apart are one visit (GPS jitter at the radius edge)
@@ -142,6 +151,10 @@ object CornerLapDetector {
             }
         }
 
+        // ---- Along-track timing (preferred) ---------------------------------------------
+        val visitList = visits.map { RadiusVisit(it.corner, it.minRow) }
+        alongTrack(timestamps, xs, ys, n, fixRows, corners, visitList, radiusM, ::xOf, ::yOf)?.let { return it }
+
         // ---- Laps by corner order -------------------------------------------------------
         visits.sortBy { timestamps[it.minRow] }
         var lap = 1
@@ -202,6 +215,272 @@ object CornerLapDetector {
         apexes.sortBy { it.utcMs }
         return apexes
     }
+
+    // =====================================================================================
+    // Along-track timing
+    //
+    // The radius test above needs a fix (or an interpolated chord) to come within radiusM of
+    // each corner point. With phone GPS at 1 Hz on a real track the chords cut corners and
+    // the fixes wander by 5-10 m, so most passes miss (Road America, Oct 2026: puck dropped at
+    // lap 38 and only 0-3 of 13 corners per lap were found after that).
+    //
+    // Instead:
+    //  - pick a clean lap from this session as a reference line (radius visits find it)
+    //  - project every fix onto that line -> distance along the lap, unwrapped across laps
+    //  - a corner's time is when that distance passes the corner's own distance on the line,
+    //    interpolated between the two fixes either side
+    // Being off the line sideways doesn't matter, only progress along it. Checked against
+    // 10 Hz puck laps thinned to 1 Hz: 468/468 corners, ~0.1 s corner / ~0.05 s lap-time error.
+    // =====================================================================================
+
+    private data class RadiusVisit(val corner: CornerSpec, val minRow: Int)
+
+    private class RefLine(val xs: DoubleArray, val ys: DoubleArray, val cum: DoubleArray) {
+        val length get() = cum.last()
+        private val grid = HashMap<Long, MutableList<Int>>()
+
+        init {
+            for (k in 0 until xs.size - 1) {
+                val gx0 = floor(minOf(xs[k], xs[k + 1]) / CELL_M).toInt() - 1
+                val gx1 = floor(maxOf(xs[k], xs[k + 1]) / CELL_M).toInt() + 1
+                val gy0 = floor(minOf(ys[k], ys[k + 1]) / CELL_M).toInt() - 1
+                val gy1 = floor(maxOf(ys[k], ys[k + 1]) / CELL_M).toInt() + 1
+                for (gx in gx0..gx1) for (gy in gy0..gy1) grid.getOrPut(key(gx, gy)) { ArrayList() }.add(k)
+            }
+        }
+
+        private fun key(gx: Int, gy: Int) = (gx.toLong() shl 32) or (gy.toLong() and 0xffffffffL)
+
+        /**
+         * Distance along the line + sideways distance, or null if no segment is near.
+         * Where two parts of the track are close (hairpin legs), the candidate nearest
+         * [hintS] wins among those within [AMBIGUITY_M] of the best.
+         */
+        fun project(x: Double, y: Double, hintS: Double? = null): Pair<Double, Double>? {
+            val segs = grid[key(floor(x / CELL_M).toInt(), floor(y / CELL_M).toInt())] ?: return null
+            val cands = ArrayList<Pair<Double, Double>>(4)
+            for (k in segs) {
+                val dx = xs[k + 1] - xs[k]
+                val dy = ys[k + 1] - ys[k]
+                val seg2 = dx * dx + dy * dy
+                val u = if (seg2 == 0.0) 0.0
+                else (((x - xs[k]) * dx + (y - ys[k]) * dy) / seg2).coerceIn(0.0, 1.0)
+                val d = hypot(x - xs[k] - u * dx, y - ys[k] - u * dy)
+                cands.add((cum[k] + u * sqrt(seg2)) to d)
+            }
+            val best = cands.minByOrNull { it.second } ?: return null
+            if (hintS == null) return best
+            // Neighbouring segments of the same stretch are always close too; only a
+            // candidate on a different part of the lap is a real ambiguity.
+            val close = cands.filter { it.second <= best.second + AMBIGUITY_M }
+            val anchor = close.minByOrNull { along(it.first, hintS) } ?: return best
+            return close.filter { along(it.first, anchor.first) <= SAME_STRETCH_M }.minByOrNull { it.second }
+        }
+
+        /** Distance between two positions along the closed lap. */
+        private fun along(a: Double, b: Double): Double {
+            val diff = abs(a - b) % length
+            return minOf(diff, length - diff)
+        }
+    }
+
+    private fun alongTrack(
+        timestamps: LongArray,
+        rowXs: DoubleArray,
+        rowYs: DoubleArray,
+        n: Int,
+        fixRows: List<Int>,
+        corners: List<CornerSpec>,
+        visits: List<RadiusVisit>,
+        radiusM: Double,
+        xOf: (Double) -> Double,
+        yOf: (Double) -> Double
+    ): MutableList<Apex>? {
+        val m = fixRows.size
+        val ft = LongArray(m) { timestamps[fixRows[it]] }
+        val fx = DoubleArray(m) { rowXs[fixRows[it]] }
+        val fy = DoubleArray(m) { rowYs[fixRows[it]] }
+
+        val ref = referenceLap(ft, fx, fy, corners, visits, timestamps, radiusM, xOf, yOf) ?: return null
+        val L = ref.length
+
+        // Each corner's distance along the reference lap
+        val cornerS = HashMap<Int, Double>()
+        for (c in corners) {
+            val p = ref.project(xOf(c.lon), yOf(c.lat)) ?: continue
+            if (p.second <= MAX_XTRACK_M) cornerS[c.index] = p.first
+        }
+        if (cornerS.size < 2) return null
+        val byS = corners.filter { it.index in cornerS }.sortedBy { cornerS.getValue(it.index) }
+
+        // ---- Crossings ----
+        data class Crossing(val utcMs: Long, val corner: CornerSpec)
+        val crossings = ArrayList<Crossing>()
+        var prevT = 0L
+        var prevS = Double.NaN
+        var prevU = Double.NaN
+        var maxU = Double.NaN
+        var wraps = 0
+        for (k in 0 until m) {
+            if (fx[k].isNaN()) continue
+            val p = ref.project(fx[k], fy[k], if (prevS.isNaN()) null else prevS) ?: continue
+            if (p.second > MAX_XTRACK_M) continue   // paddock, or a bad fix
+            val s = p.first
+            if (!prevS.isNaN()) {
+                val ds = s - prevS
+                if (ds < -L / 2) wraps++ else if (ds > L / 2) wraps--
+            }
+            val u = wraps * L + s
+            val dtMs = ft[k] - prevT
+            val plausible = dtMs in 1..MAX_INTERP_GAP_MS && (u - prevU) / dtMs * 1000 <= MAX_SPEED_MPS
+            if (!maxU.isNaN() && u > maxU && plausible) {
+                // Every corner distance passed between max(prevU, maxU) and u; never twice
+                // (maxU), so jitter while stopped can't repeat a corner.
+                val lo = maxOf(prevU, maxU)
+                var lap = floor(lo / L).toLong()
+                while (lap * L <= u) {
+                    for (c in byS) {
+                        val target = lap * L + cornerS.getValue(c.index)
+                        if (target > lo && target <= u) {
+                            val t = prevT + ((ft[k] - prevT) * (target - prevU) / (u - prevU)).toLong()
+                            crossings.add(Crossing(t, c))
+                        }
+                    }
+                    lap++
+                }
+            }
+            maxU = if (maxU.isNaN()) u else maxOf(maxU, u)
+            prevT = ft[k]; prevS = s; prevU = u
+        }
+        if (crossings.isEmpty()) return null
+
+        // ---- Apex rows, laps by corner order (same rule as the radius path) ----
+        var lap = 1
+        var prevIndex = 0
+        return crossings.mapTo(ArrayList()) { cr ->
+            val c = cr.corner
+            if (prevIndex != 0 && c.index <= prevIndex) lap++
+            prevIndex = c.index
+            val row = nearestRow(timestamps, n, cr.utcMs)
+            val d = if (rowXs[row].isNaN()) Double.NaN
+            else hypot(rowXs[row] - xOf(c.lon), rowYs[row] - yOf(c.lat))
+            Apex(row, timestamps[row], c.index, c.name, lap, d)
+        }
+    }
+
+    /**
+     * A clean lap from the session itself: between two consecutive radius visits of the same
+     * corner, passing near every other corner in order, no slower than [REF_MAX_SLOWER] x the
+     * quickest such lap (not a pit lap). Highest GPS rate wins, then quickest.
+     */
+    private fun referenceLap(
+        ft: LongArray,
+        fx: DoubleArray,
+        fy: DoubleArray,
+        corners: List<CornerSpec>,
+        visits: List<RadiusVisit>,
+        timestamps: LongArray,
+        radiusM: Double,
+        xOf: (Double) -> Double,
+        yOf: (Double) -> Double
+    ): RefLine? {
+        if (corners.size < 2) return null
+        val near2 = (radiusM * REF_CORNER_RADIUS_FACTOR).let { it * it }
+        val cyclic = corners.sortedBy { it.index }
+
+        data class Cand(val a: Int, val b: Int, val durMs: Long)   // fix index range
+        val cands = ArrayList<Cand>()
+        for ((_, vs) in visits.groupBy { it.corner.index }) {
+            val times = vs.map { timestamps[it.minRow] }.sorted()
+            for (j in 0 until times.size - 1) {
+                val a = ft.lowerBound(times[j])
+                val b = ft.lowerBound(times[j + 1])
+                if (b - a < MIN_REF_FIXES) continue
+                // Gaps in GPS would make a bad line
+                if ((a + 1..b).any { ft[it] - ft[it - 1] > MAX_INTERP_GAP_MS }) continue
+                // Every other corner passed, in order
+                val start = cyclic.indexOfFirst { it.index == vs[0].corner.index }
+                var cursor = a
+                var ok = true
+                for (step in 1 until cyclic.size) {
+                    val c = cyclic[(start + step) % cyclic.size]
+                    val cx = xOf(c.lon); val cy = yOf(c.lat)
+                    var best = -1; var bestD2 = Double.MAX_VALUE
+                    for (k in cursor..b) {
+                        if (fx[k].isNaN()) continue
+                        val d2 = (fx[k] - cx).let { it * it } + (fy[k] - cy).let { it * it }
+                        if (d2 < bestD2) { bestD2 = d2; best = k }
+                    }
+                    if (best < 0 || bestD2 > near2) { ok = false; break }
+                    cursor = best
+                }
+                if (ok) cands.add(Cand(a, b, ft[b] - ft[a]))
+            }
+        }
+        if (cands.isEmpty()) return null
+        val quickest = cands.minOf { it.durMs }
+        val pick = cands.filter { it.durMs <= quickest * REF_MAX_SLOWER }
+            .maxWithOrNull(compareBy<Cand>({ (it.b - it.a).toDouble() / it.durMs }, { -it.durMs }))
+            ?: return null
+
+        val px = ArrayList<Double>(); val py = ArrayList<Double>()
+        for (k in pick.a..pick.b) {
+            if (fx[k].isNaN()) continue
+            if (px.isNotEmpty() && fx[k] == px.last() && fy[k] == py.last()) continue
+            px.add(fx[k]); py.add(fy[k])
+        }
+        // The last fix can be just past the first one; a closing chord that points backwards
+        // would make the lap too long and corner times drift a little more every lap.
+        while (px.size > 2 &&
+            (px[0] - px.last()) * (px[1] - px[0]) + (py[0] - py.last()) * (py[1] - py[0]) < 0
+        ) {
+            px.removeAt(px.size - 1); py.removeAt(py.size - 1)
+        }
+        px.add(px[0]); py.add(py[0])   // close the loop
+        val cum = DoubleArray(px.size)
+        for (k in 1 until px.size) cum[k] = cum[k - 1] + hypot(px[k] - px[k - 1], py[k] - py[k - 1])
+        if (cum.last() <= 0.0) return null
+        return RefLine(px.toDoubleArray(), py.toDoubleArray(), cum)
+    }
+
+    /** First index with value >= [t]. */
+    private fun LongArray.lowerBound(t: Long): Int {
+        var lo = 0; var hi = size
+        while (lo < hi) { val mid = (lo + hi) ushr 1; if (this[mid] < t) lo = mid + 1 else hi = mid }
+        return lo
+    }
+
+    private fun nearestRow(timestamps: LongArray, n: Int, t: Long): Int {
+        var lo = 0; var hi = n
+        while (lo < hi) { val mid = (lo + hi) ushr 1; if (timestamps[mid] < t) lo = mid + 1 else hi = mid }
+        if (lo >= n) return n - 1
+        if (lo > 0 && t - timestamps[lo - 1] < timestamps[lo] - t) return lo - 1
+        return lo
+    }
+
+    /** Grid cell size for the reference-line segment index. */
+    private const val CELL_M = 50.0
+
+    /** Fixes further than this from the reference line are ignored (paddock, bad fixes). */
+    private const val MAX_XTRACK_M = 40.0
+
+    /** Progress faster than this between two fixes is a GPS jump: no corners from it. */
+    private const val MAX_SPEED_MPS = 100.0
+
+    /** Near-equal projections onto different parts of the line: prefer continuity. */
+    private const val AMBIGUITY_M = 10.0
+
+    /** Candidates this close along the lap are the same stretch of track, not an ambiguity. */
+    private const val SAME_STRETCH_M = 100.0
+
+    /** A reference lap must pass within radius x this of every corner. */
+    private const val REF_CORNER_RADIUS_FACTOR = 2.5
+
+    /** Reference lap no slower than this x the quickest candidate. */
+    private const val REF_MAX_SLOWER = 1.25
+
+    /** Fewest fixes for a usable reference lap. */
+    private const val MIN_REF_FIXES = 20
 
     /** Gap fill only between neighbours this close in time (one corner-to-corner stretch, not a pit stop). */
     private const val GAP_FILL_MAX_WINDOW_MS = 60_000L
